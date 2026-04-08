@@ -15,31 +15,43 @@ Set by environment variable SEDIMENT_KB_PATH (default: ./knowledge-base)
 - One proposition = one file. When in doubt, split rather than merge.
 - File name = the proposition title. Use natural language that an agent would naturally think of when reasoning about this topic.
 - Core proposition: 1-3 sentences max, 150 characters max. No meta-phrases like "This document introduces...".
-- Mark all domain-specific nouns and concepts as [[candidate links]].
+- Mark all domain-specific nouns and concepts as [[candidate links]]. Preference should be given to **Inline Contextual Links** (e.g. "When a [[Client]] requests an [[Access Token]]...") rather than just a flat list at the bottom.
 - Do NOT mark generic words (system, user, data, process...) as links.
 - If a concept appears but is not explained in the document, create a placeholder file for it.
+- Include Map of Content (MOC) or Index notes if a broad topic emerges, to act as a hub for scattered notes.
 
 ## Entry Structure
 ~~~markdown
+---
+aliases: [alias1, alias2]
+tags: [tag1, tag2]
+status: formal
+date: YYYY-MM-DD
+---
 # [filename]
 
-[core proposition, 1-3 sentences]
+[core proposition, 1-3 sentences] Note: use inline links here like [[concept A]] naturally inside the text.
 
 ## Context (optional)
-[when and where this knowledge applies]
+[when and where this knowledge applies] We also recommend using inline [[links]] in this section to preserve the context for backlinks.
 
 ## Source
 [[source document name]]
-
-## Related
-[[concept A]] [[concept B]]
 ~~~
 
 ## Placeholder Structure
 ~~~markdown
+---
+aliases: []
+tags: [placeholder]
+status: placeholder
+date: YYYY-MM-DD
+---
 # [concept name]
 
-> Status: placeholder (unfilled)
+#status/placeholder
+- [ ] Needs human or agent to perform inductive reasoning to complete this concept.
+
 > Appears in: [[source entry]]
 
 This concept is referenced but not yet defined.

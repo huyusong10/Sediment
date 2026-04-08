@@ -70,10 +70,13 @@ def find_dangling_links(kb_path: str) -> list[dict]:
         lines = md_file.read_text(encoding='utf-8').splitlines()
         for line in lines:
             for match in _LINK_PATTERN.finditer(line):
-                link_name = match.group(1)
-                if not _file_exists_in_kb(kb_path, link_name):
+                original_link = match.group(1)
+                target = original_link.split('|')[0].split('#')[0].strip()
+                if not target:
+                    continue
+                if not _file_exists_in_kb(kb_path, target):
                     results.append({
-                        'link': link_name,
+                        'link': target,
                         'source_file': str(rel),
                         'context': line.strip(),
                     })
@@ -115,9 +118,10 @@ def count_placeholder_refs(kb_path: str) -> list[dict]:
             rel = str(md_file)
 
         content = md_file.read_text(encoding='utf-8')
-        for link_name in _LINK_PATTERN.findall(content):
-            if link_name in ref_map:
-                ref_map[link_name].append(rel)
+        for original_link in _LINK_PATTERN.findall(content):
+            target = original_link.split('|')[0].split('#')[0].strip()
+            if target and target in ref_map:
+                ref_map[target].append(rel)
 
     results = [
         {
@@ -159,7 +163,11 @@ def find_orphan_entries(kb_path: str) -> list[str]:
     file_outlinks: dict[str, set[str]] = {}
     for md_file in all_files:
         content = md_file.read_text(encoding='utf-8')
-        links = set(_LINK_PATTERN.findall(content))
+        links = set()
+        for ln in _LINK_PATTERN.findall(content):
+            target = ln.split('|')[0].split('#')[0].strip()
+            if target:
+                links.add(target)
         try:
             rel = str(md_file.relative_to(root))
         except ValueError:
@@ -207,7 +215,8 @@ def collect_ref_contexts(kb_path: str, placeholder_name: str) -> list[str]:
     """
     root = Path(kb_path)
     results = []
-    target_pattern = re.compile(r'\[\[' + re.escape(placeholder_name) + r'\]\]')
+    # Match [[Placeholder]], [[Placeholder|Alias]], or [[Placeholder#Heading]]
+    target_pattern = re.compile(r'\[\[' + re.escape(placeholder_name) + r'(?:[|#][^\]]*)?\]\]')
 
     for md_file in _get_all_md_files(kb_path):
         content = md_file.read_text(encoding='utf-8')

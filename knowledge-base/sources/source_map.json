@@ -1,1 +1,14 @@
-{}
+{
+  "https://datatracker.ietf.org/doc/html/rfc6749": [
+    "OAuth-2.0",
+    "Access-Token",
+    "Authorization-Code-Flow",
+    "Refresh-Token"
+  ],
+  "https://datatracker.ietf.org/doc/html/rfc7519": [
+    "JWT"
+  ],
+  "Internal Security Architecture Guide v1.2": [
+    "OAuth-MOC"
+  ]
+}

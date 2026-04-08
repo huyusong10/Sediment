@@ -16,14 +16,14 @@ Run Python functions from scripts/tidy_utils.py:
 
 ### 1. Resolve Dangling Links
 Run find_dangling_links(). For each dangling link:
-- If the concept is clearly just an unexplained reference → create a placeholder file
+- If the concept is clearly just an unexplained reference → create a placeholder file with standard YAML frontmatter (status: placeholder), `#status/placeholder` tag, and `- [ ] Needs human or agent to perform inductive reasoning...`
 - Present a list of all created placeholders to the user for review
 
 ### 2. Inductive Reasoning (Detective Mode)
 Run count_placeholder_refs(). For placeholders with ref_count >= 3:
 - Run collect_ref_contexts() to gather all usage contexts
 - Reason about what this concept means in this codebase/organization
-- Draft a formal entry and mark it with: `> Status: draft — pending human review`
+- Draft a formal entry with full YAML frontmatter (with `status: draft`) and mark it with: `> Status: draft — pending human review`
 - Present the draft to the user for confirmation before writing
 
 ### 3. Merge Duplicates

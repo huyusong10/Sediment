@@ -20,7 +20,7 @@ Set by environment variable SEDIMENT_KB_PATH (default: ./knowledge-base)
 - If a concept appears but is not explained in the document, create a placeholder file for it.
 
 ## Entry Structure
-```markdown
+~~~markdown
 # [filename]
 
 [core proposition, 1-3 sentences]
@@ -33,17 +33,17 @@ Set by environment variable SEDIMENT_KB_PATH (default: ./knowledge-base)
 
 ## Related
 [[concept A]] [[concept B]]
-```
+~~~
 
 ## Placeholder Structure
-```markdown
+~~~markdown
 # [concept name]
 
 > Status: placeholder (unfilled)
 > Appears in: [[source entry]]
 
 This concept is referenced but not yet defined.
-```
+~~~
 
 ## Processing Steps
 1. Read the document thoroughly

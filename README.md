@@ -18,28 +18,41 @@ Key capabilities:
 
 ## Quick Start
 
-### 1. Install
+> **Requires [uv](https://docs.astral.sh/uv/) — the fast Python package manager.**
+> Install it with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+### 1. Install dependencies
+
 ```bash
-pip install -r mcp_server/requirements.txt
+uv sync
 ```
 
+This creates a virtual environment and installs all dependencies automatically.
+
 ### 2. Set knowledge base path
+
 ```bash
 export SEDIMENT_KB_PATH=/path/to/your/knowledge-base
 ```
 
 ### 3. Start MCP Server
+
 ```bash
-python mcp_server/server.py
+uv run python mcp_server/server.py
 ```
 
 ### 4. Connect from OpenCode
+
 Add to your OpenCode MCP config:
 ```json
 {
   "sediment": {
-    "command": "python",
-    "args": ["/path/to/sediment/mcp_server/server.py"],
+    "command": "uv",
+    "args": [
+      "run",
+      "--project", "/path/to/sediment",
+      "python", "mcp_server/server.py"
+    ],
     "env": {
       "SEDIMENT_KB_PATH": "/path/to/your/knowledge-base"
     }
@@ -48,10 +61,27 @@ Add to your OpenCode MCP config:
 ```
 
 ### 5. Ingest documents (admin)
+
 In OpenCode, load `skills/ingest.md` as your system prompt, then provide document paths.
 
 ### 6. Query knowledge (users)
+
 Use the `knowledge_ask` MCP tool, or load `skills/explore.md` and use `knowledge_list` + `knowledge_read` directly.
+
+---
+
+## Development
+
+```bash
+# Install with dev dependencies
+uv sync --dev
+
+# Run linter
+uv run ruff check .
+
+# Run tests
+uv run pytest tests/
+```
 
 ---
 

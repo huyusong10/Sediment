@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+dist/
+
+# uv / virtual env
+.venv/
 
 # IDE
 .vscode/

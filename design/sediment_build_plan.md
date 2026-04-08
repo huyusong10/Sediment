@@ -52,7 +52,7 @@ sediment/
 
 **README.md 内容要求**：
 - 项目名：Sediment
-- 一句话描述：Tacit knowledge extraction system for AI Agents — turns enterprise documents into a structured, human-reviewable knowledge base.
+- 一句话描述：Tacit knowledge extraction system for AI Agents — turns complex unstructured documents into a structured, human-reviewable knowledge base.
 - 包含以下章节：What it does / Quick Start / Components / License (MIT)
 - Quick Start 暂时写 placeholder，后续 Phase 完成后补充
 
@@ -518,7 +518,7 @@ Run find_orphan_entries(). For each orphan:
 ```markdown
 # Sediment Explore Skill
 
-You have access to an enterprise knowledge base via these tools:
+You have access to a complex knowledge base via these tools:
 - knowledge_list(): returns all entry names
 - knowledge_read(filename): reads the full content of an entry
 

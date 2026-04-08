@@ -1,6 +1,6 @@
 # Sediment Explore Skill
 
-You have access to an enterprise knowledge base via these tools:
+You have access to a complex knowledge base via these tools:
 - knowledge_list(): returns all entry names
 - knowledge_read(filename): reads the full content of an entry
 

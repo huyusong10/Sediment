@@ -1,3 +1,11 @@
+---
+name: sediment-explore
+description: >
+  Explore and query a Sediment knowledge base using knowledge_list and knowledge_read MCP tools.
+  Use when the user wants to query, search, explore, or find information in the knowledge base.
+  Triggers on: query knowledge base, explore knowledge, find information in knowledge base.
+---
+
 # Sediment Explore Skill
 
 You have access to a complex knowledge base via these tools:

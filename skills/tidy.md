@@ -1,3 +1,12 @@
+---
+name: sediment-tidy
+description: >
+  Improve the internal consistency of a Sediment knowledge base by resolving dangling links,
+  merging duplicates, fixing orphan nodes, and drafting entries from placeholders.
+  Use when the user wants to tidy, clean up, or maintain the knowledge base.
+  Triggers on: tidy knowledge base, clean up knowledge base, maintain knowledge base.
+---
+
 # Sediment Tidy Skill
 
 You are a knowledge tidy agent for Sediment.

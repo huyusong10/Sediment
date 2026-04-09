@@ -355,10 +355,10 @@ async def knowledge_ask(question: str) -> str:
 实现要点：
 
 1. 读取 `skills/explore.md` 的内容作为子 Agent 的 system prompt
-2. 通过 subprocess 调用 OpenCode CLI：
+2. 通过 subprocess 调用 CLI：
    ```python
    cmd = [
-       "opencode",  # 或从环境变量 SEDIMENT_CLI 读取，支持 claude / opencode
+       "claude",  # 或从环境变量 SEDIMENT_CLI 读取
        "--print",   # 非交互模式，输出结果后退出
        "--system", explore_skill_content,
        question
@@ -374,7 +374,7 @@ async def knowledge_ask(question: str) -> str:
    }
    ```
 
-注意：CLI 命令名通过环境变量 `SEDIMENT_CLI` 配置，默认为 `opencode`，允许用户改为 `claude` 或其他。
+注意：CLI 命令名通过环境变量 `SEDIMENT_CLI` 配置，默认为 `claude`。
 
 **验收**：
 - 环境中有 CLI 时：`knowledge_ask("示例条目规范是什么")` 返回包含 answer 和 sources 的 JSON
@@ -388,7 +388,7 @@ async def knowledge_ask(question: str) -> str:
 
 文件路径：`skills/ingest.md`
 
-**内容要求**（直接可用作 OpenCode system prompt）：
+**内容要求**（直接可用作 system prompt）：
 
 ```markdown
 # Sediment Ingest Skill
@@ -640,8 +640,8 @@ export SEDIMENT_KB_PATH=/path/to/your/knowledge-base
 ### 3. Start MCP Server
 python mcp_server/server.py
 
-### 4. Connect from OpenCode
-Add to your OpenCode MCP config:
+### 4. Connect from Claude Code
+Add to your Claude Code MCP config:
 {
   "sediment": {
     "command": "python",
@@ -653,7 +653,7 @@ Add to your OpenCode MCP config:
 }
 
 ### 5. Ingest documents (admin)
-In OpenCode, load skills/ingest.md as your system prompt, then provide document paths.
+In Claude Code, load skills/ingest.md as your system prompt, then provide document paths.
 
 ### 6. Query knowledge (users)
 Use the knowledge_ask MCP tool, or load skills/explore.md and use knowledge_list + knowledge_read directly.
@@ -709,7 +709,7 @@ python -c "from scripts.tidy_utils import find_dangling_links; print(find_dangli
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
 | `SEDIMENT_KB_PATH` | `./knowledge-base` | 知识库根目录路径 |
-| `SEDIMENT_CLI` | `opencode` | knowledge_ask 内部调用的 CLI 命令名，可改为 `claude` |
+| `SEDIMENT_CLI` | `claude` | knowledge_ask 内部调用的 CLI 命令名 |
 
 ---
 

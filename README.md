@@ -49,7 +49,6 @@ Sediment embraces the **Zettelkasten (Slip-box)** philosophy and prioritizes a *
 
 ## Table of Contents
 
-- [Architecture](#architecture)
 - [Server-side Deployment](#server-side-deployment)
   - [Prerequisites](#prerequisites)
   - [Install dependencies](#install-dependencies)
@@ -62,37 +61,8 @@ Sediment embraces the **Zettelkasten (Slip-box)** philosophy and prioritizes a *
   - [Querying the knowledge base](#querying-the-knowledge-base)
   - [Manual exploration with MCP tools](#manual-exploration-with-mcp-tools)
   - [Tidying the knowledge base](#tidying-the-knowledge-base)
-- [Components reference](#components-reference)
 - [Development](#development)
 - [License](#license)
-
----
-
-## Architecture
-
-```
-sediment/
-├── mcp_server/
-│   └── server.py           # MCP Server — exposes 3 tools to AI Agents
-├── scripts/
-│   ├── tidy_utils.py       # Stateless helper functions (dangling links, orphans, etc.)
-│   └── health_check.py     # CLI diagnostic report generator
-├── skills/
-│   ├── ingest.md           # System prompt: AI-powered document ingestion
-│   ├── tidy.md             # System prompt: knowledge base maintenance
-│   └── explore.md          # System prompt: autonomous exploration protocol
-└── knowledge-base/
-    ├── entries/            # Formal knowledge entries (.md files)
-    ├── placeholders/       # Concepts referenced but not yet defined
-    └── sources/
-        └── source_map.json # Maps source documents → entry names
-```
-
-The MCP Server exposes three tools:
-
-- **`knowledge_list`** — returns all entry names (real-time, no cache)
-- **`knowledge_read`** — reads the full content of any entry by name
-- **`knowledge_ask`** — answers natural-language questions via an internal sub-agent using `skills/explore.md` as system prompt
 
 ---
 
@@ -124,77 +94,73 @@ This creates a `.venv` virtual environment and installs all dependencies automat
 
 ### Configure and start the MCP Server
 
-#### Option A — Direct launch (for testing)
+Sediment runs as an HTTP server using SSE transport:
 
 ```bash
-# Set knowledge base path (optional; defaults to ./knowledge-base)
+# Set knowledge base path (optional; defaults to the project's knowledge-base directory)
 export SEDIMENT_KB_PATH=/path/to/your/knowledge-base
 
-# Set the CLI used by knowledge_ask (optional; defaults to opencode)
-export SEDIMENT_CLI=opencode
+# Set the CLI used by knowledge_ask (optional; defaults to claude)
+export SEDIMENT_CLI=claude
 
-# Start the server
+# Start the server (default: 0.0.0.0:8000)
 uv run python mcp_server/server.py
 ```
 
-#### Option B — Production launch via entry point
+**Environment variables for the server:**
 
-After `uv sync`, the console script is available:
+| Variable | Default | Description |
+|---|---|---|
+| `SEDIMENT_HOST` | `0.0.0.0` | Host address to bind to |
+| `SEDIMENT_PORT` | `8000` | Port number |
+| `SEDIMENT_SSE_PATH` | `/sediment/` | SSE endpoint path |
 
-```bash
-SEDIMENT_KB_PATH=/path/to/kb uv run sediment-server
+**Production deployment** — use a process manager like `systemd`, `supervisor`, or a reverse proxy (nginx/Caddy) in front:
+
+```nginx
+# Example nginx reverse proxy
+location /sediment/ {
+    proxy_pass http://127.0.0.1:8000/sediment/;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+}
 ```
 
 ### Connect to an AI Agent host
 
-**OpenCode** — add to your `opencode.json` MCP configuration:
+Clients connect to the Sediment server via HTTP/SSE rather than spawning a subprocess.
+
+**Claude Desktop / Claude Code** — add the following to your MCP configuration file:
+
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
+- **Claude Code**: `.claude/settings.json` in your project root, or `~/.claude/settings.json` for global config
 
 ```json
 {
   "mcpServers": {
     "sediment": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--project", "/path/to/sediment",
-        "python", "mcp_server/server.py"
-      ],
-      "env": {
-        "SEDIMENT_KB_PATH": "/path/to/your/knowledge-base",
-        "SEDIMENT_CLI": "opencode"
-      }
+      "url": "http://your-server-host:8000/sediment/"
     }
   }
 }
 ```
 
-**Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Replace `your-server-host:8000` with the actual IP/domain and port where Sediment is running.
 
-```json
-{
-  "mcpServers": {
-    "sediment": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--project", "/path/to/sediment",
-        "python", "mcp_server/server.py"
-      ],
-      "env": {
-        "SEDIMENT_KB_PATH": "/path/to/your/knowledge-base"
-      }
-    }
-  }
-}
+**MCP Inspector** — for debugging:
+
+```bash
+npx @anthropic/mcp-inspector --url http://localhost:8000/sediment/
 ```
 
 > **Security note:** `knowledge_read` rejects filenames containing `/`, `\`, or `..` to prevent path traversal. The MCP Server performs **no write operations** on the knowledge base.
 
 ### Ingest documents into the knowledge base
 
-1. In your AI Agent host (e.g., OpenCode), load `skills/ingest.md` as the system prompt.
-2. Paste or point to the document you want to ingest.
-3. The agent will:
+Load `skills/ingest.md` as your agent's system prompt. The file includes YAML frontmatter with `name`, `description`, and `trigger` metadata for agents that support skill auto-discovery (Claude Code, etc.).
+
+Then paste or point to the document you want to ingest. The agent will:
    - Extract atomic knowledge entries → write to `knowledge-base/entries/`
    - Create placeholder files for referenced-but-undefined concepts → `knowledge-base/placeholders/`
    - Update `knowledge-base/sources/source_map.json`
@@ -251,8 +217,11 @@ Recommendation logic:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SEDIMENT_KB_PATH` | `./knowledge-base` | Path to the knowledge base root directory |
-| `SEDIMENT_CLI` | `opencode` | CLI command used by `knowledge_ask` sub-agent (can be `claude`, `opencode`, etc.) |
+| `SEDIMENT_KB_PATH` | project `knowledge-base/` | Path to the knowledge base root directory |
+| `SEDIMENT_CLI` | `claude` | CLI command used by `knowledge_ask` sub-agent |
+| `SEDIMENT_HOST` | `0.0.0.0` | Host address for the HTTP server |
+| `SEDIMENT_PORT` | `8000` | Port number for the HTTP server |
+| `SEDIMENT_SSE_PATH` | `/sediment/` | Path for the SSE endpoint |
 
 ---
 
@@ -271,7 +240,7 @@ Agent: [calls knowledge_ask("What is our API permission control policy?")]
 ```
 
 `knowledge_ask` internally:
-1. Reads `skills/explore.md` as a sub-agent system prompt
+1. Reads `skills/explore.md` as a sub-agent system prompt (YAML frontmatter provides `name`/`description` metadata for skill-aware agents)
 2. Calls the configured CLI sub-agent to reason over the knowledge base
 3. Returns a synthesized answer with source citations
 
@@ -311,20 +280,6 @@ Load `skills/explore.md` as your agent's system prompt for a guided exploration 
 
 3. Review each suggestion, confirm, and the agent writes the changes.
 4. Agent runs `health_check.py` at the end to show before/after improvement.
-
----
-
-## Components reference
-
-| Component | Path | Description |
-|---|---|---|
-| MCP Server | `mcp_server/server.py` | Exposes `knowledge_list`, `knowledge_read`, `knowledge_ask` |
-| Tidy Utils | `scripts/tidy_utils.py` | Stateless KB analysis: dangling links, orphans, placeholder refs, context collection |
-| Health Check | `scripts/health_check.py` | CLI diagnostic report |
-| Ingest Skill | `skills/ingest.md` | System prompt for AI-powered document ingestion |
-| Tidy Skill | `skills/tidy.md` | System prompt for KB maintenance (human-confirmed writes) |
-| Explore Skill | `skills/explore.md` | Autonomous exploration protocol; also used as `knowledge_ask` sub-agent prompt |
-| Knowledge Base | `knowledge-base/` | Entries, placeholders, and source map |
 
 ---
 

@@ -1,3 +1,11 @@
+---
+name: sediment-ingest
+description: >
+  Extract atomic knowledge entries from documents and write them into a Sediment knowledge base.
+  Use when the user wants to ingest, parse, or extract knowledge from a document into the knowledge base.
+  Triggers on: ingest document, extract knowledge, parse document into knowledge base.
+---
+
 # Sediment Ingest Skill
 
 You are a knowledge ingestion agent for Sediment.

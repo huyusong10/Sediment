@@ -58,46 +58,97 @@ def discover_results() -> list[dict]:
 
     # Try to load the standard scorecard.json first
     scorecard = load_json(RESULTS_DIR / 'scorecard.json')
+    # Legacy: load shared scoring files (last build wins — only used if no per-build files exist)
     concept_match = load_json(RESULTS_DIR / 'concept_match.json')
     answers_scored = load_json(RESULTS_DIR / 'answers_scored.json')
 
-    if scorecard or concept_match or answers_scored:
-        # Load raw answers for showing wrong answers
+    if scorecard:
+        builds = scorecard.get('builds', {})
+        if builds:
+            # Create a separate result entry for each build type
+            for build_type in ['full', 'batched']:
+                if build_type not in builds:
+                    continue
+                bdata = builds[build_type]
+                if bdata.get('error'):
+                    continue
+
+                # Load per-build scoring details
+                build_tc01 = load_json(RESULTS_DIR / f'concept_match_{build_type}.json')
+                build_tc02 = load_json(RESULTS_DIR / f'answers_scored_{build_type}.json')
+
+                # Fall back to shared files if per-build not found
+                if build_tc01 is None:
+                    build_tc01 = concept_match
+                if build_tc02 is None:
+                    build_tc02 = answers_scored
+
+                # Load per-build answers
+                concept_answers = {}
+                qa_answers = {}
+                ca_file = load_json(RESULTS_DIR / f'concept_answers_{build_type}.json')
+                if ca_file and 'results' in ca_file:
+                    for item in ca_file['results']:
+                        concept_answers[item.get('concept', '')] = item.get('answer', '')
+                qa_file = load_json(RESULTS_DIR / f'qa_answers_{build_type}.json')
+                if qa_file and 'results' in qa_file:
+                    for item in qa_file['results']:
+                        qa_answers[item.get('id', '')] = item.get('answer', '')
+
+                label = '全量构建' if build_type == 'full' else '分批构建'
+                total = bdata.get('total', 0)
+                results.append({
+                    'label': f'{label} (得分 {total:.1f})',
+                    'tc01': build_tc01,
+                    'tc02': build_tc02,
+                    'scorecard': scorecard,
+                    'concept_answers': concept_answers,
+                    'qa_answers': qa_answers,
+                })
+        else:
+            # No per-build data, use shared scoring files
+            concept_answers = {}
+            qa_answers = {}
+            for name in ['full', 'batched', 'test', 'v2', 'v3', 'v4', 'new']:
+                ca = load_json(RESULTS_DIR / f'concept_answers_{name}.json')
+                if ca and 'results' in ca:
+                    for item in ca['results']:
+                        concept_answers[item.get('concept', '')] = item.get('answer', '')
+                qa = load_json(RESULTS_DIR / f'qa_answers_{name}.json')
+                if qa and 'results' in qa:
+                    for item in qa['results']:
+                        qa_answers[item.get('id', '')] = item.get('answer', '')
+
+            results.append({
+                'label': _guess_label(scorecard),
+                'tc01': concept_match,
+                'tc02': answers_scored,
+                'scorecard': scorecard,
+                'concept_answers': concept_answers,
+                'qa_answers': qa_answers,
+            })
+
+    elif concept_match or answers_scored:
+        # Fallback: no scorecard, only shared scoring files
         concept_answers = {}
         qa_answers = {}
-
-        # Try standard naming first
-        for name in ['full', 'batched', 'test', 'v2', 'v3', 'v4', 'new']:
-            ca = load_json(RESULTS_DIR / f'concept_answers_{name}.json')
-            if ca and 'results' in ca:
-                for item in ca['results']:
-                    concept_answers[item.get('concept', '')] = item.get('answer', '')
-
-            qa = load_json(RESULTS_DIR / f'qa_answers_{name}.json')
-            if qa and 'results' in qa:
-                for item in qa['results']:
-                    qa_answers[item.get('id', '')] = item.get('answer', '')
-
-        # Also check the latest concept_answers and qa_answers
         latest_ca = load_json(RESULTS_DIR / 'concept_answers.json')
         if latest_ca and 'results' in latest_ca:
             for item in latest_ca['results']:
                 concept_answers[item.get('concept', '')] = item.get('answer', '')
-
         latest_qa = load_json(RESULTS_DIR / 'qa_answers.json')
         if latest_qa and 'results' in latest_qa:
             for item in latest_qa['results']:
                 qa_answers[item.get('id', '')] = item.get('answer', '')
 
-        result = {
-            'label': _guess_label(scorecard),
+        results.append({
+            'label': '当前轮次',
             'tc01': concept_match,
             'tc02': answers_scored,
-            'scorecard': scorecard,
+            'scorecard': None,
             'concept_answers': concept_answers,
             'qa_answers': qa_answers,
-        }
-        results.append(result)
+        })
 
     # Also discover historical reports from the history directory
     history_dir = RESULTS_DIR / 'history'
@@ -107,6 +158,12 @@ def discover_results() -> list[dict]:
                 sc = load_json(entry / 'scorecard.json')
                 cm = load_json(entry / 'concept_match.json')
                 as_ = load_json(entry / 'answers_scored.json')
+
+                # Also check for per-build historical scoring files
+                cm_full = load_json(entry / 'concept_match_full.json') or cm
+                cm_batched = load_json(entry / 'concept_match_batched.json') or cm
+                as_full = load_json(entry / 'answers_scored_full.json') or as_
+                as_batched = load_json(entry / 'answers_scored_batched.json') or as_
 
                 # Load answers from the historical snapshot
                 ca = {}
@@ -144,107 +201,119 @@ def _guess_label(scorecard: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# HTML Generation
+# HTML Generation — Per-Build Report
 # ---------------------------------------------------------------------------
 
-def generate_html(results: list[dict]) -> str:
-    """Generate a comprehensive HTML report."""
-    # Load judge data for reference
-    concepts_judge = load_json(JUDGE_DIR / '概念.json') or {}
-    qa_judge = load_json(JUDGE_DIR / '问答.json') or {}
-
-    # Build question lookup
+def generate_html_for_build(build_type: str, tc01_data: dict, tc02_data: dict,
+                            scorecard: dict, concept_answers: dict, qa_answers: dict,
+                            qa_judge: dict, concepts_judge: dict, timestamp: str) -> str:
+    """Generate a complete HTML report for a single build type."""
     qa_by_id = {}
     for q in qa_judge.get('questions', []):
         qa_by_id[q['id']] = q
-
     concepts_by_name = concepts_judge.get('terms', {})
 
-    # Determine the latest result for "current" focus
-    current = results[-1] if results else None
+    label = '全量构建' if build_type == 'full' else '分批构建'
+    avg = scorecard.get('average_score', 0)
+    build_info = scorecard.get('builds', {}).get(build_type, {})
+    build_score = build_info.get('total', 0)
+    passed = build_score >= 80
 
-    html_parts = []
-    html_parts.append(_html_header())
+    started = build_info.get('started_at', '')
+    finished = build_info.get('finished_at', '')
+    duration = build_info.get('duration_seconds', 0)
 
-    if current and current['scorecard']:
-        sc = current['scorecard']
-        avg = sc.get('average_score', 0)
-        passed = avg >= 90  # Pass threshold: 90
-        html_parts.append(f"""
-        <div class="header-card {'passed' if passed else 'failed'}">
-            <h1>Sediment 测试报告</h1>
-            <div class="score-display">
-                <div class="score-circle" style="--score: {avg}%">
-                    <span class="score-value">{avg:.1f}</span>
-                    <span class="score-max">/100</span>
-                </div>
-                <div class="score-badge {'passed' if passed else 'failed'}">
-                    {'✅ 通过' if passed else '❌ 未通过'}（标准 ≥ 90）
-                </div>
+    html = [_html_header()]
+
+    # Header
+    html.append(f"""
+    <div class="header-card {'passed' if passed else 'failed'}">
+        <h1>Sediment 测试报告 — {label}</h1>
+        <div class="meta-row">
+            <span>生成时间: {timestamp}</span>
+        </div>
+        {f'<div class="meta-row"><span>构建开始: {started}</span></div>' if started else ''}
+        {f'<div class="meta-row"><span>构建结束: {finished}</span></div>' if finished else ''}
+        {f'<div class="meta-row"><span>耗时: {duration:.0f} 秒</span></div>' if duration else ''}
+        <div class="score-display">
+            <div class="score-circle" style="color: {'#22c55e' if passed else '#ef4444'}">
+                <span class="score-value">{build_score:.1f}</span>
+                <span class="score-max">/100</span>
+            </div>
+            <div class="score-badge {'passed' if passed else 'failed'}">
+                {'通过' if passed else '未通过'}（标准 ≥ 80）
             </div>
         </div>
-        """)
+        <div class="score-breakdown">
+            <div class="bd-card">
+                <div class="bd-label">TC-01 概念覆盖率</div>
+                <div class="bd-value">{build_info.get('tc01', 0):.1f}<span class="bd-max">/40</span></div>
+            </div>
+            <div class="bd-card">
+                <div class="bd-label">TC-02 问答准确率</div>
+                <div class="bd-value">{build_info.get('tc02', 0):.1f}<span class="bd-max">/60</span></div>
+            </div>
+        </div>
+    </div>
+    """)
 
-    # Trend section if multiple results
-    if len(results) > 1:
-        html_parts.append(_trend_section(results))
+    # TC-01 Full
+    html.append(_tc01_full_section(tc01_data, concept_answers, concepts_by_name))
 
-    # Current results detail
-    if current:
-        html_parts.append(_tc01_section(current['tc01'], current.get('concept_answers', {}), concepts_by_name))
-        html_parts.append(_tc02_section(current['tc02'], current.get('qa_answers', {}), qa_by_id))
+    # TC-02 Full
+    html.append(_tc02_full_section(tc02_data, qa_answers, qa_by_id))
 
-        # Build comparison table if we have scorecard with builds
-        if current['scorecard'] and 'builds' in current['scorecard']:
-            html_parts.append(_build_comparison_section(current['scorecard']))
-
-    html_parts.append(_html_footer())
-    return '\n'.join(html_parts)
+    html.append(_html_footer())
+    return '\n'.join(html)
 
 
-def _trend_section(results: list[dict]) -> str:
-    """Generate trend comparison section."""
+def _tc01_full_section(tc01_data: dict, concept_answers: dict, concepts_by_name: dict) -> str:
+    """Generate full TC-01 section with ALL concepts sorted by score ascending."""
+    if not tc01_data:
+        return _empty_section('TC-01 概念覆盖率')
+
+    raw = tc01_data.get('raw_score', 0)
+    final = tc01_data.get('final_score', 0)
+    total = tc01_data.get('total_concepts', 0)
+    answered = tc01_data.get('answered', 0)
+    zero = tc01_data.get('zero_score', 0)
+    full = tc01_data.get('full_score', 0)
+    details = tc01_data.get('details', [])
+
     rows = []
-    for r in results:
-        sc = r.get('scorecard', {})
-        tc01 = r.get('tc01', {})
-        tc02 = r.get('tc02', {})
-
-        avg = sc.get('average_score', 0)
-        tc01_score = tc01.get('final_score', 0) if tc01 else 0
-        tc02_score = tc02.get('final_score', 0) if tc02 else 0
-
-        # Build info from scorecard builds
-        build_info = ''
-        if 'builds' in sc:
-            parts = []
-            for btype, bdata in sc['builds'].items():
-                label = '全量' if btype == 'full' else '分批'
-                total = bdata.get('total', 0)
-                parts.append(f'{label}: {total:.1f}')
-            build_info = ' | '.join(parts)
+    for d in details:  # Already sorted by score ascending from scorer
+        concept = d['concept']
+        score = d['score']
+        definition = d.get('definition', '')
+        answer = concept_answers.get(concept, '')
+        score_class = _score_class(score, 1.0)
+        has_answer = d.get('has_answer', False)
 
         rows.append(f"""
         <tr>
-            <td><strong>{r['label']}</strong></td>
-            <td>{tc01_score:.1f}<span class="dim">/40</span></td>
-            <td>{tc02_score:.1f}<span class="dim">/60</span></td>
-            <td><strong>{avg:.1f}</strong></td>
-            <td class="dim">{build_info}</td>
+            <td class="concept-name"><strong>{_esc(concept)}</strong></td>
+            <td class="score-cell"><span class="score-tag {score_class}">{score:.2f}</span></td>
+            <td class="def-cell"><details><summary>{_truncate_html(definition, 80)}</summary>{_esc(definition)}</details></td>
+            <td class="ans-cell"><details><summary>{_truncate_html(answer, 100) if answer else '<span class=\"dim\">无回答</span>'}</summary>{_esc(answer)}</details></td>
         </tr>
         """)
 
     return f"""
     <div class="section">
-        <h2>分数趋势</h2>
-        <table class="trend-table">
+        <h2>TC-01 概念覆盖率 <span class="dim">({final:.1f}/40, 原始分 {raw:.1f}/100)</span></h2>
+        <div class="stats-row">
+            <div class="stat-card"><span class="stat-value">{total}</span><span class="stat-label">总概念数</span></div>
+            <div class="stat-card"><span class="stat-value">{answered}</span><span class="stat-label">已回答</span></div>
+            <div class="stat-card"><span class="stat-value">{full}</span><span class="stat-label">满分</span></div>
+            <div class="stat-card"><span class="stat-value">{zero}</span><span class="stat-label">零分</span></div>
+        </div>
+        <table class="full-table">
             <thead>
                 <tr>
-                    <th>轮次</th>
-                    <th>TC-01 概念覆盖率</th>
-                    <th>TC-02 问答准确率</th>
-                    <th>平均分</th>
-                    <th>详情</th>
+                    <th class="col-concept">概念</th>
+                    <th class="col-score">得分</th>
+                    <th class="col-def">标准定义</th>
+                    <th class="col-ans">系统回答</th>
                 </tr>
             </thead>
             <tbody>
@@ -255,89 +324,10 @@ def _trend_section(results: list[dict]) -> str:
     """
 
 
-def _tc01_section(tc01_data: dict, concept_answers: dict, concepts_by_name: dict) -> str:
-    """Generate TC-01 concept coverage section."""
-    if not tc01_data:
-        return '<div class="section"><h2>TC-01 概念覆盖率</h2><p class="dim">暂无数据</p></div>'
-
-    raw = tc01_data.get('raw_score', 0)
-    final = tc01_data.get('final_score', 0)
-    total = tc01_data.get('total_concepts', 0)
-    answered = tc01_data.get('answered', 0)
-    zero = tc01_data.get('zero_score', 0)
-    full = tc01_data.get('full_score', 0)
-    details = tc01_data.get('details', [])
-
-    # Low score concepts (score < 0.7)
-    low_concepts = [d for d in details if d['score'] < 0.7]
-
-    rows = []
-    for d in low_concepts[:20]:  # Top 20 worst
-        concept = d['concept']
-        score = d['score']
-        definition = d.get('definition', '')
-        answer = concept_answers.get(concept, '')
-        related = concepts_by_name.get(concept, {}).get('related_terms', [])
-
-        score_class = 'score-zero' if score == 0 else 'score-low' if score < 0.5 else 'score-mid'
-
-        answer_display = _truncate(answer, 200) if answer else '<span class="dim">无回答</span>'
-
-        rows.append(f"""
-        <tr>
-            <td><strong>{concept}</strong></td>
-            <td><span class="score-tag {score_class}">{score:.2f}</span></td>
-            <td class="dim">{definition[:60]}{'...' if len(definition) > 60 else ''}</td>
-            <td class="answer-cell">{answer_display}</td>
-        </tr>
-        """)
-
-    return f"""
-    <div class="section">
-        <h2>TC-01 概念覆盖率 <span class="dim">({final:.1f}/40, 原始分 {raw:.1f}/100)</span></h2>
-        <div class="stats-row">
-            <div class="stat-card">
-                <span class="stat-value">{total}</span>
-                <span class="stat-label">总概念数</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-value">{answered}</span>
-                <span class="stat-label">已回答</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-value">{full}</span>
-                <span class="stat-label">满分</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-value">{zero}</span>
-                <span class="stat-label">零分</span>
-            </div>
-        </div>
-
-        <details>
-            <summary>低分概念详情 (Top {len(low_concepts[:20])}, 分数 &lt; 0.7)</summary>
-            <table class="detail-table">
-                <thead>
-                    <tr>
-                        <th>概念</th>
-                        <th>得分</th>
-                        <th>标准定义</th>
-                        <th>系统回答</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {''.join(rows)}
-                </tbody>
-            </table>
-        </details>
-    </div>
-    """
-
-
-def _tc02_section(tc02_data: dict, qa_answers: dict, qa_by_id: dict) -> str:
-    """Generate TC-02 QA accuracy section."""
+def _tc02_full_section(tc02_data: dict, qa_answers: dict, qa_by_id: dict) -> str:
+    """Generate full TC-02 section with ALL questions sorted by score ascending."""
     if not tc02_data:
-        return '<div class="section"><h2>TC-02 问答准确率</h2><p class="dim">暂无数据</p></div>'
+        return _empty_section('TC-02 问答准确率')
 
     total_earned = tc02_data.get('total_earned', 0)
     total_max = tc02_data.get('total_max', 0)
@@ -349,48 +339,10 @@ def _tc02_section(tc02_data: dict, qa_answers: dict, qa_by_id: dict) -> str:
     details = tc02_data.get('details', [])
     scoring_method = tc02_data.get('scoring_method', {})
 
-    # Low score questions
-    low_qs = [d for d in details if d['earned'] < d.get('max_points', 0.6) * 0.5]
-
-    rows = []
-    for d in low_qs[:20]:  # Top 20 worst
-        qid = d['id']
-        q_info = qa_by_id.get(qid, {})
-        question = d.get('question', q_info.get('question', ''))
-        difficulty = d.get('difficulty', 'medium')
-        earned = d.get('earned', 0)
-        max_pts = d.get('max_points', 0)
-        answer = qa_answers.get(qid, '')
-        standard = q_info.get('standard_answer', '')
-        method = d.get('method', '')
-
-        score_class = 'score-zero' if earned == 0 else 'score-low' if earned < max_pts * 0.5 else 'score-mid'
-        diff_class = f'difficulty-{difficulty}'
-
-        answer_display = _truncate(answer, 200) if answer else '<span class="dim">无回答</span>'
-        standard_display = _truncate(standard, 150)
-
-        rows.append(f"""
-        <tr>
-            <td><span class="diff-tag {diff_class}">{difficulty}</span> <strong>Q{qid}</strong></td>
-            <td>{question[:60]}{'...' if len(question) > 60 else ''}</td>
-            <td><span class="score-tag {score_class}">{earned:.2f}/{max_pts:.2f}</span></td>
-            <td class="dim">{method or '-'}</td>
-            <td class="answer-cell">
-                <details>
-                    <summary>查看</summary>
-                    <div class="qa-comparison">
-                        <div class="qa-std"><strong>标准答案:</strong> {standard_display}</div>
-                        <div class="qa-ans"><strong>系统回答:</strong> {answer_display}</div>
-                    </div>
-                </details>
-            </td>
-        </tr>
-        """)
-
     # Difficulty breakdown
     diff_rows = []
-    for diff, stats in by_difficulty.items():
+    for diff in ['easy', 'medium', 'hard']:
+        stats = by_difficulty.get(diff, {})
         earned = stats.get('earned', 0)
         max_val = stats.get('max', 0)
         count = stats.get('count', 0)
@@ -417,97 +369,60 @@ def _tc02_section(tc02_data: dict, qa_answers: dict, qa_by_id: dict) -> str:
         if llm or script:
             scoring_info = f'<p class="dim">评分方式: LLM={llm} 题, 脚本 fallback={script} 题</p>'
 
-    return f"""
-    <div class="section">
-        <h2>TC-02 问答准确率 <span class="dim">({final:.1f}/60, 原始分 {total_earned:.1f}/{total_max:.1f})</span></h2>
-        {scoring_info}
-        <div class="stats-row">
-            <div class="stat-card">
-                <span class="stat-value">{total_q}</span>
-                <span class="stat-label">总题数</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-value">{answered}</span>
-                <span class="stat-label">已回答</span>
-            </div>
-            <div class="stat-card">
-                <span class="stat-value">{zero}</span>
-                <span class="stat-label">零分</span>
-            </div>
-        </div>
-
-        <h3>难度分布</h3>
-        <table class="detail-table">
-            <thead>
-                <tr>
-                    <th>难度</th>
-                    <th>题数</th>
-                    <th>得分率</th>
-                    <th>得分</th>
-                    <th>百分比</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(diff_rows)}
-            </tbody>
-        </table>
-
-        <details>
-            <summary>低分题目详情 (Top {len(low_qs[:20])}, 得分 &lt; 50%)</summary>
-            <table class="detail-table">
-                <thead>
-                    <tr>
-                        <th>题目</th>
-                        <th>问题</th>
-                        <th>得分</th>
-                        <th>评分方式</th>
-                        <th>回答对比</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {''.join(rows)}
-                </tbody>
-            </table>
-        </details>
-    </div>
-    """
-
-
-def _build_comparison_section(scorecard: dict) -> str:
-    """Generate build comparison section."""
-    builds = scorecard.get('builds', {})
-    if len(builds) < 2:
-        return ''
-
+    # Full question table
     rows = []
-    for btype, bdata in builds.items():
-        label = '全量构建' if btype == 'full' else '分批构建'
-        tc01 = bdata.get('tc01', 0)
-        tc02 = bdata.get('tc02', 0)
-        total = bdata.get('total', 0)
-        error = bdata.get('error')
+    for d in details:  # Already sorted by score ascending
+        qid = d['id']
+        question = d.get('question', '')
+        difficulty = d.get('difficulty', 'medium')
+        earned = d.get('earned', 0)
+        max_pts = d.get('max_points', 0)
+        answer = qa_answers.get(qid, '')
+        standard = d.get('standard_answer', qa_by_id.get(qid, {}).get('standard_answer', ''))
+        method = d.get('method', '')
+        score_class = _score_class(earned, max_pts)
+        diff_class = f'difficulty-{difficulty}'
 
         rows.append(f"""
         <tr>
-            <td><strong>{label}</strong></td>
-            <td>{tc01:.1f}<span class="dim">/40</span></td>
-            <td>{tc02:.1f}<span class="dim">/60</span></td>
-            <td><strong>{total:.1f}</strong></td>
-            <td class="dim">{error or '-'}</td>
+            <td class="q-id"><span class="diff-tag {diff_class}">{difficulty}</span> <strong>Q{qid}</strong></td>
+            <td class="q-question">{_esc(question)}</td>
+            <td class="q-score"><span class="score-tag {score_class}">{earned:.2f}/{max_pts:.2f}</span></td>
+            <td class="q-method dim">{method or '-'}</td>
+            <td class="q-answers">
+                <details><summary>标准答案</summary><div class="qa-box std">{_esc(standard)}</div></details>
+                <details><summary>系统回答</summary><div class="qa-box ans">{_esc(answer) if answer else '<span class=\"dim\">无回答</span>'}</div></details>
+            </td>
         </tr>
         """)
 
     return f"""
     <div class="section">
-        <h2>构建方式对比</h2>
+        <h2>TC-02 问答准确率 <span class="dim">({final:.1f}/60, 原始分 {total_earned:.1f}/{total_max:.1f})</span></h2>
+        {scoring_info}
+        <div class="stats-row">
+            <div class="stat-card"><span class="stat-value">{total_q}</span><span class="stat-label">总题数</span></div>
+            <div class="stat-card"><span class="stat-value">{answered}</span><span class="stat-label">已回答</span></div>
+            <div class="stat-card"><span class="stat-value">{zero}</span><span class="stat-label">零分</span></div>
+        </div>
+
+        <h3>难度分布</h3>
         <table class="detail-table">
             <thead>
+                <tr><th>难度</th><th>题数</th><th>得分率</th><th>得分</th><th>百分比</th></tr>
+            </thead>
+            <tbody>{''.join(diff_rows)}</tbody>
+        </table>
+
+        <h3>全部题目详情（按得分升序）</h3>
+        <table class="full-table">
+            <thead>
                 <tr>
-                    <th>构建方式</th>
-                    <th>TC-01 (40分)</th>
-                    <th>TC-02 (60分)</th>
-                    <th>总分</th>
-                    <th>错误</th>
+                    <th class="col-qid">题目</th>
+                    <th class="col-qquestion">问题</th>
+                    <th class="col-qscore">得分</th>
+                    <th class="col-qmethod">评分方式</th>
+                    <th class="col-qanswers">回答对比</th>
                 </tr>
             </thead>
             <tbody>
@@ -516,6 +431,191 @@ def _build_comparison_section(scorecard: dict) -> str:
         </table>
     </div>
     """
+
+
+# ---------------------------------------------------------------------------
+# Summary Report (all builds)
+# ---------------------------------------------------------------------------
+
+def generate_summary_html(all_results: dict, scorecard: dict, timestamp: str,
+                          qa_judge: dict, concepts_judge: dict) -> str:
+    """Generate a summary HTML comparing all builds."""
+    qa_by_id = {q['id']: q for q in qa_judge.get('questions', [])}
+    concepts_by_name = concepts_judge.get('terms', {})
+    builds = scorecard.get('builds', {})
+    avg = scorecard.get('average_score', 0)
+    passed = avg >= 80
+
+    html = [_html_header()]
+    html.append(f"""
+    <div class="header-card {'passed' if passed else 'failed'}">
+        <h1>Sediment 测试报告 — 总览</h1>
+        <div class="meta-row"><span>生成时间: {timestamp}</span></div>
+        <div class="score-display">
+            <div class="score-circle" style="color: {'#22c55e' if passed else '#ef4444'}">
+                <span class="score-value">{avg:.1f}</span>
+                <span class="score-max">/100</span>
+            </div>
+            <div class="score-badge {'passed' if passed else 'failed'}">
+                {'通过' if passed else '未通过'}（标准 ≥ 80）
+            </div>
+        </div>
+    </div>
+    """)
+
+    # Build comparison table
+    if len(builds) >= 2:
+        rows = []
+        for btype, bdata in builds.items():
+            label = '全量构建' if btype == 'full' else '分批构建'
+            tc01 = bdata.get('tc01', 0)
+            tc02 = bdata.get('tc02', 0)
+            total = bdata.get('total', 0)
+            dur = bdata.get('duration_seconds', 0)
+            started = bdata.get('started_at', '')
+            error = bdata.get('error')
+            rows.append(f"""
+            <tr>
+                <td><strong>{label}</strong>{f'<br><span class="dim">{started}</span>' if started else ''}</td>
+                <td>{tc01:.1f}<span class="dim">/40</span></td>
+                <td>{tc02:.1f}<span class="dim">/60</span></td>
+                <td><strong>{total:.1f}</strong></td>
+                <td>{dur:.0f}s</td>
+                <td class="dim">{_esc(error) if error else '-'}</td>
+            </tr>
+            """)
+
+        html.append(f"""
+        <div class="section">
+            <h2>构建方式对比</h2>
+            <table class="detail-table">
+                <thead>
+                    <tr><th>构建</th><th>TC-01 (40分)</th><th>TC-02 (60分)</th><th>总分</th><th>耗时</th><th>错误</th></tr>
+                </thead>
+                <tbody>{''.join(rows)}</tbody>
+            </table>
+        </div>
+        """)
+
+    # Links to per-build reports
+    for btype in builds:
+        label = '全量构建' if btype == 'full' else '分批构建'
+        report_name = f'report_{btype}.html'
+        html.append(f'<div class="section"><h2><a href="{report_name}" class="report-link">{label} 详细报告</a></h2></div>')
+
+    html.append(_html_footer())
+    return '\n'.join(html)
+
+
+# ---------------------------------------------------------------------------
+# Report Generation Entry Point
+# ---------------------------------------------------------------------------
+
+def generate_report_from_results(results_dir: Path, all_results: dict) -> list[str]:
+    """
+    Generate HTML reports for each build type + a summary report.
+    Returns list of generated file paths.
+    """
+    global RESULTS_DIR, JUDGE_DIR
+    RESULTS_DIR = results_dir
+    JUDGE_DIR = RESULTS_DIR.parent / 'judge'
+
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    ts_file = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Load judge data
+    concepts_judge = load_json(JUDGE_DIR / '概念.json') or {}
+    qa_judge = load_json(JUDGE_DIR / '问答.json') or {}
+
+    # Read scorecard for combined info
+    scorecard = load_json(RESULTS_DIR / 'scorecard.json') or {}
+
+    generated_files = []
+
+    # Generate per-build reports
+    for build_type in ['full', 'batched']:
+        if build_type not in all_results:
+            continue
+        build_result = all_results[build_type]
+        if build_result.get('error'):
+            continue
+
+        tc01_file = RESULTS_DIR / f'concept_match_{build_type}.json'
+        tc02_file = RESULTS_DIR / f'answers_scored_{build_type}.json'
+        tc01_data = load_json(tc01_file) or load_json(RESULTS_DIR / 'concept_match.json')
+        tc02_data = load_json(tc02_file) or load_json(RESULTS_DIR / 'answers_scored.json')
+
+        concept_answers = {}
+        ca_file = RESULTS_DIR / f'concept_answers_{build_type}.json'
+        ca = load_json(ca_file)
+        if ca and 'results' in ca:
+            for item in ca['results']:
+                concept_answers[item.get('concept', '')] = item.get('answer', '')
+
+        qa_answers = {}
+        qa_file = RESULTS_DIR / f'qa_answers_{build_type}.json'
+        qa = load_json(qa_file)
+        if qa and 'results' in qa:
+            for item in qa['results']:
+                qa_answers[item.get('id', '')] = item.get('answer', '')
+
+        html = generate_html_for_build(
+            build_type, tc01_data, tc02_data, scorecard,
+            concept_answers, qa_answers, qa_judge, concepts_judge, timestamp
+        )
+        report_path = RESULTS_DIR / f'report_{ts_file}_{build_type}.html'
+        report_path.write_text(html, encoding='utf-8')
+        generated_files.append(str(report_path))
+
+    # Generate summary report
+    if all_results:
+        html = generate_summary_html(all_results, scorecard, timestamp, qa_judge, concepts_judge)
+        summary_path = RESULTS_DIR / f'report_{ts_file}_summary.html'
+        summary_path.write_text(html, encoding='utf-8')
+        generated_files.append(str(summary_path))
+
+    return generated_files
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _score_class(earned: float, max_pts: float) -> str:
+    """Return CSS class based on score ratio."""
+    if max_pts <= 0:
+        return 'score-zero'
+    ratio = earned / max_pts
+    if ratio == 0:
+        return 'score-zero'
+    if ratio < 0.3:
+        return 'score-critical'
+    if ratio < 0.6:
+        return 'score-low'
+    if ratio < 0.8:
+        return 'score-mid'
+    if ratio < 1.0:
+        return 'score-good'
+    return 'score-perfect'
+
+
+def _esc(text: str) -> str:
+    """Escape HTML special characters."""
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+
+def _truncate_html(text: str, max_len: int) -> str:
+    """Truncate text with HTML escaping."""
+    if not text:
+        return ''
+    escaped = _esc(text)
+    if len(text) > max_len:
+        return escaped[:max_len] + '...'
+    return escaped
+
+
+def _empty_section(title: str) -> str:
+    return f'<div class="section"><h2>{title}</h2><p class="dim">暂无数据</p></div>'
 
 
 # ---------------------------------------------------------------------------
@@ -537,9 +637,9 @@ def _html_header() -> str:
             background: #f5f5f5;
             color: #1a1a1a;
             line-height: 1.6;
-            padding: 2rem;
+            padding: 1.5rem;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
+        .container { max-width: 1400px; margin: 0 auto; }
 
         /* Header card */
         .header-card {
@@ -550,15 +650,17 @@ def _html_header() -> str:
             box-shadow: 0 1px 3px rgba(0,0,0,0.08);
             text-align: center;
         }
-        .header-card.passed { border-left: 4px solid #22c55e; }
-        .header-card.failed { border-left: 4px solid #ef4444; }
-        .header-card h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+        .header-card.passed { border-top: 4px solid #22c55e; }
+        .header-card.failed { border-top: 4px solid #ef4444; }
+        .header-card h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .meta-row { font-size: 0.85rem; color: #888; margin-bottom: 0.25rem; }
 
         .score-display {
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 1.5rem;
+            margin-top: 1rem;
         }
         .score-circle {
             width: 100px;
@@ -570,10 +672,7 @@ def _html_header() -> str:
             justify-content: center;
             font-weight: 700;
             border: 6px solid;
-            border-color: color-mix(in srgb, currentColor 80%, transparent);
         }
-        .passed .score-circle { color: #22c55e; }
-        .failed .score-circle { color: #ef4444; }
         .score-value { font-size: 2rem; line-height: 1; }
         .score-max { font-size: 0.85rem; font-weight: 400; opacity: 0.6; }
         .score-badge {
@@ -584,6 +683,22 @@ def _html_header() -> str:
         }
         .score-badge.passed { background: #dcfce7; color: #166534; }
         .score-badge.failed { background: #fef2f2; color: #991b1b; }
+
+        .score-breakdown {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 1.5rem;
+        }
+        .bd-card {
+            background: #f8f8f8;
+            border-radius: 8px;
+            padding: 1rem 2rem;
+            text-align: center;
+        }
+        .bd-label { font-size: 0.8rem; color: #666; margin-bottom: 0.25rem; }
+        .bd-value { font-size: 1.5rem; font-weight: 700; }
+        .bd-max { font-size: 0.85rem; color: #888; font-weight: 400; }
 
         /* Section */
         .section {
@@ -601,7 +716,7 @@ def _html_header() -> str:
         }
         .section h3 {
             font-size: 1rem;
-            margin: 1rem 0 0.5rem;
+            margin: 1.5rem 0 0.5rem;
             color: #555;
         }
 
@@ -629,9 +744,12 @@ def _html_header() -> str:
             font-size: 0.85rem;
             font-weight: 600;
         }
-        .score-zero { background: #fee2e2; color: #991b1b; }
-        .score-low { background: #fef3c7; color: #92400e; }
-        .score-mid { background: #dbeafe; color: #1e40af; }
+        .score-zero     { background: #fee2e2; color: #991b1b; }
+        .score-critical { background: #fecaca; color: #b91c1c; }
+        .score-low      { background: #fef3c7; color: #92400e; }
+        .score-mid      { background: #dbeafe; color: #1e40af; }
+        .score-good     { background: #dcfce7; color: #166534; }
+        .score-perfect  { background: #d1fae5; color: #065f46; border: 1px solid #065f46; }
 
         /* Difficulty tags */
         .diff-tag {
@@ -640,17 +758,16 @@ def _html_header() -> str:
             border-radius: 3px;
             font-size: 0.75rem;
             font-weight: 600;
-            margin-right: 4px;
         }
-        .difficulty-easy { background: #dcfce7; color: #166534; }
+        .difficulty-easy   { background: #dcfce7; color: #166534; }
         .difficulty-medium { background: #dbeafe; color: #1e40af; }
-        .difficulty-hard { background: #fef3c7; color: #92400e; }
+        .difficulty-hard   { background: #fef3c7; color: #92400e; }
 
         /* Tables */
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
         }
         th {
             text-align: left;
@@ -659,22 +776,60 @@ def _html_header() -> str:
             font-weight: 600;
             color: #555;
             border-bottom: 2px solid #eee;
+            position: sticky;
+            top: 0;
+            z-index: 1;
         }
         td {
             padding: 0.5rem 0.75rem;
             border-bottom: 1px solid #f0f0f0;
             vertical-align: top;
         }
-        tr:hover { background: #fafafa; }
+        tr:nth-child(even) { background: #fafafa; }
+        tr:hover { background: #f0f0f0; }
 
-        .trend-table { font-size: 0.9rem; }
+        /* Full detail table column widths */
+        .full-table { table-layout: fixed; }
+        .col-concept  { width: 12%; }
+        .col-score    { width: 8%; }
+        .col-def      { width: 35%; }
+        .col-ans      { width: 45%; }
+        .col-qid      { width: 8%; }
+        .col-qquestion{ width: 30%; }
+        .col-qscore   { width: 10%; }
+        .col-qmethod  { width: 10%; }
+        .col-qanswers { width: 42%; }
+
         .detail-table { font-size: 0.85rem; }
+        .trend-table  { font-size: 0.9rem; }
 
-        .answer-cell {
-            max-width: 300px;
-            font-size: 0.85rem;
-            color: #444;
+        /* Concept name column */
+        .concept-name { font-size: 0.9rem; }
+        /* Definition / Answer cells */
+        .def-cell, .ans-cell { font-size: 0.82rem; color: #444; }
+        .def-cell details, .ans-cell details { cursor: pointer; }
+        .def-cell summary, .ans-cell summary { list-style: none; }
+        .def-cell summary::-webkit-details-marker, .ans-cell summary::-webkit-details-marker { display: none; }
+
+        /* QA cells */
+        .q-id { white-space: nowrap; }
+        .q-question { max-width: 300px; }
+        .q-score { white-space: nowrap; }
+        .q-method { font-size: 0.8rem; color: #888; }
+        .q-answers details { margin-bottom: 0.25rem; cursor: pointer; }
+        .q-answers summary { list-style: none; }
+        .q-answers summary::-webkit-details-marker { display: none; }
+        .qa-box {
+            padding: 0.5rem;
+            background: #f8f8f8;
+            border-radius: 4px;
+            font-size: 0.82rem;
+            margin-top: 0.25rem;
+            max-height: 200px;
+            overflow-y: auto;
         }
+        .qa-box.std { border-left: 3px solid #166534; }
+        .qa-box.ans { border-left: 3px solid #1e40af; }
 
         /* Bar chart */
         .bar-container {
@@ -688,36 +843,30 @@ def _html_header() -> str:
             height: 100%;
             background: linear-gradient(90deg, #3b82f6, #22c55e);
             border-radius: 4px;
-            transition: width 0.3s;
         }
+
+        /* Details */
+        details { margin-top: 0.25rem; }
+        details summary {
+            padding: 0.25rem 0.5rem;
+            background: #f8f8f8;
+            border-radius: 4px;
+            font-weight: 500;
+            user-select: none;
+            font-size: 0.82rem;
+        }
+        details summary:hover { background: #f0f0f0; }
+
+        /* Report links */
+        .report-link {
+            color: #1e40af;
+            text-decoration: none;
+            font-size: 1.1rem;
+        }
+        .report-link:hover { text-decoration: underline; }
 
         /* Utilities */
         .dim { color: #888; font-size: 0.85rem; }
-
-        /* Details */
-        details { margin-top: 0.5rem; }
-        details summary {
-            cursor: pointer;
-            padding: 0.5rem;
-            background: #f8f8f8;
-            border-radius: 6px;
-            font-weight: 500;
-            user-select: none;
-        }
-        details summary:hover { background: #f0f0f0; }
-        details[open] summary { border-radius: 6px 6px 0 0; }
-
-        /* QA comparison */
-        .qa-comparison {
-            padding: 0.75rem;
-            background: #fafafa;
-            border-radius: 6px;
-            margin-top: 0.25rem;
-            font-size: 0.85rem;
-        }
-        .qa-std { margin-bottom: 0.5rem; padding-bottom: 0.5rem; border-bottom: 1px dashed #ddd; }
-        .qa-std strong { color: #166534; }
-        .qa-ans strong { color: #1e40af; }
 
         /* Footer */
         .footer {
@@ -725,6 +874,14 @@ def _html_header() -> str:
             padding: 2rem;
             color: #888;
             font-size: 0.85rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body { padding: 0.5rem; }
+            .section { padding: 1rem; }
+            .score-breakdown { flex-direction: column; align-items: center; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
         }
     </style>
 </head>
@@ -734,31 +891,16 @@ def _html_header() -> str:
 
 
 def _html_footer() -> str:
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     return f"""
     <div class="footer">
         <p>报告生成时间: {now}</p>
-        <p>Sediment 测试方案 — 目标分数 ≥ 90/100</p>
+        <p>Sediment 测试方案</p>
     </div>
 </div>
 </body>
 </html>
 """
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _truncate(text: str, max_len: int) -> str:
-    """Truncate text and escape HTML."""
-    if not text:
-        return ''
-    # Escape HTML
-    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
-    if len(text) > max_len:
-        return text[:max_len] + '...'
-    return text
 
 
 # ---------------------------------------------------------------------------
@@ -770,7 +912,6 @@ def archive_current_results() -> Path | None:
     Move current results to history directory with a timestamp label.
     Returns the history entry path, or None if nothing to archive.
     """
-    # Check if there's anything to archive
     has_data = False
     for f in ['scorecard.json', 'concept_match.json', 'answers_scored.json']:
         if (RESULTS_DIR / f).exists():
@@ -783,12 +924,10 @@ def archive_current_results() -> Path | None:
     history_dir = RESULTS_DIR / 'history'
     history_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create timestamped entry
     ts = datetime.now().strftime('%Y-%m-%d_%H%M%S')
     entry = history_dir / ts
     entry.mkdir(parents=True, exist_ok=True)
 
-    # Copy relevant files
     import shutil
     for f in RESULTS_DIR.iterdir():
         if f.is_file() and f.name not in ('scorecard.md',):
@@ -798,34 +937,8 @@ def archive_current_results() -> Path | None:
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Main (standalone CLI)
 # ---------------------------------------------------------------------------
-
-def generate_report_from_results(results_dir: Path, all_results: dict):
-    """
-    Generate HTML report directly from run_all_scores.py results.
-    This is called by run_all_scores.py after scoring is complete.
-    """
-    global RESULTS_DIR, JUDGE_DIR
-    RESULTS_DIR = results_dir
-    JUDGE_DIR = RESULTS_DIR.parent / 'judge'
-
-    # Archive current results to history
-    archive_current_results()
-
-    # Discover all results (including historical)
-    results = discover_results()
-
-    if not results:
-        return
-
-    # Generate HTML
-    html = generate_html(results)
-
-    # Write output
-    output_path = RESULTS_DIR / 'report.html'
-    output_path.write_text(html, encoding='utf-8')
-
 
 def main():
     parser = argparse.ArgumentParser(description='Sediment HTML Report Generator')
@@ -833,29 +946,132 @@ def main():
     parser.add_argument('--no-archive', action='store_true', help='Do not archive current results to history')
     args = parser.parse_args()
 
-    # Archive current results to history before generating new report
     if not args.no_archive:
         archived = archive_current_results()
         if archived:
             print(f"[report] Archived current results to history: {archived.name}")
 
-    # Discover all results (including historical)
     results = discover_results()
-
     if not results:
         print("[report] No scoring results found in results directory.")
         print("[report] Run `python testcase/scripts/run_all_scores.py` first.")
         sys.exit(1)
 
     print(f"[report] Found {len(results)} result set(s)")
-
-    # Generate HTML
     html = generate_html(results)
-
-    # Write output
     output_path = Path(args.output) if args.output else RESULTS_DIR / 'report.html'
     output_path.write_text(html, encoding='utf-8')
     print(f"[report] Report written to: {output_path}")
+
+
+# Legacy generate_html for backward compatibility (standalone CLI usage)
+def generate_html(results: list[dict]) -> str:
+    """Generate a comprehensive HTML report from legacy discover_results() output."""
+    concepts_judge = load_json(JUDGE_DIR / '概念.json') or {}
+    qa_judge = load_json(JUDGE_DIR / '问答.json') or {}
+    qa_by_id = {q['id']: q for q in qa_judge.get('questions', [])}
+    concepts_by_name = concepts_judge.get('terms', {})
+    current = results[-1] if results else None
+
+    html = [_html_header()]
+    if current and current['scorecard']:
+        sc = current['scorecard']
+        avg = sc.get('average_score', 0)
+        passed = avg >= 80
+        html.append(f"""
+        <div class="header-card {'passed' if passed else 'failed'}">
+            <h1>Sediment 测试报告</h1>
+            <div class="score-display">
+                <div class="score-circle" style="color: {'#22c55e' if passed else '#ef4444'}">
+                    <span class="score-value">{avg:.1f}</span>
+                    <span class="score-max">/100</span>
+                </div>
+                <div class="score-badge {'passed' if passed else 'failed'}">
+                    {'通过' if passed else '未通过'}（标准 ≥ 80）
+                </div>
+            </div>
+        </div>
+        """)
+
+    if len(results) > 1:
+        html.append(_trend_section(results))
+
+    if current:
+        html.append(_tc01_full_section(current['tc01'], current.get('concept_answers', {}), concepts_by_name))
+        html.append(_tc02_full_section(current['tc02'], current.get('qa_answers', {}), qa_by_id))
+        if current['scorecard'] and 'builds' in current['scorecard']:
+            html.append(_build_comparison_section(current['scorecard']))
+
+    html.append(_html_footer())
+    return '\n'.join(html)
+
+
+def _trend_section(results: list[dict]) -> str:
+    rows = []
+    for r in results:
+        sc = r.get('scorecard', {})
+        tc01 = r.get('tc01', {})
+        tc02 = r.get('tc02', {})
+        avg = sc.get('average_score', 0)
+        tc01_score = tc01.get('final_score', 0) if tc01 else 0
+        tc02_score = tc02.get('final_score', 0) if tc02 else 0
+        build_info = ''
+        if 'builds' in sc:
+            parts = []
+            for btype, bdata in sc['builds'].items():
+                label = '全量' if btype == 'full' else '分批'
+                total = bdata.get('total', 0)
+                parts.append(f'{label}: {total:.1f}')
+            build_info = ' | '.join(parts)
+        rows.append(f"""
+        <tr>
+            <td><strong>{r['label']}</strong></td>
+            <td>{tc01_score:.1f}<span class="dim">/40</span></td>
+            <td>{tc02_score:.1f}<span class="dim">/60</span></td>
+            <td><strong>{avg:.1f}</strong></td>
+            <td class="dim">{build_info}</td>
+        </tr>
+        """)
+    return f"""
+    <div class="section">
+        <h2>分数趋势</h2>
+        <table class="trend-table">
+            <thead><tr><th>轮次</th><th>TC-01 概念覆盖率</th><th>TC-02 问答准确率</th><th>平均分</th><th>详情</th></tr></thead>
+            <tbody>{''.join(rows)}</tbody>
+        </table>
+    </div>
+    """
+
+
+def _build_comparison_section(scorecard: dict) -> str:
+    builds = scorecard.get('builds', {})
+    if len(builds) < 2:
+        return ''
+    rows = []
+    for btype, bdata in builds.items():
+        label = '全量构建' if btype == 'full' else '分批构建'
+        tc01 = bdata.get('tc01', 0)
+        tc02 = bdata.get('tc02', 0)
+        total = bdata.get('total', 0)
+        error = bdata.get('error')
+        rows.append(f"""
+        <tr>
+            <td><strong>{label}</strong></td>
+            <td>{tc01:.1f}<span class="dim">/40</span></td>
+            <td>{tc02:.1f}<span class="dim">/60</span></td>
+            <td><strong>{total:.1f}</strong></td>
+            <td class="dim">{error or '-'}</td>
+        </tr>
+        """)
+    return f"""
+    <div class="section">
+        <h2>构建方式对比</h2>
+        <table class="detail-table">
+            <thead><tr><th>构建方式</th><th>TC-01 (40分)</th><th>TC-02 (60分)</th><th>总分</th><th>错误</th></tr></thead>
+            <tbody>{''.join(rows)}</tbody>
+        </table>
+    </div>
+    """
 
 
 if __name__ == '__main__':

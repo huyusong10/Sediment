@@ -27,6 +27,7 @@ import os
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 # Add scripts dir to path for isolated_build imports
@@ -146,7 +147,8 @@ async def build_and_test(build_type: str, output_dir: Path, port: int) -> dict:
     log(f"{'='*60}")
 
     builder = IsolatedBuilder(build_type=build_type, port=port)
-    results = {}
+    results = {'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    build_start = time.time()
 
     try:
         # Step 1: Create isolated copy and build
@@ -181,7 +183,7 @@ async def build_and_test(build_type: str, output_dir: Path, port: int) -> dict:
 
             # Score TC-01
             from score_tc01 import run_scoring as score_tc01
-            tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir)
+            tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir, build_type)
             results['tc01'] = tc01_result
 
             # Run QA test
@@ -195,13 +197,15 @@ async def build_and_test(build_type: str, output_dir: Path, port: int) -> dict:
 
             # Score TC-02
             from score_tc02 import run_scoring as score_tc02
-            tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir)
+            tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir, build_type)
             results['tc02'] = tc02_result
 
             # Combined score
             total_score = tc01_result['final_score'] + tc02_result['final_score']
             results['total_score'] = total_score
             results['max_score'] = 100
+            results['finished_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            results['duration_seconds'] = round(time.time() - build_start, 1)
             log(f"\n{'='*60}")
             log(f"{build_type} build total score: {total_score:.1f}/100")
             log(f"  TC-01: {tc01_result['final_score']:.1f}/40")
@@ -244,8 +248,8 @@ def score_existing(build_type: str, output_dir: Path) -> dict:
     from score_tc01 import run_scoring as score_tc01
     from score_tc02 import run_scoring as score_tc02
 
-    tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir)
-    tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir)
+    tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir, build_type)
+    tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir, build_type)
 
     total_score = tc01_result['final_score'] + tc02_result['final_score']
 
@@ -320,10 +324,14 @@ async def main():
                 'tc02': v.get('tc02', {}).get('final_score', 0),
                 'total': v.get('total_score', 0),
                 'error': v.get('error'),
+                'started_at': v.get('started_at'),
+                'finished_at': v.get('finished_at'),
+                'duration_seconds': v.get('duration_seconds'),
             } for k, v in all_results.items()},
             'average_score': round(avg_score, 2),
             'max_score': 100,
             'passed': avg_score >= 80,
+            'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
 
         with open(RESULTS_DIR / 'scorecard.json', 'w', encoding='utf-8') as f:
@@ -354,10 +362,13 @@ async def main():
         if not args.no_report:
             try:
                 from generate_report import generate_report_from_results
-                generate_report_from_results(RESULTS_DIR, all_results)
-                log(f"HTML report written to: {RESULTS_DIR / 'report.html'}")
+                report_files = generate_report_from_results(RESULTS_DIR, all_results)
+                for rf in report_files:
+                    log(f"HTML report: {rf}")
             except Exception as e:
                 log(f"Warning: Failed to generate HTML report: {e}")
+                import traceback
+                log(traceback.format_exc())
 
     else:
         log("No valid scores obtained")

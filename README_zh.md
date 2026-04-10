@@ -165,7 +165,6 @@ npx @anthropic/mcp-inspector --url http://localhost:8000/sediment/
 然后提供需要摄入的文档（粘贴内容或指明文件路径）。Agent 将自动完成：
    - 提取原子知识条目 → 写入 `knowledge-base/entries/`
    - 为被引用但未定义的概念创建占位文件 → `knowledge-base/placeholders/`
-   - 更新 `knowledge-base/sources/source_map.json`
 
 > **摄入原则：** 一个命题 = 一个文件。拿不准时，宁可拆多，不要合并。
 

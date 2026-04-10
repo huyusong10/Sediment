@@ -456,69 +456,81 @@ def build_tidy_prompt(kb_dir: Path) -> str:
 # ---------------------------------------------------------------------------
 
 async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
-    """Run ingest using claude -p with the ingest prompt."""
+    """Run ingest using claude -p with directory polling and retry."""
     kb_entries = isolated_dir / 'knowledge-base' / 'entries'
     kb_entries.mkdir(parents=True, exist_ok=True)
 
-    prompt = build_ingest_prompt(materials, isolated_dir)
+    MAX_RETRIES = 2
+    POLL_INTERVAL = 30  # seconds
 
-    cmd = [
-        'claude', '-p',
-        '--permission-mode', 'auto',
-        '--allowed-tools', 'Write', 'Edit', 'Bash', 'Read', 'Glob',
-        '--max-budget-usd', '10',
-        '--no-session-persistence',
-        prompt,
-    ]
+    for attempt in range(1, MAX_RETRIES + 1):
+        prompt = build_ingest_prompt(materials, isolated_dir)
 
-    env = os.environ.copy()
-    env['SEDIMENT_KB_PATH'] = str(isolated_dir / 'knowledge-base')
-    env['CLAUDE_CODE'] = '1'
+        cmd = [
+            'claude', '-p',
+            '--permission-mode', 'auto',
+            '--allowed-tools', 'Write', 'Edit', 'Bash', 'Read', 'Glob',
+            '--max-budget-usd', '10',
+            '--no-session-persistence',
+            prompt,
+        ]
 
-    log(f"Running ingest for {len(materials)} files...")
-    start = time.time()
+        env = os.environ.copy()
+        env['SEDIMENT_KB_PATH'] = str(isolated_dir / 'knowledge-base')
+        env['CLAUDE_CODE'] = '1'
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(isolated_dir),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        log(f"Running ingest for {len(materials)} files (attempt {attempt}/{MAX_RETRIES})...")
+        start = time.time()
 
-        INGEST_TIMEOUT = 90 * 60
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=INGEST_TIMEOUT)
-        except asyncio.TimeoutError:
-            log(f"WARNING: Ingest timed out after {INGEST_TIMEOUT}s. Killing process...")
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            await proc.wait()
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(isolated_dir),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            # Poll KB directory for progress instead of blind proc.communicate()
+            last_count = len(list(kb_entries.glob('*.md')))
+            while proc.returncode is None:
+                await asyncio.sleep(POLL_INTERVAL)
+                current_count = len(list(kb_entries.glob('*.md')))
+                if current_count != last_count:
+                    elapsed = time.time() - start
+                    log(f"  Ingest progress: {current_count} entries ({elapsed:.0f}s elapsed)")
+                    last_count = current_count
+
+            # Process has exited — consume stdout/stderr
+            stdout, stderr = await proc.communicate()
+
             elapsed = time.time() - start
             entry_count = len(list(kb_entries.glob('*.md')))
-            log(f"Ingest terminated after {elapsed:.1f}s. Partial: {entry_count} entries.")
+            log(f"Ingest complete in {elapsed:.1f}s. Created {entry_count} entries.")
+
+            if proc.returncode != 0:
+                log(f"Warning: claude exited with code {proc.returncode}")
+                log(f"stderr: {stderr.decode()[:500]}")
+                if attempt < MAX_RETRIES:
+                    log("Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+
             return entry_count > 0
 
-        elapsed = time.time() - start
-        entry_count = len(list(kb_entries.glob('*.md')))
-        log(f"Ingest complete in {elapsed:.1f}s. Created {entry_count} entries.")
+        except Exception as e:
+            log(f"Ingest attempt {attempt} failed: {e}")
+            if attempt < MAX_RETRIES:
+                log("Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+                continue
+            return False
 
-        if proc.returncode != 0:
-            log(f"Warning: claude exited with code {proc.returncode}")
-            log(f"stderr: {stderr.decode()[:500]}")
-
-        return entry_count > 0
-
-    except Exception as e:
-        log(f"Ingest failed: {e}")
-        return False
+    return False
 
 
 async def run_tidy(isolated_dir: Path) -> bool:
-    """Run tidy using claude -p with the tidy prompt."""
+    """Run tidy using claude -p with directory polling and retry."""
     kb_dir = isolated_dir / 'knowledge-base'
     if not kb_dir.exists():
         return False
@@ -527,38 +539,73 @@ async def run_tidy(isolated_dir: Path) -> bool:
     placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
     log(f"Running tidy. Current: {entry_count} entries, {placeholder_count} placeholders.")
 
-    prompt = build_tidy_prompt(kb_dir)
+    MAX_RETRIES = 2
+    POLL_INTERVAL = 30  # seconds
 
-    cmd = [
-        'claude', '-p',
-        '--permission-mode', 'auto',
-        '--allowed-tools', 'Write', 'Edit', 'Bash', 'Read', 'Glob',
-        '--max-budget-usd', '5',
-        '--no-session-persistence',
-        prompt,
-    ]
+    for attempt in range(1, MAX_RETRIES + 1):
+        prompt = build_tidy_prompt(kb_dir)
 
-    env = os.environ.copy()
-    env['SEDIMENT_KB_PATH'] = str(kb_dir)
+        cmd = [
+            'claude', '-p',
+            '--permission-mode', 'auto',
+            '--allowed-tools', 'Write', 'Edit', 'Bash', 'Read', 'Glob',
+            '--max-budget-usd', '5',
+            '--no-session-persistence',
+            prompt,
+        ]
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(isolated_dir),
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        env = os.environ.copy()
+        env['SEDIMENT_KB_PATH'] = str(kb_dir)
 
-        new_entry_count = len(list((kb_dir / 'entries').glob('*.md')))
-        new_placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
-        log(f"Tidy complete. Now: {new_entry_count} entries, {new_placeholder_count} placeholders.")
-        return True
+        log(f"Tidy attempt {attempt}/{MAX_RETRIES}...")
+        start = time.time()
 
-    except Exception as e:
-        log(f"Tidy failed: {e}")
-        return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(isolated_dir),
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+            # Poll for changes in entries + placeholders count
+            last_total = len(list((kb_dir / 'entries').glob('*.md'))) + len(list((kb_dir / 'placeholders').glob('*.md')))
+            while proc.returncode is None:
+                await asyncio.sleep(POLL_INTERVAL)
+                current_total = len(list(kb_dir.rglob('*.md')))
+                if current_total != last_total:
+                    elapsed = time.time() - start
+                    new_entries = len(list((kb_dir / 'entries').glob('*.md')))
+                    new_placeholders = len(list((kb_dir / 'placeholders').glob('*.md')))
+                    log(f"  Tidy progress: {new_entries} entries, {new_placeholders} placeholders ({elapsed:.0f}s)")
+                    last_total = current_total
+
+            stdout, stderr = await proc.communicate()
+
+            elapsed = time.time() - start
+            new_entry_count = len(list((kb_dir / 'entries').glob('*.md')))
+            new_placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
+            log(f"Tidy complete in {elapsed:.1f}s. Now: {new_entry_count} entries, {new_placeholder_count} placeholders.")
+
+            if proc.returncode != 0:
+                log(f"Warning: tidy exited with code {proc.returncode}")
+                if attempt < MAX_RETRIES:
+                    log("Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+
+            return True
+
+        except Exception as e:
+            log(f"Tidy attempt {attempt} failed: {e}")
+            if attempt < MAX_RETRIES:
+                log("Retrying in 5 seconds...")
+                await asyncio.sleep(5)
+                continue
+            return False
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +625,24 @@ class MCPServer:
 
     async def start(self):
         """Start the MCP server."""
+        # Kill any existing process on the target port
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                'lsof', '-ti', f':{self.port}',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if stdout:
+                for pid in stdout.decode().strip().split('\n'):
+                    pid = pid.strip()
+                    if pid:
+                        log(f"Killing existing process on port {self.port}: PID {pid}")
+                        await asyncio.create_subprocess_exec('kill', '-9', pid)
+                        await asyncio.sleep(0.5)
+        except Exception:
+            pass
+
         env = os.environ.copy()
         env['SEDIMENT_KB_PATH'] = str(self.kb_path)
         env['SEDIMENT_PORT'] = str(self.port)
@@ -731,15 +796,12 @@ class IsolatedBuilder:
             raise ValueError(f"Unknown build_type: {self.build_type}")
 
     async def build_full(self):
-        """Full build: ingest in 3 batches, tidy once at end."""
+        """Full build: ingest all files in a single claude -p call, tidy once at end."""
         materials = get_material_files()
-        batches = chunk_list(materials, 3)
-        for i, batch in enumerate(batches):
-            log(f"\n--- Full ingest batch {i + 1}/3 ---")
-            success = await run_ingest(self.isolated_dir, batch)
-            if not success:
-                log(f"Full ingest batch {i + 1} failed")
-            await asyncio.sleep(1)
+        log(f"\n--- Ingest all {len(materials)} files ---")
+        success = await run_ingest(self.isolated_dir, materials)
+        if not success:
+            log("Full ingest failed")
 
         await run_tidy(self.isolated_dir)
 
@@ -762,7 +824,18 @@ class IsolatedBuilder:
         return self.mcp_server
 
     async def cleanup(self):
-        """Stop MCP server and remove isolated directory."""
+        """Stop MCP server, clean up background processes, remove isolated directory."""
+        # Kill any lingering claude subprocesses spawned in this isolated dir
+        try:
+            pkill_proc = await asyncio.create_subprocess_exec(
+                'pkill', '-f', str(self.isolated_dir),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await pkill_proc.wait()
+        except Exception:
+            pass
+
         if self.mcp_server:
             await self.mcp_server.stop()
             self.mcp_server = None
@@ -782,7 +855,7 @@ async def main():
     parser = argparse.ArgumentParser(description='Sediment Isolated Build')
     parser.add_argument(
         '--build-type', choices=['full', 'batched'], default='full',
-        help='Build type: full (3-batch ingest + tidy) or batched (5-batch with tidy each)',
+        help='Build type: full (single ingest + tidy) or batched (5-batch with tidy each)',
     )
     parser.add_argument('--port', type=int, default=18800, help='MCP server port')
     parser.add_argument('--dry-run', action='store_true', help='Only create isolated copy, skip build')

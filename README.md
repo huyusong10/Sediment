@@ -163,7 +163,6 @@ Load `skills/ingest.md` as your agent's system prompt. The file includes YAML fr
 Then paste or point to the document you want to ingest. The agent will:
    - Extract atomic knowledge entries → write to `knowledge-base/entries/`
    - Create placeholder files for referenced-but-undefined concepts → `knowledge-base/placeholders/`
-   - Update `knowledge-base/sources/source_map.json`
 
 > **Principle:** One proposition = one file. When in doubt, split rather than merge.
 

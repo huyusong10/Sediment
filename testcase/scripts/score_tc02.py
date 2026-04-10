@@ -368,7 +368,7 @@ def score_with_llm(questions: list[dict], answers_lookup: dict) -> list[dict]:
 # Main Scoring Runner
 # ---------------------------------------------------------------------------
 
-def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
+def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_type: str | None = None) -> dict:
     """Run QA accuracy scoring and produce report."""
     with open(judge_file, 'r', encoding='utf-8') as f:
         judge_data = json.load(f)
@@ -464,7 +464,8 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
 
     # Write output
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(output_dir / 'answers_scored.json', 'w', encoding='utf-8') as f:
+    output_file = f'answers_scored_{build_type}.json' if build_type else 'answers_scored.json'
+    with open(output_dir / output_file, 'w', encoding='utf-8') as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     # Print summary

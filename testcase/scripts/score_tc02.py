@@ -1,28 +1,98 @@
 """
 score_tc02.py — TC-02 问答准确率评分脚本（60 分）
 
-读取 answers.json 中的问答结果，通过多维度评估每题质量：
+读取问答结果，通过多维度评估每题质量：
 - accuracy: 回答是否准确传达了标准答案的核心意思
 - completeness: 是否覆盖了标准答案的主要要点
 - keyword_coverage: 是否包含预期关键词
-- reasoning: 回答是否展现了合理的推理链条（medium/hard 题额外关注）
+- reasoning: 回答是否展现了合理的推理链条
+
+采用 LLM 评分器 + 脚本评分混合模式：
+- LLM 评分器：批量（10题/组）调用 claude -p 进行语义评分
+- 脚本评分：作为 LLM 评分失败时的 fallback
+- 否定检测：回答与标准答案矛盾时直接判 0 分
+- 因果链验证：对 medium/hard 题检查回答是否包含与标准答案对应的逻辑关系
 
 每题得分 = 综合评分 × 该题满分值
 """
 
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
 
-def score_question(answer_text: str, question: dict) -> dict:
+# ---------------------------------------------------------------------------
+# Script-based Scoring (fallback)
+# ---------------------------------------------------------------------------
+
+def _extract_tokens(text):
+    """Extract Chinese char bigrams and English words."""
+    chars = re.findall(r'[\u4e00-\u9fff]', text)
+    bigrams = set()
+    for i in range(len(chars) - 1):
+        bigrams.add(chars[i] + chars[i + 1])
+    words = set(re.findall(r'[a-zA-Z][a-zA-Z0-9]*', text.lower()))
+    return bigrams | words
+
+
+def _check_contradiction(answer: str, standard_answer: str) -> bool:
     """
-    评分单个问答，返回各维度分数和总分。
+    检测回答是否与标准答案矛盾。
+    如果标准答案说"X 是 Y"，回答中出现"X 不是 Y"等否定形式，返回 True。
+    """
+    # Extract key subject-predicate pairs from standard answer
+    # Look for "X是Y" patterns
+    is_patterns = re.findall(r'([\u4e00-\u9fff]{2,8})是([^，。、；：,!?\n]{2,20})', standard_answer)
+
+    for subject, predicate in is_patterns:
+        # Check if answer says the opposite
+        negation_patterns = [
+            rf'{subject}.*?不[是是]',
+            rf'{subject}.*?(并非|不属于|不存在|没有)',
+            rf'不[是是].*?{predicate[:4]}',
+        ]
+        for pattern in negation_patterns:
+            if re.search(pattern, answer):
+                return True
+
+    return False
+
+
+def _check_causal_chain(answer: str, standard_answer: str) -> float:
+    """
+    因果链验证：检查标准答案中的逻辑关系是否在回答中也得到体现。
+    返回 0-1 的分数。
+    """
+    causal_markers = ['因为', '所以', '因此', '导致', '由于', '从而', '进而', '使得', '因而']
+
+    # Find causal markers in standard answer
+    standard_causals = [m for m in causal_markers if m in standard_answer]
+    if not standard_causals:
+        # No causal logic in standard answer, full score for this dimension
+        return 1.0
+
+    # Check if answer also contains causal markers
+    answer_causals = [m for m in causal_markers if m in answer]
+    if not answer_causals:
+        return 0.0
+
+    # Check overlap: does the answer use similar causal logic?
+    overlap = len(set(standard_causals) & set(answer_causals))
+    return min(overlap / len(standard_causals), 1.0)
+
+
+def score_question_script(answer_text: str, question: dict) -> dict:
+    """
+    脚本评分单个问答，返回各维度分数。
+    作为 LLM 评分失败时的 fallback。
     """
     if not answer_text or answer_text.startswith('ERROR'):
         return {
             'accuracy': 0, 'completeness': 0, 'keyword_coverage': 0,
             'reasoning': 0, 'composite': 0, 'earned': 0,
+            'method': 'script',
         }
 
     difficulty = question.get('difficulty', 'medium')
@@ -32,38 +102,46 @@ def score_question(answer_text: str, question: dict) -> dict:
     answer_lower = answer_text.lower()
     standard_lower = standard_answer.lower()
 
-    # 1. Keyword coverage: how many expected keywords appear in answer
+    # Negation check
+    if _check_contradiction(answer_text, standard_answer):
+        return {
+            'accuracy': 0, 'completeness': 0, 'keyword_coverage': 0,
+            'reasoning': 0, 'composite': 0, 'earned': 0,
+            'method': 'script', 'contradiction': True,
+        }
+
+    # 1. Keyword coverage
     kw_matched = 0
     for kw in expected_keywords:
-        if kw.lower() in answer_lower:
-            kw_matched += 1
+        kw_lower = kw.lower()
+        if len(kw_lower) <= 4:
+            if kw_lower in answer_lower:
+                kw_matched += 1
+        else:
+            # Long keywords: check continuous substring
+            if kw_lower in answer_lower:
+                kw_matched += 1
+            else:
+                # Partial: check if significant contiguous portion appears
+                min_sub = max(int(len(kw_lower) * 0.7), 3)
+                for i in range(len(kw_lower) - min_sub + 1):
+                    if kw_lower[i:i + min_sub] in answer_lower:
+                        kw_matched += 0.5
+                        break
     keyword_coverage = kw_matched / len(expected_keywords) if expected_keywords else 0
 
-    # 2. Accuracy: token-overlap between answer and standard answer
-    # Use Chinese character bigrams + English words for more robust matching
-    import re
-    def extract_tokens(text):
-        """Extract Chinese char bigrams and English words."""
-        chars = re.findall(r'[\u4e00-\u9fff]', text)
-        bigrams = set()
-        for i in range(len(chars) - 1):
-            bigrams.add(chars[i] + chars[i + 1])
-        words = set(re.findall(r'[a-zA-Z][a-zA-Z0-9]*', text.lower()))
-        return bigrams | words
-
-    standard_tokens = extract_tokens(standard_answer)
-    answer_tokens = extract_tokens(answer_text)
+    # 2. Accuracy: token overlap
+    standard_tokens = _extract_tokens(standard_answer)
+    answer_tokens = _extract_tokens(answer_text)
     if standard_tokens:
         overlap = len(standard_tokens & answer_tokens)
         accuracy = overlap / len(standard_tokens)
     else:
         accuracy = 0
-    # Boost if at least half the key content is covered
     if accuracy > 0.5:
         accuracy = min(accuracy * 1.2, 1.0)
 
-    # 3. Completeness: check coverage of standard answer's meaningful chunks
-    # Split by punctuation and check how many chunks are partially covered
+    # 3. Completeness: chunk coverage
     standard_chunks = [c.strip() for c in re.split(r'[。！？.!?,，；;]', standard_answer) if len(c.strip()) > 1]
     if standard_chunks:
         chunk_hits = 0
@@ -75,29 +153,26 @@ def score_question(answer_text: str, question: dict) -> dict:
     else:
         completeness = 0
 
-    # 4. Reasoning depth: for medium/hard, check if answer has explanatory depth
+    # 4. Reasoning depth: causal chain validation
+    causal_score = _check_causal_chain(answer_text, standard_answer)
     reasoning = 0.0
     if difficulty in ('medium', 'hard'):
-        # Indicators of reasoning depth
-        reasoning_markers = [
-            '因为', '所以', '因此', '导致', '原因', '机制', '过程',
-            '当', '如果', '则', '从而', '进而', '意味着', '说明',
-            '分为', '包括', '涉及', '需要', '通常',
-        ]
+        reasoning = causal_score
+        # Also consider explanatory markers
+        reasoning_markers = ['因为', '所以', '因此', '导致', '原因', '机制', '过程',
+                           '如果', '则', '意味着', '说明', '分为', '包括', '需要']
         marker_count = sum(1 for m in reasoning_markers if m in answer_text)
-        # Also consider answer length as a proxy for depth
-        length_score = min(len(answer_text) / 200, 1.0)
-        reasoning = (min(marker_count / 3, 1.0) * 0.5 + length_score * 0.5)
+        marker_bonus = min(marker_count / 4, 0.3)
+        reasoning = min(reasoning * 0.7 + marker_bonus, 1.0)
 
-    # Compute composite score based on difficulty weights
+    # Composite
     if difficulty == 'easy':
         composite = accuracy * 0.4 + completeness * 0.3 + keyword_coverage * 0.3
     elif difficulty == 'medium':
         composite = accuracy * 0.3 + completeness * 0.3 + keyword_coverage * 0.3 + reasoning * 0.1
-    else:  # hard
+    else:
         composite = accuracy * 0.25 + completeness * 0.25 + keyword_coverage * 0.25 + reasoning * 0.25
 
-    # Max points for this question based on difficulty
     difficulty_max = {'easy': 0.3, 'medium': 0.6, 'hard': 0.69}
     max_points = difficulty_max.get(difficulty, 0.6)
     earned = composite * max_points
@@ -110,8 +185,188 @@ def score_question(answer_text: str, question: dict) -> dict:
         'composite': round(composite, 4),
         'earned': round(earned, 4),
         'max_points': max_points,
+        'method': 'script',
     }
 
+
+# ---------------------------------------------------------------------------
+# LLM-based Scoring
+# ---------------------------------------------------------------------------
+
+def build_llm_scoring_prompt(batch: list[dict]) -> str:
+    """Build a prompt for LLM to score a batch of QA results."""
+    parts = []
+    parts.append("""你是一个考试评分助手。请对以下学生的回答进行评分。
+
+评分标准（每个维度 0-1 分）：
+1. accuracy（准确性）：回答是否准确传达了标准答案的核心意思，没有事实错误或矛盾
+2. completeness（完整性）：是否覆盖了标准答案的主要要点
+3. keyword_coverage（关键词覆盖）：是否包含预期关键词
+4. reasoning（推理深度）：回答是否展现了合理的推理链条，是否解释了"为什么"而不仅仅是"是什么"
+
+对于每个维度，请给出 0-1 的精确分数（可以有小数，如 0.75）。
+
+请以 JSON 格式输出评分结果，格式为：
+[
+  {"id": 题目ID, "accuracy": 0.8, "completeness": 0.7, "keyword_coverage": 0.9, "reasoning": 0.6},
+  ...
+]
+
+只输出 JSON 数组，不要任何其他文字。
+""")
+
+    parts.append(f"\n共 {len(batch)} 道题：\n")
+
+    for i, q in enumerate(batch):
+        parts.append(f"\n--- 题目 {i+1}/{len(batch)} ---")
+        parts.append(f"ID: {q['id']}")
+        parts.append(f"难度: {q.get('difficulty', 'medium')}")
+        parts.append(f"问题: {q['question']}")
+        parts.append(f"标准答案: {q.get('standard_answer', '')}")
+        parts.append(f"预期关键词: {', '.join(q.get('expected_keywords', []))}")
+        parts.append(f"学生回答: {q.get('answer', '')[:500]}")  # Truncate very long answers
+
+    return '\n'.join(parts)
+
+
+def run_llm_scoring(batch: list[dict]) -> list[dict] | None:
+    """
+    Use claude -p to score a batch of questions.
+    Returns list of scoring results, or None if LLM scoring fails.
+    """
+    prompt = build_llm_scoring_prompt(batch)
+
+    cmd = [
+        'claude', '-p',
+        '--permission-mode', 'auto',
+        '--allowed-tools', 'Bash', 'Read', 'Write', 'Edit', 'Glob',
+        '--max-budget-usd', '3',
+        '--no-session-persistence',
+        prompt,
+    ]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,  # 2 minutes per batch
+        )
+
+        output = proc.stdout.strip()
+
+        # Try to extract JSON from the output
+        # Claude might wrap JSON in markdown code blocks
+        json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', output, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # Try to find JSON array directly
+            json_match = re.search(r'\[.*\]', output, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+            else:
+                return None
+
+        scores = json.loads(json_str)
+
+        # Validate the structure
+        if not isinstance(scores, list):
+            return None
+
+        # Match scores to question IDs
+        result = {}
+        for s in scores:
+            if isinstance(s, dict) and 'id' in s:
+                result[s['id']] = s
+
+        return result
+
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+        return None
+
+
+def score_with_llm(questions: list[dict], answers_lookup: dict) -> list[dict]:
+    """
+    Score all questions using LLM in batches.
+    Falls back to script scoring for failed batches.
+    """
+    batch_size = 10
+    all_results = []
+
+    for i in range(0, len(questions), batch_size):
+        batch_questions = questions[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(questions) + batch_size - 1) // batch_size
+
+        print(f"  LLM scoring batch {batch_num}/{total_batches}...", flush=True)
+
+        # Prepare batch data with answers
+        batch_data = []
+        for q in batch_questions:
+            qid = q['id']
+            answer_item = answers_lookup.get(qid, {})
+            batch_data.append({
+                'id': qid,
+                'question': q['question'],
+                'difficulty': q.get('difficulty', 'medium'),
+                'standard_answer': q.get('standard_answer', ''),
+                'expected_keywords': q.get('expected_keywords', []),
+                'answer': answer_item.get('answer', ''),
+            })
+
+        # Try LLM scoring
+        llm_scores = run_llm_scoring(batch_data)
+
+        for q in batch_questions:
+            qid = q['id']
+            answer_item = answers_lookup.get(qid, {})
+            answer_text = answer_item.get('answer', '')
+
+            if llm_scores and qid in llm_scores:
+                s = llm_scores[qid]
+                difficulty = q.get('difficulty', 'medium')
+                difficulty_max = {'easy': 0.3, 'medium': 0.6, 'hard': 0.69}
+                max_points = difficulty_max.get(difficulty, 0.6)
+
+                # Clamp scores to 0-1
+                accuracy = max(0, min(s.get('accuracy', 0), 1))
+                completeness = max(0, min(s.get('completeness', 0), 1))
+                kw = max(0, min(s.get('keyword_coverage', 0), 1))
+                reasoning = max(0, min(s.get('reasoning', 0), 1))
+
+                if difficulty == 'easy':
+                    composite = accuracy * 0.4 + completeness * 0.3 + kw * 0.3
+                elif difficulty == 'medium':
+                    composite = accuracy * 0.3 + completeness * 0.3 + kw * 0.3 + reasoning * 0.1
+                else:
+                    composite = accuracy * 0.25 + completeness * 0.25 + kw * 0.25 + reasoning * 0.25
+
+                earned = composite * max_points
+
+                all_results.append({
+                    'id': qid,
+                    'accuracy': round(accuracy, 4),
+                    'completeness': round(completeness, 4),
+                    'keyword_coverage': round(kw, 4),
+                    'reasoning': round(reasoning, 4),
+                    'composite': round(composite, 4),
+                    'earned': round(earned, 4),
+                    'max_points': max_points,
+                    'method': 'llm',
+                })
+            else:
+                # Fallback to script scoring
+                script_result = score_question_script(answer_text, q)
+                script_result['id'] = qid
+                all_results.append(script_result)
+
+    return all_results
+
+
+# ---------------------------------------------------------------------------
+# Main Scoring Runner
+# ---------------------------------------------------------------------------
 
 def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
     """Run QA accuracy scoring and produce report."""
@@ -127,37 +382,54 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
         answers[item['id']] = item
 
     questions = judge_data.get('questions', [])
+
+    print(f"\n{'='*60}")
+    print(f"TC-02 问答准确率评分报告")
+    print(f"{'='*60}")
+    print(f"  总题数: {len(questions)}")
+    print(f"  使用 LLM 评分器（批量 10 题/组）")
+    print(f"  LLM 评分失败时回退到脚本评分")
+
+    # Score with LLM (with script fallback)
+    scored_results = score_with_llm(questions, answers)
+
+    # Build lookup by id
+    results_by_id = {r['id']: r for r in scored_results}
+
     total_earned = 0.0
     total_max = 0.0
     details = []
 
-    by_difficulty = {'easy': {'earned': 0, 'max': 0, 'count': 0},
-                     'medium': {'earned': 0, 'max': 0, 'count': 0},
-                     'hard': {'earned': 0, 'max': 0, 'count': 0}}
+    by_difficulty = {
+        'easy': {'earned': 0, 'max': 0, 'count': 0},
+        'medium': {'earned': 0, 'max': 0, 'count': 0},
+        'hard': {'earned': 0, 'max': 0, 'count': 0},
+    }
 
     for q in questions:
         qid = q['id']
-        answer_item = answers.get(qid, {})
-        answer_text = answer_item.get('answer', '')
+        result = results_by_id.get(qid, score_question_script('', q))
+        result['id'] = qid  # Ensure id is set
 
-        result = score_question(answer_text, q)
         total_earned += result['earned']
         difficulty_max = {'easy': 0.3, 'medium': 0.6, 'hard': 0.69}
-        total_max += difficulty_max.get(q['difficulty'], 0.6)
+        max_pts = difficulty_max.get(q['difficulty'], 0.6)
+        total_max += max_pts
 
         diff = q['difficulty']
         by_difficulty[diff]['earned'] += result['earned']
-        by_difficulty[diff]['max'] += difficulty_max.get(diff, 0.6)
+        by_difficulty[diff]['max'] += max_pts
         by_difficulty[diff]['count'] += 1
 
         details.append({
             'id': qid,
             'question': q['question'][:50],
             'difficulty': diff,
-            'earned': result['earned'],
-            'max_points': result['max_points'],
-            'composite': result['composite'],
-            'sources': answer_item.get('sources', []),
+            'earned': round(result['earned'], 4),
+            'max_points': result.get('max_points', max_pts),
+            'composite': round(result.get('composite', 0), 4),
+            'method': result.get('method', 'unknown'),
+            'sources': answers.get(qid, {}).get('sources', []),
         })
 
     # Max score is 60
@@ -165,6 +437,10 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
 
     # Sort by score ascending (worst first)
     details.sort(key=lambda x: x['earned'])
+
+    # Count methods
+    llm_count = sum(1 for r in scored_results if r.get('method') == 'llm')
+    script_count = sum(1 for r in scored_results if r.get('method') == 'script')
 
     result = {
         'total_earned': round(total_earned, 2),
@@ -174,9 +450,15 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
         'total_questions': len(questions),
         'answered': sum(1 for d in details if d['composite'] > 0),
         'zero_score': sum(1 for d in details if d['earned'] == 0),
-        'by_difficulty': {k: {mk: round(mv, 2) if isinstance(mv, float) else mv
-                               for mk, mv in v.items()}
-                          for k, v in by_difficulty.items()},
+        'scoring_method': {
+            'llm_scored': llm_count,
+            'script_fallback': script_count,
+        },
+        'by_difficulty': {
+            k: {mk: round(mv, 2) if isinstance(mv, float) else mv
+                for mk, mv in v.items()}
+            for k, v in by_difficulty.items()
+        },
         'details': details,
     }
 
@@ -186,14 +468,11 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     # Print summary
-    print(f"\n{'='*60}")
-    print(f"TC-02 问答准确率评分报告")
-    print(f"{'='*60}")
-    print(f"  总题数:   {result['total_questions']}")
     print(f"  已回答:   {result['answered']}")
     print(f"  零分:     {result['zero_score']}")
     print(f"  原始分:   {result['total_earned']:.2f}/{result['total_max']:.2f}")
     print(f"  最终得分: {result['final_score']:.1f}/60")
+    print(f"  评分方式: LLM={llm_count}, 脚本={script_count}")
     print(f"\n按难度统计:")
     for diff, stats in by_difficulty.items():
         pct = stats['earned'] / stats['max'] * 100 if stats['max'] > 0 else 0

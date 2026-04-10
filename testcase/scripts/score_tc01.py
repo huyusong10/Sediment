@@ -1,8 +1,13 @@
 """
 score_tc01.py — TC-01 概念覆盖率评分脚本（40 分）
 
-读取 answers.json 中的概念问答结果，通过关键词覆盖率和语义相似度评估
+读取概念问答结果，通过关键词覆盖率、语义匹配、同义词引用和否定检测评估。
 每个概念 0-1 分，总分 100 分后乘以 0.4 得到最终得分。
+
+改进点：
+- 精确子串匹配：移除 50% 字符重叠率判断，改为连续子串匹配
+- 同义词加分：利用 related_terms 字段，回答提及相关概念时额外加分
+- 否定检测：回答包含否定词+概念名时判低分
 """
 
 import json
@@ -11,72 +16,100 @@ import sys
 from pathlib import Path
 
 
-def extract_chinese_keywords(text: str) -> list[str]:
+def extract_key_phrases(text: str) -> list[str]:
     """
-    从中文文本中提取有意义的关键词。
-    按标点分割为短句，每个短句作为一个匹配单元。
-    匹配时只要短句中超过一半的字符出现在答案中就算匹配成功。
+    从文本中提取关键短语。
+    按标点分割为有意义的短句/词组，保留 2 字以上片段。
     """
-    import re
-    # Split by common Chinese punctuation
     chunks = re.split(r'[，。、；：,.;!?！？\n\r（）()]', text)
     keywords = [c.strip() for c in chunks if len(c.strip()) >= 2]
-    # Extract English words
+    # Also extract English words
     english_words = re.findall(r'[a-zA-Z][a-zA-Z0-9_]*', text)
     return keywords + english_words
 
 
-def _keyword_match_score(keyword: str, answer: str) -> float:
+def _phrase_match_score(phrase: str, answer: str) -> float:
     """
-    检查关键词是否在答案中出现。
-    对长关键词（>4字），使用字符重叠率判断：超过50%重叠即算匹配。
-    对短关键词（<=4字），使用精确子串匹配。
+    检查短语是否在答案中出现。
+    - 2-4 字符：精确子串匹配
+    - >4 字符：检查是否以连续子串形式出现（而非字符集重叠）
     """
-    kw_lower = keyword.lower()
+    phrase_lower = phrase.lower()
     ans_lower = answer.lower()
 
-    # Short keywords: exact substring match
-    if len(kw_lower) <= 4:
-        return 1.0 if kw_lower in ans_lower else 0.0
+    # Short phrases: exact substring match
+    if len(phrase_lower) <= 4:
+        return 1.0 if phrase_lower in ans_lower else 0.0
 
-    # Long keywords: character-level overlap
-    kw_chars = set(kw_lower)
-    if not kw_chars:
-        return 0.0
-    ans_chars = set(ans_lower)
-    overlap = len(kw_chars & ans_chars) / len(kw_chars)
-    return 1.0 if overlap >= 0.5 else 0.0
+    # Long phrases: check if the phrase appears as a continuous substring
+    # or if a significant contiguous portion (>= 70%) appears
+    if phrase_lower in ans_lower:
+        return 1.0
+
+    # Check if any contiguous sub-phrase of length >= 70% of original appears
+    min_sub_len = max(int(len(phrase_lower) * 0.7), 3)
+    for i in range(len(phrase_lower) - min_sub_len + 1):
+        sub = phrase_lower[i:i + min_sub_len]
+        if sub in ans_lower:
+            return 0.8  # Partial match for long phrases
+
+    return 0.0
 
 
-def score_concept(answer_text: str, concept_name: str, concept_def: dict) -> float:
+def _check_negation(answer: str, concept_name: str) -> bool:
+    """
+    检测回答是否包含否定表述。
+    如果回答中说"概念 不是/不存在/没有/并非"，返回 True。
+    """
+    negation_patterns = [
+        rf'{concept_name}.*?不[是是].*?[的的存有]',
+        rf'不[是是].*?{concept_name}',
+        rf'{concept_name}.*?(不存在|没有|并非|不属于|不是)',
+        rf'(不存在|没有|并非|不属于|不是).*?{concept_name}',
+    ]
+    for pattern in negation_patterns:
+        if re.search(pattern, answer):
+            return True
+    return False
+
+
+def score_concept(answer_text: str, concept_name: str, concept_def: dict,
+                  all_terms: dict | None = None) -> float:
     """
     评分单个概念问答，返回 0-1 分。
     评分维度：
-    1. keyword_coverage (40%): 标准答案/定义中的关键词是否出现在回答中
+    1. keyword_coverage (40%): 标准定义中的关键词是否出现在回答中
     2. semantic_match (30%): 回答是否包含概念名并提供定义
     3. no_contradiction (30%): 回答不含明显错误或矛盾
+    +  同义词加分 (额外 +0.1，总分不超过 1.0)
     """
     if not answer_text or answer_text.startswith('ERROR'):
         return 0.0
 
     answer_lower = answer_text.lower()
 
-    # 1. Keyword coverage: extract keywords from concept definition
+    # Negation check: if answer negates the concept, penalize heavily
+    if _check_negation(answer_text, concept_name):
+        return 0.0
+
+    # 1. Keyword coverage: extract key phrases from concept definition
     definition = concept_def.get('definition', '')
     if definition:
-        # Extract meaningful Chinese keywords
-        standard_keywords = extract_chinese_keywords(definition)
+        key_phrases = extract_key_phrases(definition)
     else:
-        standard_keywords = []
+        key_phrases = []
 
-    if not standard_keywords:
-        # Fallback: use concept name itself
-        standard_keywords = [concept_name]
+    # Always include concept name as a keyword
+    if concept_name not in key_phrases:
+        key_phrases.insert(0, concept_name)
 
-    matched_keywords = 0
-    for kw in standard_keywords:
-        matched_keywords += _keyword_match_score(kw, answer_text)
-    keyword_coverage = matched_keywords / len(standard_keywords) if standard_keywords else 0
+    if not key_phrases:
+        key_phrases = [concept_name]
+
+    matched_phrases = 0
+    for phrase in key_phrases:
+        matched_phrases += _phrase_match_score(phrase, answer_text)
+    keyword_coverage = matched_phrases / len(key_phrases) if key_phrases else 0
 
     # 2. Concept name must appear in answer
     concept_in_answer = concept_name.lower() in answer_lower
@@ -96,9 +129,29 @@ def score_concept(answer_text: str, concept_name: str, concept_def: dict) -> flo
     has_error = any(indicator in answer_text for indicator in error_indicators)
     no_contradiction = 0.0 if has_error else 1.0
 
-    # Weighted score
+    # Weighted base score
     score = keyword_coverage * 0.4 + semantic_match * 0.3 + no_contradiction * 0.3
-    return min(score, 1.0)
+
+    # Synonym bonus: if answer mentions related concepts with their key features
+    synonym_bonus = 0.0
+    if all_terms and concept_name in all_terms:
+        related = all_terms[concept_name].get('related_terms', [])
+        for related_concept in related[:3]:  # Check up to 3 related concepts
+            if related_concept in all_terms:
+                related_def = all_terms[related_concept].get('definition', '')
+                if related_def:
+                    # Check if any meaningful phrase from the related concept's definition appears
+                    related_phrases = extract_key_phrases(related_def)
+                    related_matches = sum(
+                        1 for p in related_phrases if _phrase_match_score(p, answer_text) > 0
+                    )
+                    if related_matches >= 2:  # At least 2 phrases from a related concept
+                        synonym_bonus = max(synonym_bonus, 0.05)
+                    if related_matches >= 4:
+                        synonym_bonus = max(synonym_bonus, 0.1)
+
+    score = min(score + synonym_bonus, 1.0)
+    return score
 
 
 def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
@@ -111,6 +164,7 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
 
     answers = {item['concept']: item for item in answers_data.get('results', [])}
 
+    all_terms = judge_data.get('terms', {})
     total_score = 0.0
     details = []
 
@@ -118,7 +172,7 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path) -> dict:
         answer_item = answers.get(concept_name, {})
         answer_text = answer_item.get('answer', '')
 
-        score = score_concept(answer_text, concept_name, concept_def)
+        score = score_concept(answer_text, concept_name, concept_def, all_terms)
         total_score += score
 
         details.append({

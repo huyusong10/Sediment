@@ -456,12 +456,11 @@ def build_tidy_prompt(kb_dir: Path) -> str:
 # ---------------------------------------------------------------------------
 
 async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
-    """Run ingest using claude -p with directory polling and retry."""
+    """Run ingest using claude -p with retry logic."""
     kb_entries = isolated_dir / 'knowledge-base' / 'entries'
     kb_entries.mkdir(parents=True, exist_ok=True)
 
     MAX_RETRIES = 2
-    POLL_INTERVAL = 30  # seconds
 
     for attempt in range(1, MAX_RETRIES + 1):
         prompt = build_ingest_prompt(materials, isolated_dir)
@@ -491,17 +490,6 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            # Poll KB directory for progress instead of blind proc.communicate()
-            last_count = len(list(kb_entries.glob('*.md')))
-            while proc.returncode is None:
-                await asyncio.sleep(POLL_INTERVAL)
-                current_count = len(list(kb_entries.glob('*.md')))
-                if current_count != last_count:
-                    elapsed = time.time() - start
-                    log(f"  Ingest progress: {current_count} entries ({elapsed:.0f}s elapsed)")
-                    last_count = current_count
-
-            # Process has exited — consume stdout/stderr
             stdout, stderr = await proc.communicate()
 
             elapsed = time.time() - start
@@ -530,7 +518,7 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
 
 
 async def run_tidy(isolated_dir: Path) -> bool:
-    """Run tidy using claude -p with directory polling and retry."""
+    """Run tidy using claude -p with retry logic."""
     kb_dir = isolated_dir / 'knowledge-base'
     if not kb_dir.exists():
         return False
@@ -540,7 +528,6 @@ async def run_tidy(isolated_dir: Path) -> bool:
     log(f"Running tidy. Current: {entry_count} entries, {placeholder_count} placeholders.")
 
     MAX_RETRIES = 2
-    POLL_INTERVAL = 30  # seconds
 
     for attempt in range(1, MAX_RETRIES + 1):
         prompt = build_tidy_prompt(kb_dir)
@@ -568,18 +555,6 @@ async def run_tidy(isolated_dir: Path) -> bool:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-
-            # Poll for changes in entries + placeholders count
-            last_total = len(list((kb_dir / 'entries').glob('*.md'))) + len(list((kb_dir / 'placeholders').glob('*.md')))
-            while proc.returncode is None:
-                await asyncio.sleep(POLL_INTERVAL)
-                current_total = len(list(kb_dir.rglob('*.md')))
-                if current_total != last_total:
-                    elapsed = time.time() - start
-                    new_entries = len(list((kb_dir / 'entries').glob('*.md')))
-                    new_placeholders = len(list((kb_dir / 'placeholders').glob('*.md')))
-                    log(f"  Tidy progress: {new_entries} entries, {new_placeholders} placeholders ({elapsed:.0f}s)")
-                    last_total = current_total
 
             stdout, stderr = await proc.communicate()
 

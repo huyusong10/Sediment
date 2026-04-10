@@ -591,9 +591,9 @@ class MCPServer:
                 str(venv_python), '-m', 'mcp_server.server',
             ]
         else:
+            # Use 'uv run' directly with the uv binary
             cmd = [
-                sys.executable, '-m', 'uv', 'run',
-                'python', '-m', 'mcp_server.server',
+                'uv', 'run', 'python', '-m', 'mcp_server.server',
             ]
 
         self.process = await asyncio.create_subprocess_exec(
@@ -660,11 +660,14 @@ class MCPServer:
     async def stop(self):
         """Stop the MCP server."""
         if self.process:
-            self.process.terminate()
             try:
-                await asyncio.wait_for(self.process.wait(), timeout=5)
-            except asyncio.TimeoutError:
-                self.process.kill()
+                self.process.terminate()
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    self.process.kill()
+            except ProcessLookupError:
+                pass  # Process already exited
             log(f"MCP server on port {self.port} stopped")
 
 

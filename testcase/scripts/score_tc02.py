@@ -250,7 +250,7 @@ def run_llm_scoring(batch: list[dict]) -> list[dict] | None:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,  # 2 minutes per batch
+            timeout=600,  # 10 minutes per batch
         )
 
         output = proc.stdout.strip()

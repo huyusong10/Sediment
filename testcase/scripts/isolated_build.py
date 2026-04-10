@@ -646,7 +646,7 @@ class MCPServer:
 
         # Wait for server to be ready
         import httpx
-        for i in range(60):
+        for i in range(120):
             await asyncio.sleep(0.5)
             try:
                 async with httpx.AsyncClient(timeout=2) as client:
@@ -672,7 +672,7 @@ class MCPServer:
         """Call an MCP tool via direct JSON-RPC."""
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(
                     self.sse_url,
                     json={
@@ -703,7 +703,7 @@ class MCPServer:
             try:
                 self.process.terminate()
                 try:
-                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                    await asyncio.wait_for(self.process.wait(), timeout=10)
                 except asyncio.TimeoutError:
                     self.process.kill()
             except ProcessLookupError:

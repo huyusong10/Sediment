@@ -20,6 +20,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -293,13 +294,15 @@ def score_with_llm(questions: list[dict], answers_lookup: dict) -> list[dict]:
     """
     batch_size = 10
     all_results = []
+    total_batches = (len(questions) + batch_size - 1) // batch_size
+    print(f"  Total batches: {total_batches} ({len(questions)} questions)", flush=True)
 
     for i in range(0, len(questions), batch_size):
         batch_questions = questions[i:i + batch_size]
         batch_num = i // batch_size + 1
-        total_batches = (len(questions) + batch_size - 1) // batch_size
 
         print(f"  LLM scoring batch {batch_num}/{total_batches}...", flush=True)
+        batch_start = time.time()
 
         # Prepare batch data with answers
         batch_data = []
@@ -317,6 +320,12 @@ def score_with_llm(questions: list[dict], answers_lookup: dict) -> list[dict]:
 
         # Try LLM scoring
         llm_scores = run_llm_scoring(batch_data)
+        batch_elapsed = time.time() - batch_start
+
+        if llm_scores:
+            print(f"    LLM batch {batch_num} done in {batch_elapsed:.1f}s", flush=True)
+        else:
+            print(f"    LLM batch {batch_num} failed after {batch_elapsed:.1f}s, falling back to script scoring", flush=True)
 
         for q in batch_questions:
             qid = q['id']

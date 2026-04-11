@@ -1,0 +1,22 @@
+[
+  {"id": 11, "accuracy": 0.95, "completeness": 1.0, "keyword_coverage": 1.0, "reasoning": 0.85},
+  {"id": 12, "accuracy": 0.9, "completeness": 0.9, "keyword_coverage": 1.0, "reasoning": 0.7},
+  {"id": 13, "accuracy": 0.0, "completeness": 0.0, "keyword_coverage": 0.0, "reasoning": 0.0},
+  {"id": 14, "accuracy": 0.95, "completeness": 1.0, "keyword_coverage": 1.0, "reasoning": 0.8},
+  {"id": 15, "accuracy": 0.0, "completeness": 0.0, "keyword_coverage": 0.0, "reasoning": 0.0},
+  {"id": 16, "accuracy": 0.3, "completeness": 0.2, "keyword_coverage": 0.4, "reasoning": 0.2},
+  {"id": 17, "accuracy": 0.3, "completeness": 0.2, "keyword_coverage": 0.25, "reasoning": 0.2},
+  {"id": 18, "accuracy": 0.55, "completeness": 0.3, "keyword_coverage": 0.25, "reasoning": 0.2},
+  {"id": 19, "accuracy": 0.9, "completeness": 0.9, "keyword_coverage": 0.83, "reasoning": 0.8},
+  {"id": 20, "accuracy": 0.9, "completeness": 0.85, "keyword_coverage": 1.0, "reasoning": 0.75},
+  {"id": 41, "accuracy": 0.15, "completeness": 0.1, "keyword_coverage": 0.2, "reasoning": 0.1},
+  {"id": 42, "accuracy": 0.0, "completeness": 0.0, "keyword_coverage": 0.0, "reasoning": 0.0},
+  {"id": 43, "accuracy": 0.5, "completeness": 0.4, "keyword_coverage": 0.67, "reasoning": 0.4},
+  {"id": 44, "accuracy": 0.9, "completeness": 0.8, "keyword_coverage": 1.0, "reasoning": 0.5},
+  {"id": 45, "accuracy": 0.85, "completeness": 0.7, "keyword_coverage": 0.75, "reasoning": 0.6},
+  {"id": 46, "accuracy": 0.1, "completeness": 0.0, "keyword_coverage": 0.2, "reasoning": 0.0},
+  {"id": 47, "accuracy": 0.0, "completeness": 0.0, "keyword_coverage": 0.0, "reasoning": 0.0},
+  {"id": 48, "accuracy": 0.35, "completeness": 0.25, "keyword_coverage": 0.6, "reasoning": 0.25},
+  {"id": 49, "accuracy": 0.8, "completeness": 0.7, "keyword_coverage": 0.8, "reasoning": 0.6},
+  {"id": 50, "accuracy": 0.0, "completeness": 0.0, "keyword_coverage": 0.2, "reasoning": 0.0}
+]

@@ -309,7 +309,7 @@ def build_ingest_prompt(materials: list[Path], isolated_dir: Path) -> str:
 核心规则（最重要，优先遵守）
 ══════════════════════════════════════════════
 
-1. 每个领域概念/术语/设备/指标/角色/流程 都必须有独立条目
+1. 每个领域概念/术语/设备/指标/角色/流程/配置/规则 都必须有独立条目
 2. 条目的第一行（核心命题）必须是对该概念的完整定义，格式为："XX是/指/用于……"
 3. 核心命题必须包含该概念的所有关键特征、属性、数值阈值、关联指标
 4. 条目中禁止出现代码片段、XML/JSON/YAML原始数据、图表ASCII艺术
@@ -317,13 +317,28 @@ def build_ingest_prompt(materials: list[Path], isolated_dir: Path) -> str:
 6. **定义段中禁止使用任何 Markdown 格式标记（如 **加粗**、*斜体* 等），保持纯文本**
 7. **定义段应当精炼简洁，2-3句话即可，不要包含长列表、数值明细或流程步骤**
 8. **数值参数、流程步骤、配置明细等详细信息应当放在"## 上下文"部分，不要塞进定义段**
+9. **aliases 字段必须包含该概念在原文中出现过的所有名称变体、同义词、缩写**
+10. **文档中提到的每个独立概念都要有条目，即使只在章节标题中出现（如"冷启动"、"乾坤袋"等）**
+
+══════════════════════════════════════════════
+必须覆盖的概念清单（关键！）
+══════════════════════════════════════════════
+
+以下概念在文档中被提及，必须为每个创建独立条目（如文档中确实存在）：
+- 指标/状态类：冷启动、热备份、无字碑、影子系统、隐身衣、晦暗、溢彩、系统健康度、峰谷差
+- 流程类：草船借箭、借东风、点睛、走线、埋点、巡河、移星斗、分流、合流、接力、种月、逆灌、收网
+- 角色类：守夜人
+- 周期类：枯水期、丰水期
+- 其他：乾坤袋、定海针
+
+如果某个概念在文档中出现过，必须为其创建条目。条目名称使用概念的标准叫法。
 
 ══════════════════════════════════════════════
 条目结构（严格遵守）
 ══════════════════════════════════════════════
 
 ---
-aliases: [别名1, 别名2]
+aliases: [别名1, 别名2, 英文对照]
 tags: [概念类型]
 status: formal
 ---
@@ -344,21 +359,30 @@ status: formal
 别名规则
 ══════════════════════════════════════════════
 aliases 字段必填，包含：
-- 该概念在文档中的其他叫法/缩写
+- 该概念在文档中的其他叫法/缩写/简称
 - 同义词或相近概念
 - 英文对照（如有）
+- 如果文档中用不同名称指代同一事物，全部列入 aliases
 
 ══════════════════════════════════════════════
 内容要求（关键！）
 ══════════════════════════════════════════════
 
 每个条目必须尽可能包含以下信息（如文档中有提到）：
-- 数值参数：阈值、范围、默认值、单位、异常值
+- 数值参数：阈值、范围、默认值、单位、异常值，**必须精确引用原文数值，不要改写或四舍五入**
 - 触发条件：什么情况下会触发/启动/激活
 - 关联行为：与其他概念的交互关系、因果链
 - 异常/故障：失败模式、错误码、应急措施
 - 流程步骤：如果是流程类概念，需包含步骤/阶段/顺序
-- 角色职责：如果是角色类概念，需包含职责/权限/操作
+- 角色职责：如果是角色类概念，需包含职责/权限/操作，**必须列出具体能做什么、不能做什么**
+
+**精确引用原则（关键！）**：
+- 配置文件中定义的每个值，必须**逐字引用原文**，例如 "severity: critical"、"unit: Hz"、"threshold: 85"
+- 代码文件中定义的每个常量/默认值/参数，必须**逐字引用原文**，例如 "MAX_RETRIES = 3"、"timeout=30"
+- TODO/FIXME 注释必须**逐字引用原文**，包括所在方法名
+- 权限配置中的每个权限项，必须列出**具体允许和禁止的操作**
+- 单位、计量、审计等配置中的每个明细，必须**逐字引用原文**
+- 禁止用模糊词语替代精确值（如不要说"定义了若干阈值"，要说"定义了 threshold: 85 的阈值"）
 
 对于流程/操作类概念，条目需要包含：
 - 前置条件（什么情况下执行）
@@ -382,12 +406,100 @@ aliases 字段必填，包含：
 **物质/资源类**：XX是系统的[本质属性]，也是系统的[重要性]。所有运作都围绕XX的[活动]展开。
 **容器类**：XX是[功能]的[容器类型]，是系统的[组成地位]，负责[职责]。
 **副产物类**：XX是[原因]后形成的[性质]副产物。它会[危害]，甚至可能导致[严重后果]。
+**配置/规则类**：XX定义了[系统/模块]的[配置/规则]，包括[主要内容]。
 
 **定义段禁止事项**：
 - 禁止使用 ** 或 * 等 Markdown 格式标记
 - 禁止在定义段中包含数值列表、配置参数、流程步骤（这些放在上下文部分）
 - 禁止使用括号补充说明（直接写入正文）
 - 定义段控制在 2-4 句话
+
+**角色类条目特殊要求**：
+- 定义段格式：XX是[职责描述]的[角色类型]，拥有/仅拥有[权限范围]。
+- 上下文中必须包含：
+  - 权限等级（level/N级）
+  - **能做什么**：逐字引用权限配置中该角色被允许的操作列表
+  - **不能做什么**：明确列出该角色被禁止的操作
+  - 限制条件（如试用期天数、需要指导、审批要求等）
+  - 晋升路径（如从XX可晋升为XX，需要什么条件）
+- 例如：外乡人是新员工的称呼，仅拥有基础查看权限。上下文中必须写明"只能查看嗡鸣度数据，不能执行启明、泄洪、织网等操作，不能修改配置，试用期90天，需在老把式指导下工作"
+
+══════════════════════════════════════════════
+覆盖率要求（非常重要！）
+══════════════════════════════════════════════
+
+- 通读每份文档，找出所有提到的概念、术语、设备、指标、角色、流程、配置、规则
+- 宁可多创建条目，不要遗漏任何概念
+- 对于文档中明确定义的概念，必须创建正式条目
+- 对于文档中提及但未详细解释的概念，创建占位文件
+- 保持条目名称与文档中的叫法一致
+
+══════════════════════════════════════════════
+配置文件和代码文件处理（关键！）
+══════════════════════════════════════════════
+
+对于 YAML/JSON/XML 配置文件：
+- **首先为整个配置文件创建一个索引条目**，名称中包含原始文件名，例如 alert_rules.yaml → "告警规则配置（alert_rules.yaml）"、metric_definitions.json → "指标定义（metric_definitions.json）"
+- 配置文件索引条目的定义段说明"XX文件定义了……"，**必须列出文件中定义的所有主要配置项/规则的名称和类型**
+- 在"## 上下文"中**逐字引用所有配置项的完整内容**，**包括**：
+  - **每个配置项的完整键路径、具体数值、数据类型、单位**
+  - 告警规则文件中定义的每个告警的**完整明细**：名称、category、severity 级别（warning/critical/emergency/info）、threshold 阈值、description 描述文字
+  - 指标定义文件中每个指标的**完整明细**：名称、unit 单位、data_type、threshold 阈值、description 描述
+  - **权限配置文件中每个角色的完整权限明细**：允许的操作、禁止的操作、权限级别、适用范围
+  - 角色权限文件中每个角色的**具体权限列表**：能做什么、不能做什么
+  - 配置文件中每个配置项的具体数值和含义，**原文引用配置值，不要改写**
+- 为文件中定义的每个配置项、规则、指标创建独立条目
+- 独立条目的 aliases 中必须包含配置文件中使用的键名/ID
+- **重要：上下文部分必须包含配置原文中的具体数值、权限值、阈值等精确信息，不能只说"定义了XX"，必须写出XX具体是什么值**
+- 例如：alert_rules.yaml 应创建"告警规则配置（alert_rules.yaml）"条目，定义段列出所有告警类型（潮涌预警、假涌过滤、严重潮涌、第一次异常记录等）和各自的 severity 级别（warning/critical/info）
+- 例如：metric_definitions.json 应创建"指标定义（metric_definitions.json）"条目，为每个指标说明其定义、unit 单位（如 Hz、ratio、percent）、阈值
+
+对于 Python 代码文件：
+- **首先为整个代码文件创建一个索引条目**，名称为"文件名（去扩展名）"，例如 vortex_protocol.py → "旋涡协议代码"、resonator.py → "谐振腔代码"
+- 代码索引条目的定义段说明"XX.py文件定义了……"
+- 在"## 上下文"中**逐字引用以下内容**：
+  - 所有 class 定义的名称和**完整继承关系**（如 class CollapseError(ResonatorError) 表示坍缩异常类继承自 ResonatorError）
+  - 所有 def 方法的名称、**完整签名**（参数列表）和简要功能
+  - 所有 TODO/FIXME/HACK 注释的**原文内容**和所在行号/方法名，**必须逐字引用 TODO 原文，不要改写**
+  - 关键常量/配置值的**名称和具体数值**（如 MAX_RETRIES=3, TIMEOUT=30, GOLDEN_TIMEOUT=60 等），**逐字引用**
+  - 异常类的**完整继承链**（如 CollapseError → ResonatorError → Exception）
+  - **方法中的关键逻辑**：返回什么值、调用了什么其他方法、有什么特殊处理
+- 然后为代码中每个重要的类、方法、函数创建独立条目
+- 条目的定义段应说明"XX是……的类/方法/函数，用于……"
+- 在"## 上下文"中说明其输入输出、关键逻辑、异常处理
+- 从代码注释和 docstring 中提取功能说明
+- 从异常类定义中提取可能的故障类型，明确列出异常类名
+- 从 TODO 注释中提取未实现功能，**明确说明"TODO: xxx"原文和所在方法**
+- **条目名称必须包含代码中使用的实际名称**，如方法名 golden_escape 应在条目中体现
+- **条目内容必须引用代码中的具体值、默认参数、异常类型等精确信息**
+
+对于 JSON 部署拓扑文件：
+- 创建"部署拓扑"条目，说明系统中各节点的类型和数量
+- 为每种节点类型创建独立条目（如 primary节点、secondary节点等）
+- 说明各节点之间的关系和职责
+
+══════════════════════════════════════════════
+跨文档关联和因果链（关键！）
+══════════════════════════════════════════════
+
+当处理多份文档时，必须在条目中建立跨文档的关联和因果关系：
+
+- **症状-原因链**：如果文档A描述了症状X，文档B解释了原因Y，在X的条目的"## 上下文"中必须写明"X可能是由Y导致的"，在Y的条目中必须写明"Y会导致X症状"
+- **工具-问题链**：如果文档提到用工具A诊断问题B，在问题B的条目中必须写明"可使用A工具进行诊断"
+- **限制-影响链**：如果技术A有局限性B，在A的条目中必须明确列出"局限性：B"
+- **事故-根因链**：如果文档记录了事故C，根因是D，在C的条目中必须写明"根因：D"，在D的条目中必须写明"曾导致C事故"
+- **权限-操作链**：如果配置文件定义了角色E的权限，在E的条目中必须逐字引用权限明细，包括**能做什么、不能做什么、权限级别、限制条件**
+- **配置-行为链**：如果配置F影响了系统行为G，在G的条目中必须写明"受F配置影响"
+- **TODO/未实现**：代码中的TODO注释必须在对应条目的"## 上下文"中**逐字引用TODO原文**，并注明"TODO原文：xxx"和所在方法
+- **诊断方法**：对于故障/异常类概念，条目中必须包含"诊断方法"或"如何检测"
+
+示例：
+- "照妖镜"条目应写明"用于检测幽灵读数"
+- "幽灵读数"条目应写明"可使用照妖镜进行诊断"
+- "镀层晦暗/老化"条目应写明"会导致清浊比下降和散斑产生"
+- "散斑"条目应写明"由镀层老化/哈基米泄漏导致"
+- "隐身衣"条目应写明"可避免回音壁和常规监控检测，但无法避免账房审计"
+- "账房"条目应写明"可检测到隐身衣无法掩盖的收支不平衡"
 
 ══════════════════════════════════════════════
 处理流程
@@ -408,8 +520,8 @@ aliases 字段必填，包含：
 
     for f in materials:
         content = extract_material_text(f)
-        if len(content) > 8000:
-            content = content[:4000] + "\n...[中间部分省略]...\n" + content[-4000:]
+        if len(content) > 12000:
+            content = content[:6000] + "\n...[中间部分省略]...\n" + content[-6000:]
         parts.append(f"\n{'='*60}\n文件: {f.relative_to(MATERIAL_DIR)}\n{'='*60}\n{content}\n")
 
     return '\n'.join(parts)
@@ -438,6 +550,12 @@ def build_tidy_prompt(kb_dir: Path) -> str:
    - 删除内容较少的重复文件
    - 注意：文件名不同但含义相同的条目也要合并
 
+   **重要约束（必须遵守）：**
+   - **禁止将 entries/ 中的正式条目移动、删除或降级为 placeholders/**
+   - **如果 entries/ 和 placeholders/ 中存在同名文件，删除 placeholders/ 中的占位版本，保留 entries/ 中的正式版本**
+   - **只能向 placeholders/ 添加新文件（用于 dangling links），不能删除或修改 placeholders/ 中已有的文件**
+   - **整理操作的目标是增加知识量，不能减少已有的正式条目**
+
 3. 补充孤立节点：
    - 检查 entries/ 下是否有条目不包含任何 [[链接]] 也没有被其他条目链接
    - 如果有，为其补充适当的 [[关联]] 链接
@@ -455,6 +573,26 @@ def build_tidy_prompt(kb_dir: Path) -> str:
 # Ingest & Tidy Execution
 # ---------------------------------------------------------------------------
 
+async def _stream_subprocess(proc: asyncio.subprocess.Process, label: str):
+    """Stream subprocess stdout/stderr to terminal in real time."""
+    async def _read_stream(stream, label_tag):
+        while True:
+            line = await stream.readline()
+            if not line:
+                break
+            text = line.decode('utf-8', errors='replace').rstrip()
+            if text:
+                print(f"  [{label_tag}] {text}", flush=True)
+
+    tasks = []
+    if proc.stdout:
+        tasks.append(asyncio.create_task(_read_stream(proc.stdout, f"{label}-out")))
+    if proc.stderr:
+        tasks.append(asyncio.create_task(_read_stream(proc.stderr, f"{label}-err")))
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
 async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
     """Run ingest using claude -p with retry logic."""
     kb_entries = isolated_dir / 'knowledge-base' / 'entries'
@@ -469,7 +607,7 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
             'claude', '-p',
             '--permission-mode', 'auto',
             '--allowed-tools', 'Write', 'Edit', 'Bash', 'Read', 'Glob',
-            '--max-budget-usd', '10',
+            '--max-budget-usd', '15',
             '--no-session-persistence',
             prompt,
         ]
@@ -486,19 +624,30 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
                 *cmd,
                 cwd=str(isolated_dir),
                 env=env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await proc.communicate()
+            await _stream_subprocess(proc, 'ingest')
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=3600)
+            except asyncio.TimeoutError:
+                log(f"  Ingest timed out after 60 minutes, killing process...")
+                proc.kill()
+                await proc.wait()
+                if attempt < MAX_RETRIES:
+                    log("Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+                return False
 
             elapsed = time.time() - start
             entry_count = len(list(kb_entries.glob('*.md')))
-            log(f"Ingest complete in {elapsed:.1f}s. Created {entry_count} entries.")
+            log(f"  Ingest complete in {elapsed:.1f}s ({elapsed/60:.1f}min). Created {entry_count} entries.")
 
             if proc.returncode != 0:
                 log(f"Warning: claude exited with code {proc.returncode}")
-                log(f"stderr: {stderr.decode()[:500]}")
                 if attempt < MAX_RETRIES:
                     log("Retrying in 5 seconds...")
                     await asyncio.sleep(5)
@@ -552,16 +701,28 @@ async def run_tidy(isolated_dir: Path) -> bool:
                 *cmd,
                 cwd=str(isolated_dir),
                 env=env,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
 
-            stdout, stderr = await proc.communicate()
+            await _stream_subprocess(proc, 'tidy')
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=600)
+            except asyncio.TimeoutError:
+                log(f"  Tidy timed out after 10 minutes, killing process...")
+                proc.kill()
+                await proc.wait()
+                if attempt < MAX_RETRIES:
+                    log("Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+                return False
 
             elapsed = time.time() - start
             new_entry_count = len(list((kb_dir / 'entries').glob('*.md')))
             new_placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
-            log(f"Tidy complete in {elapsed:.1f}s. Now: {new_entry_count} entries, {new_placeholder_count} placeholders.")
+            log(f"  Tidy complete in {elapsed:.1f}s. Now: {new_entry_count} entries, {new_placeholder_count} placeholders.")
 
             if proc.returncode != 0:
                 log(f"Warning: tidy exited with code {proc.returncode}")
@@ -612,7 +773,7 @@ class MCPServer:
                 for pid in stdout.decode().strip().split('\n'):
                     pid = pid.strip()
                     if pid:
-                        log(f"Killing existing process on port {self.port}: PID {pid}")
+                        log(f"  Killing existing process on port {self.port}: PID {pid}")
                         await asyncio.create_subprocess_exec('kill', '-9', pid)
                         await asyncio.sleep(0.5)
         except Exception:
@@ -630,12 +791,15 @@ class MCPServer:
             cmd = [
                 str(venv_python), '-m', 'mcp_server.server',
             ]
+            log(f"  Using venv python: {venv_python}")
         else:
             # Use 'uv run' directly with the uv binary
             cmd = [
                 'uv', 'run', 'python', '-m', 'mcp_server.server',
             ]
+            log(f"  Using uv run")
 
+        log(f"  Launching MCP server: {' '.join(cmd)}")
         self.process = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(self.isolated_dir),
@@ -646,8 +810,11 @@ class MCPServer:
 
         # Wait for server to be ready
         import httpx
+        log(f"  Waiting for MCP server on {self.base_url}...")
         for i in range(120):
             await asyncio.sleep(0.5)
+            if i > 0 and i % 20 == 0:
+                log(f"  Still waiting... ({i}s)")
             try:
                 async with httpx.AsyncClient(timeout=2) as client:
                     resp = await client.post(
@@ -660,12 +827,12 @@ class MCPServer:
                         headers={'Content-Type': 'application/json'},
                     )
                     if resp.status_code == 200:
-                        log(f"MCP server ready on port {self.port}")
+                        log(f"  MCP server ready on port {self.port} (after {i*0.5:.0f}s)")
                         return True
             except Exception:
                 continue
 
-        log("MCP server failed to start")
+        log("  MCP server failed to start (timeout after 60s)")
         return False
 
     async def call_tool(self, tool_name: str, arguments: dict) -> str:
@@ -742,9 +909,11 @@ class IsolatedBuilder:
 
     async def create_isolated_copy(self) -> Path:
         """Create an isolated copy of the project."""
+        log(f"Creating isolated copy...")
         self.isolated_dir = Path(tempfile.mkdtemp(prefix=f'sediment-{self.build_type}-'))
-        log(f"Isolated dir: {self.isolated_dir}")
+        log(f"  Isolated dir: {self.isolated_dir}")
 
+        log(f"  Copying project files (excluding .git, __pycache__, etc.)...")
         shutil.copytree(
             PROJECT_ROOT, self.isolated_dir, dirs_exist_ok=True,
             ignore=shutil.ignore_patterns(
@@ -752,12 +921,14 @@ class IsolatedBuilder:
                 'testcase/results', '.claude', 'node_modules',
             ),
         )
+        log(f"  Copy complete")
 
         # Ensure KB directories exist
         self.kb_dir = self.isolated_dir / 'knowledge-base'
         self.kb_dir.mkdir(exist_ok=True)
         (self.kb_dir / 'entries').mkdir(exist_ok=True)
         (self.kb_dir / 'placeholders').mkdir(exist_ok=True)
+        log(f"  KB directories created at {self.kb_dir}")
 
         return self.isolated_dir
 
@@ -773,23 +944,61 @@ class IsolatedBuilder:
     async def build_full(self):
         """Full build: ingest all files in a single claude -p call, tidy once at end."""
         materials = get_material_files()
-        log(f"\n--- Ingest all {len(materials)} files ---")
+        total_size = sum(f.stat().st_size for f in materials) / 1024  # KB
+        log(f"\n{'─'*60}")
+        log(f"Phase 1: Ingest ({len(materials)} files, {total_size:.0f}KB)")
+        log(f"{'─'*60}")
+        ingest_start = time.time()
         success = await run_ingest(self.isolated_dir, materials)
+        ingest_elapsed = time.time() - ingest_start
         if not success:
             log("Full ingest failed")
+        else:
+            log(f"Ingest phase complete in {ingest_elapsed:.1f}s")
 
+        entry_count = len(list((self.kb_dir / 'entries').glob('*.md')))
+        placeholder_count = len(list((self.kb_dir / 'placeholders').glob('*.md')))
+        log(f"  After ingest: {entry_count} entries, {placeholder_count} placeholders")
+
+        log(f"\n{'─'*60}")
+        log(f"Phase 2: Tidy")
+        log(f"{'─'*60}")
+        tidy_start = time.time()
         await run_tidy(self.isolated_dir)
+        tidy_elapsed = time.time() - tidy_start
+        log(f"Tidy phase complete in {tidy_elapsed:.1f}s")
+
+        final_entry_count = len(list((self.kb_dir / 'entries').glob('*.md')))
+        final_placeholder_count = len(list((self.kb_dir / 'placeholders').glob('*.md')))
+        log(f"  After tidy: {final_entry_count} entries, {final_placeholder_count} placeholders")
+        log(f"{'─'*60}")
 
     async def build_batched(self):
         """Batched build: ingest 1/5 at a time, tidy after each."""
         materials = get_material_files()
         batches = chunk_list(materials, 5)
         for i, batch in enumerate(batches):
-            log(f"\n--- Batch {i + 1}/5 ---")
+            batch_size = sum(f.stat().st_size for f in batch) / 1024  # KB
+            log(f"\n{'─'*60}")
+            log(f"Phase {i+1}/5: Batch ingest ({len(batch)} files, {batch_size:.0f}KB)")
+            log(f"{'─'*60}")
+            batch_start = time.time()
             success = await run_ingest(self.isolated_dir, batch)
             if success:
+                log(f"  Batch ingest complete in {time.time() - batch_start:.1f}s")
+                log(f"  Running tidy...")
+                tidy_start = time.time()
                 await run_tidy(self.isolated_dir)
+                log(f"  Tidy complete in {time.time() - tidy_start:.1f}s")
+            else:
+                log(f"  Batch ingest failed after {time.time() - batch_start:.1f}s")
             await asyncio.sleep(1)
+
+        final_entry_count = len(list((self.kb_dir / 'entries').glob('*.md')))
+        final_placeholder_count = len(list((self.kb_dir / 'placeholders').glob('*.md')))
+        log(f"\n{'─'*60}")
+        log(f"Batched build complete: {final_entry_count} entries, {final_placeholder_count} placeholders")
+        log(f"{'─'*60}")
 
     def start_mcp_server(self, port: int | None = None) -> MCPServer:
         """Start the MCP server. Returns the server instance."""
@@ -800,6 +1009,8 @@ class IsolatedBuilder:
 
     async def cleanup(self):
         """Stop MCP server, clean up background processes, remove isolated directory."""
+        if self.isolated_dir:
+            log(f"Cleaning up isolated directory: {self.isolated_dir}")
         # Kill any lingering claude subprocesses spawned in this isolated dir
         try:
             pkill_proc = await asyncio.create_subprocess_exec(
@@ -817,9 +1028,11 @@ class IsolatedBuilder:
         if self.isolated_dir and self.isolated_dir.exists():
             try:
                 shutil.rmtree(self.isolated_dir, ignore_errors=True)
-                log(f"Cleaned up: {self.isolated_dir}")
+                log(f"  Cleanup complete: {self.isolated_dir}")
             except Exception as e:
-                log(f"Cleanup warning: {e}")
+                log(f"  Cleanup warning: {e}")
+        else:
+            log(f"  Cleanup skipped (no isolated dir)")
 
 
 # ---------------------------------------------------------------------------

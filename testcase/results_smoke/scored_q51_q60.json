@@ -1,0 +1,12 @@
+[
+  {"id": 51, "accuracy": 0.8, "completeness": 0.6, "keyword_coverage": 0.5, "reasoning": 0.6},
+  {"id": 52, "accuracy": 0.65, "completeness": 0.6, "keyword_coverage": 0.5, "reasoning": 0.5},
+  {"id": 53, "accuracy": 0.9, "completeness": 0.85, "keyword_coverage": 0.9, "reasoning": 0.8},
+  {"id": 54, "accuracy": 0.4, "completeness": 0.3, "keyword_coverage": 0.25, "reasoning": 0.4},
+  {"id": 55, "accuracy": 0.7, "completeness": 0.6, "keyword_coverage": 0.6, "reasoning": 0.5},
+  {"id": 56, "accuracy": 0.75, "completeness": 0.65, "keyword_coverage": 0.75, "reasoning": 0.6},
+  {"id": 57, "accuracy": 0.8, "completeness": 0.75, "keyword_coverage": 0.75, "reasoning": 0.7},
+  {"id": 58, "accuracy": 0.85, "completeness": 0.65, "keyword_coverage": 0.75, "reasoning": 0.6},
+  {"id": 59, "accuracy": 0.3, "completeness": 0.3, "keyword_coverage": 0.0, "reasoning": 0.2},
+  {"id": 60, "accuracy": 0.85, "completeness": 0.85, "keyword_coverage": 0.83, "reasoning": 0.6}
+]

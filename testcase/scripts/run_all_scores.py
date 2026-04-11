@@ -65,10 +65,15 @@ async def run_concept_test(server: MCPServer, judge_file: Path) -> list[dict]:
 
     results = []
     total = len(judge_data['terms'])
+    empty_count = 0
 
     for i, (concept, defn) in enumerate(judge_data['terms'].items()):
         question = f"什么是{concept}？"
+        q_start = time.time()
+        log(f"  [{i+1}/{total}] {question}")
         answer_text = await server.call_tool('knowledge_ask', {'question': question})
+        q_elapsed = time.time() - q_start
+        log(f"    -> {len(answer_text)} chars in {q_elapsed:.1f}s")
 
         try:
             result = json.loads(answer_text)
@@ -78,6 +83,12 @@ async def run_concept_test(server: MCPServer, judge_file: Path) -> list[dict]:
             answer = answer_text
             sources = []
 
+        if not answer:
+            empty_count += 1
+            if empty_count >= 3 and i < 10:
+                log(f"  ERROR: First {empty_count} answers are empty — KB likely empty or server misconfigured")
+                raise RuntimeError(f"Empty answers detected early in concept test ({empty_count}/{i+1} empty)")
+
         results.append({
             'concept': concept,
             'question': question,
@@ -85,9 +96,6 @@ async def run_concept_test(server: MCPServer, judge_file: Path) -> list[dict]:
             'sources': sources,
             'definition': defn.get('definition', ''),
         })
-
-        if (i + 1) % 20 == 0:
-            log(f"Concept test: {i + 1}/{total}")
 
     log(f"Concept test complete: {len(results)}/{total}")
     return results
@@ -101,9 +109,14 @@ async def run_qa_test(server: MCPServer, judge_file: Path) -> list[dict]:
     results = []
     questions = judge_data.get('questions', [])
     total = len(questions)
+    empty_count = 0
 
     for i, q in enumerate(questions):
+        q_start = time.time()
+        log(f"  [{i+1}/{total}] {q['question'][:60]}...")
         answer_text = await server.call_tool('knowledge_ask', {'question': q['question']})
+        q_elapsed = time.time() - q_start
+        log(f"    -> {len(answer_text)} chars in {q_elapsed:.1f}s")
 
         try:
             result = json.loads(answer_text)
@@ -112,6 +125,12 @@ async def run_qa_test(server: MCPServer, judge_file: Path) -> list[dict]:
         except (json.JSONDecodeError, TypeError):
             answer = answer_text
             sources = []
+
+        if not answer:
+            empty_count += 1
+            if empty_count >= 3 and i < 10:
+                log(f"  ERROR: First {empty_count} answers are empty — KB likely empty or server misconfigured")
+                raise RuntimeError(f"Empty answers detected early in QA test ({empty_count}/{i+1} empty)")
 
         results.append({
             'id': q['id'],
@@ -122,9 +141,6 @@ async def run_qa_test(server: MCPServer, judge_file: Path) -> list[dict]:
             'standard_answer': q.get('standard_answer', ''),
             'expected_keywords': q.get('expected_keywords', []),
         })
-
-        if (i + 1) % 20 == 0:
-            log(f"QA test: {i + 1}/{total}")
 
     log(f"QA test complete: {len(results)}/{total}")
     return results
@@ -151,54 +167,85 @@ async def build_and_test(build_type: str, output_dir: Path, port: int) -> dict:
     build_start = time.time()
 
     try:
-        # Step 1: Create isolated copy and build
+        # Step 1: Create isolated copy
+        log(f"\n[STEP 1/5] Creating isolated project copy...")
+        step_start = time.time()
         await builder.create_isolated_copy()
+        log(f"  Isolated copy ready in {time.time() - step_start:.1f}s")
+
+        # Step 2: Build KB
+        log(f"\n[STEP 2/5] Building knowledge base ({build_type})...")
+        step_start = time.time()
         await builder.build()
+        log(f"  Build phase complete in {time.time() - step_start:.1f}s")
 
         # Save KB snapshot
+        log(f"\n[STEP 2b] Saving KB snapshot...")
         kb_snapshot = output_dir / f'kb_{build_type}'
+        entry_count = 0
+        placeholder_count = 0
         if builder.kb_dir and builder.kb_dir.exists():
+            snap_start = time.time()
             shutil.copytree(builder.kb_dir, kb_snapshot, dirs_exist_ok=True)
             entry_count = len(list((builder.kb_dir / 'entries').glob('*.md')))
             placeholder_count = len(list((builder.kb_dir / 'placeholders').glob('*.md')))
-            log(f"KB snapshot saved: {entry_count} entries, {placeholder_count} placeholders")
+            log(f"  KB snapshot saved in {time.time() - snap_start:.1f}s: {entry_count} entries, {placeholder_count} placeholders")
 
-        # Step 2: Start MCP server
+        # Validate KB has entries before proceeding
+        if entry_count == 0:
+            log("  ERROR: Knowledge base is empty after build. Aborting.")
+            results['error'] = 'KB empty after build — ingest may have failed or timed out'
+            return results
+
+        # Step 3: Start MCP server
+        log(f"\n[STEP 3/5] Starting MCP server on port {port}...")
+        step_start = time.time()
         server = builder.start_mcp_server(port=port)
         started = await server.start()
         if not started:
-            log("Failed to start MCP server")
+            log("  FAILED to start MCP server")
             results['error'] = 'MCP server failed to start'
             return results
+        log(f"  MCP server ready in {time.time() - step_start:.1f}s")
 
         try:
-            # Step 3: Run concept test
-            log("\nRunning TC-01: Concept Coverage...")
+            # Step 4: Run concept test
+            log(f"\n[STEP 4/5] Running TC-01: Concept Coverage (100 questions)...")
+            step_start = time.time()
             concept_results = await run_concept_test(server, JUDGE_DIR / '概念.json')
+            log(f"  TC-01 complete in {time.time() - step_start:.1f}s")
 
             # Save concept answers
             concept_answers_file = output_dir / f'concept_answers_{build_type}.json'
             with open(concept_answers_file, 'w', encoding='utf-8') as f:
                 json.dump({'results': concept_results}, f, ensure_ascii=False, indent=2)
+            log(f"  Concept answers saved to {concept_answers_file.name}")
 
             # Score TC-01
+            log(f"\n  Scoring TC-01...")
             from score_tc01 import run_scoring as score_tc01
             tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir, build_type)
             results['tc01'] = tc01_result
+            log(f"  TC-01 score: {tc01_result['final_score']:.1f}/40")
 
             # Run QA test
-            log("\nRunning TC-02: QA Accuracy...")
+            log(f"\n[STEP 5/5] Running TC-02: QA Accuracy (100 questions)...")
+            step_start = time.time()
             qa_results = await run_qa_test(server, JUDGE_DIR / '问答.json')
+            log(f"  TC-02 complete in {time.time() - step_start:.1f}s")
 
             # Save QA answers
             qa_answers_file = output_dir / f'qa_answers_{build_type}.json'
             with open(qa_answers_file, 'w', encoding='utf-8') as f:
                 json.dump({'results': qa_results}, f, ensure_ascii=False, indent=2)
+            log(f"  QA answers saved to {qa_answers_file.name}")
 
             # Score TC-02
+            log(f"\n  Scoring TC-02...")
             from score_tc02 import run_scoring as score_tc02
             tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir, build_type)
             results['tc02'] = tc02_result
+            log(f"  TC-02 score: {tc02_result['final_score']:.1f}/60")
 
             # Combined score
             total_score = tc01_result['final_score'] + tc02_result['final_score']
@@ -210,6 +257,7 @@ async def build_and_test(build_type: str, output_dir: Path, port: int) -> dict:
             log(f"{build_type} build total score: {total_score:.1f}/100")
             log(f"  TC-01: {tc01_result['final_score']:.1f}/40")
             log(f"  TC-02: {tc02_result['final_score']:.1f}/60")
+            log(f"  Total time: {results['duration_seconds']:.0f}s")
             log(f"{'='*60}")
 
         finally:
@@ -281,10 +329,14 @@ async def main():
     )
     args = parser.parse_args()
 
+    log(f"\n{'#'*60}")
+    log(f"Sediment 全流程测试运行器")
+    log(f"{'#'*60}")
     log(f"Project root: {PROJECT_ROOT}")
     if not args.skip_build:
         log(f"Material files: {len(get_material_files())}")
     log(f"Test cases: 概念(100), 问答(100)")
+    log(f"Mode: {'SKIP-BUILD (score only)' if args.skip_build else f'build={args.build_type}'}")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -296,14 +348,22 @@ async def main():
         build_types.append('batched')
 
     all_results = {}
+    overall_start = time.time()
 
     if args.skip_build:
+        log(f"\nScoring existing results for: {', '.join(build_types)}")
         for build_type in build_types:
             all_results[build_type] = score_existing(build_type, RESULTS_DIR)
     else:
         for i, build_type in enumerate(build_types):
             port = MCP_PORT_BASE + (i * 100)
+            label = "全量" if build_type == 'full' else "分批"
+            log(f"\n{'*'*60}")
+            log(f"BUILD {i+1}/{len(build_types)}: {label} ({build_type})")
+            log(f"{'*'*60}")
             all_results[build_type] = await build_and_test(build_type, RESULTS_DIR, port)
+            elapsed = time.time() - overall_start
+            log(f"\n  Overall elapsed: {elapsed:.0f}s ({elapsed/60:.1f}min)")
 
     # Calculate average
     scores = []
@@ -336,12 +396,13 @@ async def main():
 
         with open(RESULTS_DIR / 'scorecard.json', 'w', encoding='utf-8') as f:
             json.dump(scorecard, f, ensure_ascii=False, indent=2)
+        log(f"Scorecard saved: {RESULTS_DIR / 'scorecard.json'}")
 
         # Write markdown scorecard
         md_lines = [
             "# Sediment 测试评分卡",
             "",
-            f"**平均分：{avg_score:.1f}/100** {'✅ 通过' if avg_score >= 80 else '❌ 未通过'}",
+            f"**平均分：{avg_score:.1f}/100** {'通过' if avg_score >= 80 else '未通过'}",
             "",
             "| 构建方式 | TC-01 (40分) | TC-02 (60分) | 总分 |",
             "|---------|-------------|-------------|------|",
@@ -357,6 +418,7 @@ async def main():
 
         with open(RESULTS_DIR / 'scorecard.md', 'w', encoding='utf-8') as f:
             f.write('\n'.join(md_lines))
+        log(f"Scorecard saved: {RESULTS_DIR / 'scorecard.md'}")
 
         # Generate HTML report
         if not args.no_report:
@@ -373,6 +435,11 @@ async def main():
     else:
         log("No valid scores obtained")
         return 0
+
+    overall_elapsed = time.time() - overall_start
+    log(f"\n{'#'*60}")
+    log(f"ALL DONE. Total elapsed: {overall_elapsed:.0f}s ({overall_elapsed/60:.1f}min)")
+    log(f"{'#'*60}")
 
     return avg_score
 

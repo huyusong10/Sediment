@@ -35,28 +35,22 @@ def _build_project(tmp_path: Path) -> tuple[Path, Path]:
         kb_path / "entries" / "热备份.md",
         """
         ---
+        type: concept
+        status: fact
         aliases: [热切换]
-        status: formal
+        sources:
+          - backup_design.md
         ---
         # 热备份
 
-        热备份是在切换前准备好[[金蝉脱壳]]和[[回音壁]]的接管能力。
+        热备份是在切换前准备好[[金蝉脱壳]]和[[回音壁]]接管能力的备份路径。
 
-        ## Context
+        ## Scope
         适用于需要连续服务且必须缩短恢复时间的系统，在主备或双活架构中尤为常见。
-
-        ## Why This Matters
-        它让故障恢复从临时抢修变成受控切换，避免在事故期间再创建新的风险点。
-
-        ## Common Pitfalls
-        常见误区是只准备数据副本，却没有验证[[金蝉脱壳]]与[[回音壁]]的协同接管链路。
 
         ## Related
         - [[金蝉脱壳]] - 切换策略
         - [[回音壁]] - 观测同步
-
-        ## Source
-        - backup_design.md
         """,
     )
 

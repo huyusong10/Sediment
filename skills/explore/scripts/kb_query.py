@@ -8,17 +8,17 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from skills.tidy.scripts.tidy_utils import (
     count_placeholder_refs,
+    extract_wikilinks,
     find_dangling_links,
     find_orphan_entries,
     graph_links_from_text,
+    graph_relevant_text,
+    split_frontmatter,
+    split_sections,
 )
 
-LINK_PATTERN = re.compile(r"\[\[([^\]]+)\]\]")
-HEADING_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
 STOP_WORDS = {
     "什么",
     "哪些",
@@ -82,13 +82,8 @@ SENTENCE_STYLE_MARKERS = (
     "时",
     "须",
 )
-REQUIRED_FORMAL_SECTIONS = (
-    "Context",
-    "Why This Matters",
-    "Common Pitfalls",
-    "Related",
-    "Source",
-)
+FORMAL_ENTRY_TYPES = {"concept", "lesson"}
+VALID_STATUSES = {"fact", "inferred", "disputed"}
 
 
 def inventory(kb_path: str | Path) -> dict[str, Any]:
@@ -119,11 +114,11 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
     for name, doc in docs.items():
         doc["inbound_count"] = inbound_counts.get(name, 0)
 
+    entries = sorted(name for name, doc in docs.items() if doc["kind"] == "formal")
+    placeholders = sorted(name for name, doc in docs.items() if doc["kind"] == "placeholder")
     canonical_entries = sorted(
         name for name, doc in docs.items() if doc["kind"] == "formal" and doc["is_canonical"]
     )
-    entries = sorted(name for name, doc in docs.items() if doc["kind"] == "formal")
-    placeholders = sorted(name for name, doc in docs.items() if doc["kind"] == "placeholder")
 
     return {
         "kb_path": str(root),
@@ -143,6 +138,7 @@ def shortlist(
 ) -> list[dict[str, Any]]:
     data = inventory_data or inventory(kb_path)
     question_lower = question.lower()
+    question_mode = _question_mode(question)
     terms = _extract_terms(question)
     results = []
 
@@ -170,23 +166,28 @@ def shortlist(
                 evidence_score += 50
                 matched_terms.append(term)
             if term_lower in doc["summary"].lower():
-                evidence_score += 18
-            if term_lower in doc["body"].lower():
+                evidence_score += 20
+            if term_lower in doc["search_text"].lower():
                 evidence_score += 8
 
         if evidence_score <= 0:
             continue
 
         score += evidence_score
+        score += min(doc["inbound_count"], 8)
 
-        if doc["is_canonical"]:
-            score += 8
         if doc["kind"] == "placeholder":
             score -= 22
+        elif doc["entry_type"] == "concept":
+            score += 12
         else:
             score += 4
 
-        score += min(doc["inbound_count"], 8)
+        if question_mode == "definition" and doc["entry_type"] == "concept":
+            score += 22
+        if question_mode in {"guidance", "risk"} and doc["entry_type"] == "lesson":
+            score += 22
+
         if score <= 0:
             continue
 
@@ -218,9 +219,8 @@ def neighbors(
     visited: dict[str, dict[str, Any]] = {}
 
     for name in names:
-        if name not in docs:
-            continue
-        queue.append((name, 0, None))
+        if name in docs:
+            queue.append((name, 0, None))
 
     while queue and len(visited) < limit:
         current, current_depth, via = queue.popleft()
@@ -239,9 +239,8 @@ def neighbors(
 
         next_targets = sorted(set(docs[current]["links"]) | _incoming_neighbors(current, docs))
         for target in next_targets:
-            if target not in docs:
-                continue
-            queue.append((target, current_depth + 1, current))
+            if target in docs:
+                queue.append((target, current_depth + 1, current))
 
     ordered = sorted(visited.values(), key=lambda item: (item["depth"], item["name"]))
     return ordered[:limit]
@@ -265,23 +264,21 @@ def snippets(
         if doc is None:
             continue
 
-        picked = []
-        passages = _candidate_passages(doc)
         scored = []
-        for section, passage in passages:
-            score = _score_passage(section, passage, terms)
+        for section, passage in _candidate_passages(doc):
+            score = _score_passage(doc["entry_type"], section, passage, terms)
             scored.append((score, section, _truncate(passage, snippet_char_limit)))
 
         scored.sort(key=lambda item: (-item[0], item[1]))
-        for _, section, passage in scored[:max_snippets_per_entry]:
-            picked.append({"section": section, "text": passage})
-
         result[name] = {
             "kind": doc["kind"],
             "summary": doc["summary"],
             "aliases": doc["aliases"],
             "links": doc["links"],
-            "snippets": picked,
+            "snippets": [
+                {"section": section, "text": passage}
+                for _, section, passage in scored[:max_snippets_per_entry]
+            ],
         }
 
     return result
@@ -394,86 +391,70 @@ def validate_entry(
 
     assert text is not None
     name = name or "UNKNOWN"
-    kind = kind or "formal"
 
-    frontmatter, body = _split_frontmatter(text)
-    sections, preamble = _parse_sections(body)
+    frontmatter, body = split_frontmatter(text)
+    sections, _ = split_sections(body)
+    entry_type = _infer_entry_type(
+        frontmatter=frontmatter,
+        fallback_kind=kind or "formal",
+        title=name,
+        sections=sections,
+    )
+    actual_kind = "placeholder" if entry_type == "placeholder" else "formal"
+    summary = _extract_summary(body)
+    related_links = extract_wikilinks(sections.get("Related", ""))
+    sources = _normalize_sources(frontmatter.get("sources"))
     hard_failures = []
     warnings = []
 
-    if kind == "placeholder":
-        if frontmatter.get("status") != "placeholder":
-            hard_failures.append("placeholder must declare status: placeholder")
-        if "#status/placeholder" not in body:
-            hard_failures.append("placeholder must include #status/placeholder marker")
-        if "Needs human or agent" not in body:
-            hard_failures.append("placeholder must include a next-step checklist")
-        if "Appears in:" not in body and "Referenced in:" not in body:
-            warnings.append("placeholder should record where it appears")
-        return {
-            "name": name,
-            "kind": kind,
-            "valid": not hard_failures,
-            "hard_failures": hard_failures,
-            "warnings": warnings,
-            "metrics": {
-                "inline_link_count": len(_extract_links(body)),
-                "missing_sections": [],
-            },
-        }
+    raw_type = str(frontmatter.get("type", "")).strip()
+    if raw_type != entry_type:
+        hard_failures.append(f"frontmatter.type must be '{entry_type}'")
 
-    summary = _extract_summary(body)
-    lesson_like = _is_sentence_style(name) or _looks_like_lesson(summary)
+    if entry_type == "placeholder":
+        if not summary:
+            hard_failures.append("placeholder must contain a gap description in the body")
+    else:
+        status = str(frontmatter.get("status", "")).strip()
+        if status not in VALID_STATUSES:
+            hard_failures.append(
+                "formal entry must declare frontmatter.status as fact, inferred, or disputed"
+            )
+        if not sources:
+            hard_failures.append("formal entry must declare at least one frontmatter.sources item")
+        if not summary:
+            hard_failures.append("entry must contain a substantive summary/core proposition")
 
-    missing_sections = [section for section in REQUIRED_FORMAL_SECTIONS if section not in sections]
-    for section in missing_sections:
-        hard_failures.append(f"missing required section: {section}")
+    if entry_type == "concept":
+        if not _is_substantive(sections.get("Scope", "")):
+            hard_failures.append("concept entry must include a substantive Scope section")
+        if not related_links:
+            hard_failures.append("concept entry must include at least one Related wikilink")
+    elif entry_type == "lesson":
+        for section_name in ("Trigger", "Why", "Risks"):
+            if not _is_substantive(sections.get(section_name, "")):
+                hard_failures.append(
+                    f"lesson entry must include a substantive {section_name} section"
+                )
+        if not related_links:
+            hard_failures.append("lesson entry must include at least one Related wikilink")
 
-    if lesson_like and "Evidence / Reasoning" not in sections:
-        hard_failures.append("lesson-style entry must include section: Evidence / Reasoning")
-
-    inline_link_count = _count_inline_links(body)
-    if inline_link_count < 2:
-        hard_failures.append("formal entry must contain at least 2 inline wikilinks")
-
-    for section_name in ("Context", "Why This Matters", "Common Pitfalls"):
-        content = sections.get(section_name, "")
-        if not _is_substantive(content):
-            hard_failures.append(f"section too short or empty: {section_name}")
-
-    if lesson_like and not _is_substantive(sections.get("Evidence / Reasoning", "")):
-        hard_failures.append("section too short or empty: Evidence / Reasoning")
-
-    related_links = len(_extract_links(sections.get("Related", "")))
-    if related_links < 2:
-        hard_failures.append("Related section must mention at least 2 linked entries")
-
-    source_refs = len(_extract_links(sections.get("Source", ""))) + len(
-        [line for line in sections.get("Source", "").splitlines() if line.strip().startswith("-")]
-    )
-    if source_refs < 1:
-        hard_failures.append("Source section must contain at least 1 source reference")
-
-    if not summary:
-        hard_failures.append("entry must contain a substantive summary/core proposition")
-    elif len(summary) > 220:
+    if sources and len(sources) != len(set(sources)):
+        warnings.append("frontmatter.sources contains duplicate entries")
+    if summary and len(summary) > 220:
         warnings.append("summary is longer than the preferred queryable size")
-
-    if not preamble.strip():
-        warnings.append("entry preamble is empty")
 
     return {
         "name": name,
-        "kind": kind,
+        "kind": actual_kind,
+        "entry_type": entry_type,
         "valid": not hard_failures,
         "hard_failures": hard_failures,
         "warnings": warnings,
         "metrics": {
-            "inline_link_count": inline_link_count,
-            "missing_sections": missing_sections,
-            "related_link_count": related_links,
-            "source_ref_count": source_refs,
-            "lesson_like": lesson_like,
+            "summary_length": len(summary),
+            "related_link_count": len(related_links),
+            "source_count": len(sources),
         },
     }
 
@@ -486,30 +467,38 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
     entry_validations = []
     for name in data["entries"]:
         doc = docs[name]
-        validation = validate_entry(path=doc["path"], kind="formal", name=name)
-        entry_validations.append(validation)
+        entry_validations.append(validate_entry(path=doc["path"], kind="formal", name=name))
 
     hard_fail_entries = [item["name"] for item in entry_validations if item["hard_failures"]]
+    missing_scope = [
+        item["name"]
+        for item in entry_validations
+        if "concept entry must include a substantive Scope section" in item["hard_failures"]
+    ]
+    missing_trigger = [
+        item["name"]
+        for item in entry_validations
+        if "lesson entry must include a substantive Trigger section" in item["hard_failures"]
+    ]
     missing_why = [
         item["name"]
         for item in entry_validations
-        if any("Why This Matters" in failure for failure in item["hard_failures"])
+        if "lesson entry must include a substantive Why section" in item["hard_failures"]
     ]
-    missing_pitfalls = [
+    missing_risks = [
         item["name"]
         for item in entry_validations
-        if any("Common Pitfalls" in failure for failure in item["hard_failures"])
+        if "lesson entry must include a substantive Risks section" in item["hard_failures"]
     ]
-    weak_inline_links = [
+    weak_related = [
         item["name"]
         for item in entry_validations
-        if item["metrics"]["inline_link_count"] < 2
+        if item["metrics"]["related_link_count"] == 0
     ]
 
     placeholder_refs = count_placeholder_refs(str(root))
     dangling = find_dangling_links(str(root))
     orphans = find_orphan_entries(str(root))
-
     promotable_placeholders = [
         {
             "name": item["placeholder"],
@@ -522,7 +511,7 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
 
     canonical_gaps: dict[str, set[str]] = defaultdict(set)
     for doc in docs.values():
-        if doc["kind"] != "formal" or not _is_sentence_style(doc["name"]):
+        if doc["kind"] != "formal":
             continue
         for target in doc["links"]:
             target_doc = docs.get(target)
@@ -537,15 +526,25 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
     return {
         "kb_path": str(root),
         "formal_entry_count": len(data["entries"]),
+        "concept_entry_count": sum(
+            1 for name in data["entries"] if docs[name]["entry_type"] == "concept"
+        ),
+        "lesson_entry_count": sum(
+            1 for name in data["entries"] if docs[name]["entry_type"] == "lesson"
+        ),
         "placeholder_count": len(data["placeholders"]),
         "hard_fail_entry_count": len(hard_fail_entries),
         "hard_fail_entries": sorted(hard_fail_entries),
+        "missing_scope_count": len(missing_scope),
+        "missing_scope_entries": sorted(missing_scope),
+        "missing_trigger_count": len(missing_trigger),
+        "missing_trigger_entries": sorted(missing_trigger),
         "missing_why_count": len(missing_why),
         "missing_why_entries": sorted(missing_why),
-        "missing_common_pitfalls_count": len(missing_pitfalls),
-        "missing_common_pitfalls_entries": sorted(missing_pitfalls),
-        "weak_inline_link_count": len(weak_inline_links),
-        "weak_inline_link_entries": sorted(weak_inline_links),
+        "missing_risks_count": len(missing_risks),
+        "missing_risks_entries": sorted(missing_risks),
+        "weak_related_count": len(weak_related),
+        "weak_related_entries": sorted(weak_related),
         "dangling_link_count": len(dangling),
         "dangling_links": dangling[:100],
         "orphan_entry_count": len(orphans),
@@ -606,6 +605,12 @@ def prepare_explore_context(
             "formal_entry_count": len(data["entries"]),
             "placeholder_count": len(data["placeholders"]),
             "alias_count": len(data["aliases"]),
+            "concept_entry_count": sum(
+                1 for name in data["entries"] if data["docs"][name]["entry_type"] == "concept"
+            ),
+            "lesson_entry_count": sum(
+                1 for name in data["entries"] if data["docs"][name]["entry_type"] == "lesson"
+            ),
         },
         "initial_shortlist": seeds,
         "expanded_candidates": expanded,
@@ -615,78 +620,77 @@ def prepare_explore_context(
 
 def _parse_doc(path: Path, kind: str) -> dict[str, Any]:
     content = path.read_text(encoding="utf-8")
-    frontmatter, body = _split_frontmatter(content)
+    frontmatter, body = split_frontmatter(content)
+    sections, _ = split_sections(body)
     aliases = frontmatter.get("aliases") or []
     if not isinstance(aliases, list):
         aliases = []
-    actual_kind = (
-        "placeholder"
-        if kind == "placeholder" or frontmatter.get("status") == "placeholder"
-        else "formal"
+
+    entry_type = _infer_entry_type(
+        frontmatter=frontmatter,
+        fallback_kind=kind,
+        title=path.stem,
+        sections=sections,
     )
+    actual_kind = "placeholder" if entry_type == "placeholder" else "formal"
 
     return {
         "name": path.stem,
         "path": str(path),
         "kind": actual_kind,
+        "entry_type": entry_type,
+        "status": str(frontmatter.get("status", "")).strip(),
         "aliases": [str(alias).strip() for alias in aliases if str(alias).strip()],
+        "sources": _normalize_sources(frontmatter.get("sources")),
         "summary": _extract_summary(body),
-        "links": graph_links_from_text(body, kind=actual_kind),
+        "links": graph_links_from_text(content, kind=actual_kind),
         "body": body,
-        "sections": list(_parse_sections(body)[0].keys()),
-        "is_canonical": actual_kind != "placeholder" and not _is_sentence_style(path.stem),
+        "sections_map": sections,
+        "sections": list(sections.keys()),
+        "search_text": graph_relevant_text(content, kind=actual_kind),
+        "is_canonical": entry_type == "concept",
     }
 
 
-def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    match = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
-    if not match:
-        return {}, text
-    payload = yaml.safe_load(match.group(1)) or {}
-    if not isinstance(payload, dict):
-        payload = {}
-    return payload, text[match.end() :]
+def _infer_entry_type(
+    *,
+    frontmatter: dict[str, Any],
+    fallback_kind: str,
+    title: str,
+    sections: dict[str, str],
+) -> str:
+    raw_type = str(frontmatter.get("type", "")).strip()
+    if raw_type in {"concept", "lesson", "placeholder"}:
+        return raw_type
+    if (
+        fallback_kind == "placeholder"
+        or str(frontmatter.get("status", "")).strip() == "placeholder"
+    ):
+        return "placeholder"
+    if "Trigger" in sections or "Why" in sections or "Risks" in sections:
+        return "lesson"
+    if _is_sentence_style(title):
+        return "lesson"
+    return "concept"
 
 
-def _parse_sections(body: str) -> tuple[dict[str, str], str]:
-    current = "__preamble__"
-    buckets: dict[str, list[str]] = defaultdict(list)
-    for line in body.splitlines():
-        heading = HEADING_PATTERN.match(line.strip())
-        if heading:
-            current = heading.group(1).strip()
-            continue
-        buckets[current].append(line)
-
-    preamble = "\n".join(buckets.pop("__preamble__", [])).strip()
-    sections = {name: "\n".join(lines).strip() for name, lines in buckets.items()}
-    return sections, preamble
+def _normalize_sources(raw_sources: Any) -> list[str]:
+    if not isinstance(raw_sources, list):
+        return []
+    return [str(item).strip() for item in raw_sources if str(item).strip()]
 
 
 def _extract_summary(body: str) -> str:
-    cleaned = re.sub(r"^#{1,6}\s+[^\n]+\n?", "", body, flags=re.MULTILINE).strip()
-    blocks = re.split(r"\n\s*\n", cleaned)
-    for block in blocks:
+    _, preamble = split_sections(body)
+    if preamble:
+        return _truncate(_first_sentences(_compress_whitespace(preamble), 2), 260)
+
+    for block in re.split(r"\n\s*\n", body):
         text = _compress_whitespace(block)
-        if not text:
-            continue
-        if text.startswith("#status/placeholder"):
-            continue
-        if text.startswith("- [ ] Needs human or agent"):
-            continue
-        if text.startswith("## "):
+        if not text or text.startswith("## "):
             continue
         return _truncate(_first_sentences(text, 2), 260)
     return ""
-
-
-def _extract_links(text: str) -> list[str]:
-    links = []
-    for raw in LINK_PATTERN.findall(text):
-        target = raw.split("|")[0].split("#")[0].strip()
-        if target:
-            links.append(target)
-    return list(dict.fromkeys(links))
 
 
 def _extract_terms(question: str) -> list[str]:
@@ -706,27 +710,21 @@ def _incoming_neighbors(name: str, docs: dict[str, dict[str, Any]]) -> set[str]:
 
 
 def _candidate_passages(doc: dict[str, Any]) -> list[tuple[str, str]]:
-    sections, preamble = _parse_sections(doc["body"])
     passages = []
-    if preamble:
-        passages.append(("Summary", preamble))
-    for section, content in sections.items():
-        if not content:
-            continue
-        if section == "Source":
-            continue
-        passages.append((section, content))
+    if doc["summary"]:
+        passages.append(("Summary", doc["summary"]))
+    for section, content in doc["sections_map"].items():
+        if content and section != "Source":
+            passages.append((section, content))
     return passages
 
 
-def _score_passage(section: str, passage: str, terms: list[str]) -> int:
+def _score_passage(entry_type: str, section: str, passage: str, terms: list[str]) -> int:
     score = 5
-    if section == "Why This Matters":
-        score += 10
-    if section == "Common Pitfalls":
-        score += 8
-    if section == "Evidence / Reasoning":
-        score += 8
+    if entry_type == "concept" and section == "Scope":
+        score += 12
+    if entry_type == "lesson" and section in {"Trigger", "Why", "Risks"}:
+        score += 12
     lowered = passage.lower()
     for term in terms:
         if term.lower() in lowered:
@@ -734,41 +732,33 @@ def _score_passage(section: str, passage: str, terms: list[str]) -> int:
     return score
 
 
+def _question_mode(question: str) -> str:
+    lowered = question.lower()
+    if any(marker in question for marker in ("什么是", "定义", "含义")):
+        return "definition"
+    if any(marker in question for marker in ("为什么", "原因", "为何")):
+        return "guidance"
+    if any(marker in question for marker in ("风险", "坑", "误区", "避免")):
+        return "risk"
+    if "how" in lowered or "when" in lowered:
+        return "guidance"
+    return "open"
+
+
 def _is_substantive(text: str) -> bool:
     if not text:
         return False
-    bullets = [line for line in text.splitlines() if line.strip().startswith(("-", "*"))]
     compact = re.sub(r"\s+", "", re.sub(r"\[\[[^\]]+\]\]", "", text))
-    return len(compact) >= 40 or len(bullets) >= 2
-
-
-def _count_inline_links(body: str) -> int:
-    lines = []
-    current_section = None
-    for line in body.splitlines():
-        heading = HEADING_PATTERN.match(line.strip())
-        if heading:
-            current_section = heading.group(1).strip()
-            continue
-        if current_section in {"Related", "Source"}:
-            continue
-        lines.append(line)
-    return len(_extract_links("\n".join(lines)))
+    bullets = [line for line in text.splitlines() if line.strip().startswith(("-", "*"))]
+    return len(compact) >= 20 or len(bullets) >= 1
 
 
 def _is_sentence_style(title: str) -> bool:
     return len(title) > 4 and any(marker in title for marker in SENTENCE_STYLE_MARKERS)
 
 
-def _looks_like_lesson(summary: str) -> bool:
-    return any(
-        marker in summary.lower()
-        for marker in ("must", "should", "avoid", "when ", "if ", "否则", "避免", "应", "需")
-    )
-
-
 def _first_sentences(text: str, limit: int) -> str:
-    sentences = [segment.strip() for segment in re.split(r"[。！？]", text) if segment.strip()]
+    sentences = [segment.strip() for segment in re.split(r"[。！？.!?]", text) if segment.strip()]
     chosen = "。".join(sentences[:limit])
     if chosen and not chosen.endswith("。"):
         chosen += "。"

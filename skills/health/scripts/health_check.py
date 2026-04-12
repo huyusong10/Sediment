@@ -47,21 +47,24 @@ def print_report(report: dict) -> None:
     print("-------")
     print(
         f"Formal entries:      {report['formal_entry_count']}  "
-        f"(placeholders: {report['placeholder_count']})"
+        f"(concepts: {report['concept_entry_count']}, lessons: {report['lesson_entry_count']})"
     )
+    print(f"Placeholders:        {report['placeholder_count']}")
     print(
         f"Entry size:          avg={report['avg_entry_size']}  "
         f"p50={report['p50_entry_size']}  p90={report['p90_entry_size']}"
     )
     print()
-    print("CONTENT QUALITY")
-    print("---------------")
+    print("STRUCTURE QUALITY")
+    print("-----------------")
     print(f"Hard-fail entries:   {report['hard_fail_entry_count']}")
+    print(f"Missing Scope:       {report['missing_scope_count']}")
+    print(f"Missing Trigger:     {report['missing_trigger_count']}")
     print(f"Missing Why:         {report['missing_why_count']}")
-    print(f"Missing Pitfalls:    {report['missing_common_pitfalls_count']}")
-    print(f"Weak inline links:   {report['weak_inline_link_count']}")
+    print(f"Missing Risks:       {report['missing_risks_count']}")
+    print(f"Weak Related:        {report['weak_related_count']}")
     if report["top_shallow_entries"]:
-        print("Top shallow entries:")
+        print("Top broken entries:")
         for item in report["top_shallow_entries"][:5]:
             joined = "; ".join(item["hard_failures"][:3])
             print(f"  - {item['name']}: {joined}")
@@ -77,13 +80,13 @@ def print_report(report: dict) -> None:
         f"low={report['placeholder_ref_buckets']['low']}"
     )
     print()
-    print("CANONICALIZATION")
+    print("CONCEPT COVERAGE")
     print("----------------")
     print(f"Promotable placeholders: {report['promotable_placeholder_count']}")
     if report["promotable_placeholders"]:
         for item in report["promotable_placeholders"][:5]:
             print(f"  - {item['name']} ({item['ref_count']} refs)")
-    print(f"Canonical gaps:          {report['canonical_gap_count']}")
+    print(f"Concept gaps:            {report['canonical_gap_count']}")
     if report["canonical_gaps"]:
         for item in report["canonical_gaps"][:5]:
             refs = ", ".join(item["referenced_by"][:3])
@@ -99,7 +102,7 @@ def build_recommendations(report: dict) -> list[str]:
     recommendations = []
     if report["hard_fail_entry_count"]:
         recommendations.append(
-            f"Run tidy to repair {report['hard_fail_entry_count']} hard-fail entries."
+            f"Run tidy to repair {report['hard_fail_entry_count']} structurally invalid entries."
         )
     if report["promotable_placeholder_count"]:
         recommendations.append(
@@ -107,8 +110,8 @@ def build_recommendations(report: dict) -> list[str]:
         )
     if report["canonical_gap_count"]:
         recommendations.append(
-            "Run tidy canonicalization; "
-            f"{report['canonical_gap_count']} concepts need formal entries."
+            "Run tidy concept coverage pass; "
+            f"{report['canonical_gap_count']} placeholders are referenced by formal entries."
         )
     if report["dangling_link_count"] or report["orphan_entry_count"]:
         recommendations.append(
@@ -122,7 +125,10 @@ def build_recommendations(report: dict) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
-        print("Usage: python skills/health/scripts/health_check.py <kb_path> [--json]", file=sys.stderr)
+        print(
+            "Usage: python skills/health/scripts/health_check.py <kb_path> [--json]",
+            file=sys.stderr,
+        )
         return 1
 
     as_json = False
@@ -131,7 +137,10 @@ def main(argv: list[str] | None = None) -> int:
         args.remove("--json")
 
     if len(args) != 1:
-        print("Usage: python skills/health/scripts/health_check.py <kb_path> [--json]", file=sys.stderr)
+        print(
+            "Usage: python skills/health/scripts/health_check.py <kb_path> [--json]",
+            file=sys.stderr,
+        )
         return 1
 
     kb_path = args[0]

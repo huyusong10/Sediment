@@ -24,8 +24,16 @@ dev = [
     "pytest>=8.0.0",
 ]
 
+[tool.hatch.build]
+include = [
+    "mcp_server/**/*.py",
+    "skills/**/*.py",
+    "skills/**/SKILL.md",
+    "skills/**/agents/*.yaml",
+]
+
 [tool.hatch.build.targets.wheel]
-packages = ["mcp_server", "scripts"]
+packages = ["mcp_server", "skills"]
 
 [tool.ruff]
 line-length = 100

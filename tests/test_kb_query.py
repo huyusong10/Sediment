@@ -10,7 +10,9 @@ from skills.explore.scripts.kb_query import (
     shortlist,
     snippets,
     validate_answer,
+    validate_entry,
 )
+from skills.tidy.scripts.tidy_utils import collect_ref_contexts, find_dangling_links
 
 
 def _write(path: Path, content: str) -> None:
@@ -25,60 +27,51 @@ def _build_sample_kb(root: Path) -> Path:
         kb_path / "entries" / "热备份.md",
         """
         ---
+        type: concept
+        status: fact
         aliases: [热切换]
-        status: formal
+        sources:
+          - backup_design.md
         ---
         # 热备份
 
-        热备份是在主链路失效前，先准备好可接管的[[金蝉脱壳]]与[[回音壁]]能力。
+        热备份是在主链路失效前准备好的可接管路径能力。
 
-        ## Context
+        ## Scope
         适用于需要连续服务、不能接受长时间中断的核心系统，尤其适用于存在主备切换流程的场景。
-
-        ## Why This Matters
-        如果没有热备份，故障发生时只能临时拼装恢复路径，导致恢复时间变长，甚至放大业务损失。
-
-        ## Common Pitfalls
-        常见误区是把冷备份误当成热备份，或者只准备数据副本却没有验证[[回音壁]]和[[金蝉脱壳]]的接管链路。
 
         ## Related
         - [[金蝉脱壳]] - 热备份依赖的切换策略
-        - [[回音壁]] - 需要保持观测链路同步
-
-        ## Source
-        - backup_design.md
+        - [[回音壁]] - 需要同步观测链路
         """,
     )
 
     _write(
-        kb_path / "entries" / "泄洪前须确认热备份.md",
+        kb_path / "entries" / "泄洪前先确认热备份.md",
         """
         ---
+        type: lesson
+        status: inferred
         aliases: []
-        status: formal
+        sources:
+          - flood_runbook.md
         ---
-        # 泄洪前须确认热备份
+        # 泄洪前先确认热备份
 
-        进行[[泄洪]]之前，必须先确认[[热备份]]处于可接管状态，否则风险会被放大。
+        进行[[泄洪]]之前，必须先确认[[热备份]]处于可接管状态。
 
-        ## Context
-        适用于需要执行主动流量转移、降载或保护性排洪的高风险操作场景，尤其适用于生产高峰时段。
+        ## Trigger
+        适用于需要主动切流、泄洪或保护性降载的高风险操作场景。
 
-        ## Why This Matters
-        泄洪会主动改变流量与容量分布，如果热备份没有准备好，系统会在保护动作之后暴露出新的单点故障。
+        ## Why
+        泄洪会改变流量和容量分布，如果热备份没有准备好，系统会在保护动作之后暴露新的单点故障。
 
-        ## Evidence / Reasoning
-        多次故障复盘都表明，先确认热备份再执行泄洪，可以把恢复路径从临时抢修转成受控切换，减少二次事故。
-
-        ## Common Pitfalls
-        常见误区是把“已有备份数据”当成“可热切换”，或者认为泄洪只是临时动作，不需要依赖[[热备份]]和[[回音壁]]的协同。
+        ## Risks
+        常见误区是把“已有备份数据”误当成“可热切换”，从而在执行[[泄洪]]后放大恢复风险。
 
         ## Related
-        - [[热备份]] - 本规则的前提条件
+        - [[热备份]] - 本规则的前提能力
         - [[泄洪]] - 适用的风险动作
-
-        ## Source
-        - flood_runbook.md
         """,
     )
 
@@ -86,28 +79,22 @@ def _build_sample_kb(root: Path) -> Path:
         kb_path / "entries" / "暗流检测.md",
         """
         ---
+        type: concept
+        status: fact
         aliases: []
-        status: formal
+        sources:
+          - darkflow_notes.md
         ---
         # 暗流检测
 
-        暗流检测需要把[[暗流]]症状和[[回音壁]]观测联合起来判断。
+        暗流检测需要联合[[暗流]]症状和[[回音壁]]观测来判断异常。
 
-        ## Context
+        ## Scope
         适用于故障排查和异常定位场景，需要结合观测指标与链路行为做综合判断。
-
-        ## Why This Matters
-        仅看单一指标容易漏掉暗流扩散的早期信号，联合检测可以更早发现风险。
-
-        ## Common Pitfalls
-        容易把短时抖动误判为暗流，或者忽略与[[回音壁]]观测之间的时序关系。
 
         ## Related
         - [[暗流]] - 被检测的异常概念
         - [[回音壁]] - 关键观测来源
-
-        ## Source
-        - darkflow_notes.md
         """,
     )
 
@@ -115,28 +102,51 @@ def _build_sample_kb(root: Path) -> Path:
         kb_path / "entries" / "账房审计.md",
         """
         ---
+        type: concept
+        status: fact
         aliases: []
-        status: formal
+        sources:
+          - audit_playbook.md
         ---
         # 账房审计
 
         账房审计会跟踪[[暗流]]带来的异常收支，并与[[回音壁]]记录做交叉验证。
 
-        ## Context
+        ## Scope
         适用于审计、异常回放和事后追责场景，需要将系统行为和账务痕迹对齐。
-
-        ## Why This Matters
-        没有账房审计时，暗流类问题会只留下模糊症状，难以还原影响范围。
-
-        ## Common Pitfalls
-        常见误区是只核对结果，不核对过程，导致[[暗流]]的来源无法追溯。
 
         ## Related
         - [[暗流]] - 审计对象之一
         - [[回音壁]] - 关键交叉验证来源
+        """,
+    )
 
-        ## Source
-        - audit_playbook.md
+    _write(
+        kb_path / "entries" / "暗流回放.md",
+        """
+        ---
+        type: lesson
+        status: inferred
+        aliases: []
+        sources:
+          - darkflow_replay.md
+        ---
+        # 暗流回放时优先对齐回音壁
+
+        暗流回放时应先对齐[[回音壁]]时间线，再解释[[暗流]]传播路径。
+
+        ## Trigger
+        适用于故障复盘、异常回放和时间线重建场景。
+
+        ## Why
+        如果时间线没有先对齐，就会把观测抖动误判为真正的暗流传播。
+
+        ## Risks
+        直接解释[[暗流]]扩散路径，容易在复盘中制造错误因果链。
+
+        ## Related
+        - [[暗流]] - 被回放的异常对象
+        - [[回音壁]] - 时间线基准
         """,
     )
 
@@ -144,15 +154,15 @@ def _build_sample_kb(root: Path) -> Path:
         kb_path / "entries" / "薄弱条目.md",
         """
         ---
+        type: concept
+        status: fact
         aliases: []
-        status: formal
+        sources:
+          - weak_note.md
         ---
         # 薄弱条目
 
         这是一个过于简单的[[暗流]]描述。
-
-        ## Context
-        太短。
 
         ## Related
         - [[暗流]] - 单一关系
@@ -163,18 +173,12 @@ def _build_sample_kb(root: Path) -> Path:
         kb_path / "placeholders" / "泄洪.md",
         """
         ---
+        type: placeholder
         aliases: []
-        tags: [placeholder]
-        status: placeholder
         ---
         # 泄洪
 
-        #status/placeholder
-        - [ ] Needs human or agent to perform inductive reasoning to complete this concept.
-
-        > Appears in: [[泄洪前须确认热备份]]
-
-        This concept is referenced but not yet defined.
+        这个概念在知识库中被引用了，但目前还没有足够清晰的定义可供提升。
         """,
     )
 
@@ -182,18 +186,14 @@ def _build_sample_kb(root: Path) -> Path:
         kb_path / "placeholders" / "暗流.md",
         """
         ---
+        type: placeholder
         aliases: []
-        tags: [placeholder]
-        status: placeholder
         ---
         # 暗流
 
-        #status/placeholder
-        - [ ] Needs human or agent to perform inductive reasoning to complete this concept.
+        这个概念在知识库中被引用了，但目前还没有足够清晰的定义可供提升。
 
         > Appears in: [[暗流检测]]
-
-        This concept is referenced but not yet defined.
         """,
     )
 
@@ -206,18 +206,32 @@ def test_inventory_shortlist_neighbors_and_snippets(tmp_path: Path) -> None:
     data = inventory(kb_path)
     assert "热备份" in data["entries"]
     assert data["aliases"]["热切换"] == ["热备份"]
+    assert data["docs"]["热备份"]["entry_type"] == "concept"
+    assert data["docs"]["泄洪前先确认热备份"]["entry_type"] == "lesson"
 
     ranked = shortlist("什么是热切换？", inventory_data=data, limit=3)
     assert ranked[0]["name"] == "热备份"
 
-    graph = neighbors(["泄洪前须确认热备份"], inventory_data=data, depth=1, limit=6)
+    graph = neighbors(["泄洪前先确认热备份"], inventory_data=data, depth=1, limit=6)
     graph_names = {item["name"] for item in graph}
     assert "热备份" in graph_names
     assert "泄洪" in graph_names
 
-    excerpt_map = snippets(["热备份"], question="为什么要热备份", inventory_data=data)
+    excerpt_map = snippets(["热备份"], question="热备份适用于什么场景", inventory_data=data)
     sections = {item["section"] for item in excerpt_map["热备份"]["snippets"]}
-    assert "Why This Matters" in sections
+    assert "Scope" in sections
+
+
+def test_validate_entry_supports_v4_types(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+
+    concept = validate_entry(path=kb_path / "entries" / "热备份.md")
+    lesson = validate_entry(path=kb_path / "entries" / "泄洪前先确认热备份.md")
+    placeholder = validate_entry(path=kb_path / "placeholders" / "泄洪.md")
+
+    assert concept["valid"] is True
+    assert lesson["valid"] is True
+    assert placeholder["valid"] is True
 
 
 def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> None:
@@ -230,7 +244,7 @@ def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> Non
             "sources": ["热备份"],
             "confidence": "high",
             "exploration_summary": {
-                "entries_scanned": 4,
+                "entries_scanned": 6,
                 "entries_read": 2,
                 "links_followed": 1,
                 "mode": "definition-driven",
@@ -248,7 +262,7 @@ def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> Non
             "sources": ["泄洪"],
             "confidence": "medium",
             "exploration_summary": {
-                "entries_scanned": 4,
+                "entries_scanned": 6,
                 "entries_read": 1,
                 "links_followed": 0,
                 "mode": "definition-driven",
@@ -262,7 +276,7 @@ def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> Non
     assert any("formal source" in error for error in invalid["errors"])
 
 
-def test_audit_kb_reports_quality_and_canonical_gaps(tmp_path: Path) -> None:
+def test_audit_kb_reports_v4_quality_and_concept_gaps(tmp_path: Path) -> None:
     kb_path = _build_sample_kb(tmp_path)
 
     report = audit_kb(kb_path)
@@ -272,3 +286,46 @@ def test_audit_kb_reports_quality_and_canonical_gaps(tmp_path: Path) -> None:
     assert any(item["name"] == "暗流" for item in report["promotable_placeholders"])
     assert report["canonical_gap_count"] >= 1
     assert any(item["name"] == "泄洪" for item in report["canonical_gaps"])
+
+
+def test_provenance_sections_do_not_create_graph_noise(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+    _write(
+        kb_path / "entries" / "权限边界.md",
+        """
+        ---
+        type: lesson
+        status: inferred
+        aliases: []
+        sources:
+          - 2024年Q3支付模块故障复盘
+          - 权限系统重构设计文档
+        ---
+        # 权限边界
+
+        先定义[[权限模型]]，再讨论接口细节。
+
+        ## Trigger
+        适用于多角色接口设计场景。
+
+        ## Why
+        权限是结构性决策，顺序错了会导致返工。
+
+        ## Risks
+        如果跳过这一步，测试和实现会基于不同权限假设展开。
+
+        ## Related
+        - [[权限模型]] - 前置依赖
+
+        ## 来源
+        [[2024年Q3支付模块故障复盘]] [[权限系统重构设计文档]]
+        """,
+    )
+
+    dangling = find_dangling_links(str(kb_path))
+    contexts = collect_ref_contexts(str(kb_path), "权限模型")
+
+    dangling_names = {item["link"] for item in dangling}
+    assert "2024年Q3支付模块故障复盘" not in dangling_names
+    assert "权限系统重构设计文档" not in dangling_names
+    assert all("2024年Q3支付模块故障复盘" not in item for item in contexts)

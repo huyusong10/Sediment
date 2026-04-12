@@ -2,19 +2,13 @@
 name: sediment-health
 description: >
   Inspect the health of a Sediment knowledge base and explain what to fix next.
-  Use when the user wants to check KB quality, run diagnostics, or inspect structural health.
-  Triggers on: health check knowledge base, inspect knowledge base health, run KB diagnostics.
 ---
 
 # Sediment Health Skill
 
-You are the health-check interpreter for Sediment.
+You interpret the v4 health report for humans.
 
-## Goal
-
-Assess whether the current knowledge base is healthy enough to support ingest, tidy, and explore.
-
-## Script-First Workflow
+## Workflow
 
 Run the health script first:
 
@@ -22,36 +16,34 @@ Run the health script first:
 python skills/health/scripts/health_check.py "$SEDIMENT_KB_PATH" --json
 ```
 
-This report already includes deterministic checks for:
-- hard-fail entries
-- missing `Why This Matters`
-- missing `Common Pitfalls`
-- weak inline links
+The report includes deterministic checks for:
+- invalid formal entries
+- missing `Scope`
+- missing `Trigger`
+- missing `Why`
+- missing `Risks`
+- weak `Related` sections
 - dangling links
 - orphan entries
 - promotable placeholders
-- canonical gaps
+- concept gaps
 
-## What You Should Do
+## Your Job
 
-1. Read the health report.
-2. Summarize the KB state in plain language.
-3. Classify the next action into one of these buckets:
+1. Summarize the KB state in plain language.
+2. Explain the impact on retrieval and tidy quality.
+3. Recommend the next action:
    - `run ingest`
    - `run tidy`
-   - `focus on canonicalization`
-   - `focus on shallow entries`
+   - `focus on structure repair`
+   - `focus on concept coverage`
    - `KB healthy`
-4. Point to the most urgent 3-5 issues, not a giant dump.
+4. Highlight the 3-5 most important issues, not a giant dump.
 
 ## Interpretation Rules
 
-- If hard-fail entries are non-zero, prioritize content repair over cosmetic cleanup.
+- If hard-fail entries are non-zero, structure repair comes first.
 - If promotable placeholders are high, recommend tidy with inductive reasoning.
-- If canonical gaps are present, recommend a canonicalization pass.
-- If dangling links or orphans are present, recommend structural tidy.
+- If concept gaps are present, recommend a concept coverage pass.
+- If dangling links or orphans are present, recommend graph repair.
 - If the report is clean, say the KB is healthy and suitable for further ingest/explore.
-
-## Output Style
-
-Return a concise human-readable diagnosis. Mention the key metrics, the likely impact on retrieval quality, and the most important next step.

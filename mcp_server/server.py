@@ -18,12 +18,13 @@ import re
 import shlex
 import subprocess
 import tempfile
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
+import yaml
 from mcp import types
 from mcp.server import Server
-import yaml
 
 from skills.explore.scripts.kb_query import inventory, prepare_explore_context, validate_answer
 
@@ -219,14 +220,13 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
     if not question:
         return _error_payload('Question must not be empty.')
 
-    skill_path = project_root / 'skills' / 'explore' / 'SKILL.md'
-    if not skill_path.exists():
-        return _error_payload(f'Explore skill not found: {skill_path}')
-
     inventory_data = inventory(kb_path)
     if not inventory_data['entries']:
         return {
-            'answer': 'Knowledge base has no formal entries yet, so explore cannot answer reliably.',
+            'answer': (
+                'Knowledge base has no formal entries yet, '
+                'so explore cannot answer reliably.'
+            ),
             'sources': [],
             'confidence': 'low',
             'exploration_summary': {
@@ -240,7 +240,7 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
         }
 
     try:
-        skill_body, runtime_contract = _load_explore_skill(skill_path)
+        skill_body, runtime_contract, skill_label = _load_explore_skill(project_root)
         context = prepare_explore_context(
             question,
             inventory_data=inventory_data,
@@ -253,7 +253,10 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
 
         if not context['expanded_candidates']:
             return {
-                'answer': 'No sufficiently relevant knowledge entries were found for this question.',
+                'answer': (
+                    'No sufficiently relevant knowledge entries were found '
+                    'for this question.'
+                ),
                 'sources': [],
                 'confidence': 'low',
                 'exploration_summary': {
@@ -262,7 +265,10 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
                     'links_followed': 0,
                     'mode': 'no-match',
                 },
-                'gaps': ['The current KB does not expose an obvious formal entry for this question.'],
+                'gaps': [
+                    'The current KB does not expose an obvious formal entry '
+                    'for this question.'
+                ],
                 'contradictions': [],
             }
 
@@ -278,15 +284,26 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
             context=context,
             payload=payload,
             project_root=project_root,
-            skill_path=skill_path,
+            skill_label=skill_label,
             inventory_data=inventory_data,
         )
     except RuntimeError as exc:
         return _error_payload(str(exc))
 
 
-def _load_explore_skill(skill_path: Path) -> tuple[str, dict[str, Any]]:
-    content = skill_path.read_text(encoding='utf-8')
+def _load_explore_skill(project_root: Path) -> tuple[str, dict[str, Any], str]:
+    local_skill_path = project_root / 'skills' / 'explore' / 'SKILL.md'
+    if local_skill_path.exists():
+        content = local_skill_path.read_text(encoding='utf-8')
+        skill_label = str(local_skill_path)
+    else:
+        try:
+            resource = resources.files('skills.explore').joinpath('SKILL.md')
+            content = resource.read_text(encoding='utf-8')
+            skill_label = 'package:skills.explore/SKILL.md'
+        except (FileNotFoundError, ModuleNotFoundError) as exc:
+            raise RuntimeError('Explore skill not found in package resources.') from exc
+
     frontmatter, body = _split_frontmatter(content)
     runtime_contract = dict(DEFAULT_CONTRACT)
     extra_contract = frontmatter.get('runtime_contract') or {}
@@ -298,7 +315,7 @@ def _load_explore_skill(skill_path: Path) -> tuple[str, dict[str, Any]]:
                 if key in DEFAULT_CONTRACT and isinstance(value, type(DEFAULT_CONTRACT[key]))
             }
         )
-    return body.strip(), runtime_contract
+    return body.strip(), runtime_contract, skill_label
 
 
 def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -355,7 +372,7 @@ def _run_validated_explore(
     context: dict[str, Any],
     payload: dict[str, Any],
     project_root: Path,
-    skill_path: Path,
+    skill_label: str,
     inventory_data: dict[str, Any],
 ) -> dict[str, Any]:
     retry_reason = None
@@ -370,8 +387,9 @@ def _run_validated_explore(
         )
         raw_output = _run_explore_cli(
             prompt=prompt,
+            skill_body=skill_body,
             project_root=project_root,
-            skill_path=skill_path,
+            skill_label=skill_label,
             payload=payload,
             timeout_seconds=runtime_contract['cli_timeout_seconds'],
         )
@@ -394,8 +412,9 @@ def _run_validated_explore(
 def _run_explore_cli(
     *,
     prompt: str,
+    skill_body: str,
     project_root: Path,
-    skill_path: Path,
+    skill_label: str,
     payload: dict[str, Any],
     timeout_seconds: int,
 ) -> str:
@@ -407,15 +426,18 @@ def _run_explore_cli(
         temp_root = Path(temp_dir)
         prompt_file = temp_root / 'prompt.txt'
         payload_file = temp_root / 'payload.json'
+        skill_file = temp_root / 'skill.md'
         prompt_file.write_text(prompt, encoding='utf-8')
         payload_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+        skill_file.write_text(skill_body, encoding='utf-8')
 
         env = os.environ.copy()
         env.update(
             {
                 'SEDIMENT_EXPLORE_PROMPT_FILE': str(prompt_file),
                 'SEDIMENT_EXPLORE_PAYLOAD_FILE': str(payload_file),
-                'SEDIMENT_EXPLORE_SKILL_FILE': str(skill_path),
+                'SEDIMENT_EXPLORE_SKILL_FILE': str(skill_file),
+                'SEDIMENT_EXPLORE_SKILL_LABEL': skill_label,
             }
         )
 
@@ -424,7 +446,7 @@ def _run_explore_cli(
             prompt=prompt,
             prompt_file=prompt_file,
             payload_file=payload_file,
-            skill_file=skill_path,
+            skill_file=skill_file,
         )
         try:
             result = subprocess.run(

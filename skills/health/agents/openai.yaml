@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sediment Health"
+  short_description: "Inspect Sediment KB health and next steps"
+  default_prompt: "Use $sediment-health to inspect this Sediment knowledge base and recommend the next action."

@@ -94,6 +94,30 @@ uv sync
 
 此命令会自动创建 `.venv` 虚拟环境并根据 `pyproject.toml` 安装所有依赖。
 
+仓库内置的 Sediment skill 现在使用标准 skill 目录结构：
+
+```text
+skills/
+  ingest/
+    SKILL.md
+    agents/openai.yaml
+  tidy/
+    SKILL.md
+    agents/openai.yaml
+    scripts/tidy_utils.py
+  explore/
+    SKILL.md
+    agents/openai.yaml
+    scripts/kb_query.py
+  health/
+    SKILL.md
+    agents/openai.yaml
+    scripts/health_check.py
+```
+
+`SKILL.md` 保存 skill 指令，相关脚本直接放在对应 skill 目录下，避免运行时代码、
+测试和文档出现两套路径。
+
 ### 配置并启动 MCP Server
 
 Sediment 以 HTTP 服务器形式运行，使用 SSE 传输：
@@ -160,7 +184,7 @@ npx @anthropic/mcp-inspector --url http://localhost:8000/sediment/
 
 ### 摄入文档到知识库
 
-将 `skills/ingest.md` 加载为 Agent 的 system prompt。文件包含 YAML frontmatter（`name`、`description`、`trigger` 元数据），支持 Claude Code 等 skill 感知型 Agent 的自动发现。
+将 `skills/ingest/SKILL.md` 加载为 Agent 的 system prompt。文件包含 YAML frontmatter（`name`、`description` 元数据），支持 skill 感知型 Agent 的自动发现。
 
 然后提供需要摄入的文档（粘贴内容或指明文件路径）。Agent 将自动完成：
    - 提取原子知识条目 → 写入 `knowledge-base/entries/`
@@ -171,7 +195,7 @@ npx @anthropic/mcp-inspector --url http://localhost:8000/sediment/
 ### 运行巡检报告
 
 ```bash
-uv run python scripts/health_check.py knowledge-base
+uv run python skills/health/scripts/health_check.py knowledge-base
 ```
 
 输出示例：
@@ -241,7 +265,7 @@ Agent：[调用 knowledge_ask("我们的 API 权限管理策略是什么？")]
 ```
 
 `knowledge_ask` 内部执行流程：
-1. 读取 `skills/explore.md` 作为子 Agent 的 System Prompt（YAML frontmatter 为 skill 感知型 Agent 提供 `name`/`description` 元数据）
+1. 读取 `skills/explore/SKILL.md` 作为子 Agent 的 System Prompt（YAML frontmatter 为 skill 感知型 Agent 提供 `name`/`description` 元数据）
 2. 调用配置的 CLI 子 Agent 对知识库进行多轮推理
 3. 返回综合答案及知识来源引用
 
@@ -263,13 +287,13 @@ knowledge_read("条目A")
 # 步骤 3 — 沿 [[Related]] 链接继续探索关联概念
 ```
 
-将 `skills/explore.md` 加载为 Agent 的 System Prompt，可获得完整的自主探索协议指引（要求在得出结论前至少深入探索 2 层链接）。
+将 `skills/explore/SKILL.md` 加载为 Agent 的 System Prompt，可获得完整的自主探索协议指引（要求在得出结论前至少深入探索 2 层链接）。
 
 ### 整理知识库
 
 > 整理操作需要**管理员权限**（有权向知识库写入文件）。所有整理建议都会在写入前呈现给人工确认。
 
-1. 将 `skills/tidy.md` 加载为 Agent 的 System Prompt。
+1. 将 `skills/tidy/SKILL.md` 加载为 Agent 的 System Prompt。
 2. Agent 会诊断知识库并给出建议：
 
 | 动作 | 触发条件 | 效果 |
@@ -298,7 +322,7 @@ uv run pytest tests/
 
 # 对示例数据验证整理工具集
 uv run python -c "
-from scripts.tidy_utils import *
+from skills.tidy.scripts.tidy_utils import *
 kb = 'knowledge-base'
 print('dangling:', find_dangling_links(kb))
 print('placeholder refs:', count_placeholder_refs(kb))
@@ -306,6 +330,9 @@ print('orphans:', find_orphan_entries(kb))
 print('contexts:', collect_ref_contexts(kb, '示例-占位文件说明'))
 "
 ```
+
+仓库已不再使用统一的根目录 `scripts/` 保存 Sediment 运行辅助脚本。
+与 skill 强绑定的辅助脚本统一放在 `skills/*/scripts/` 下，代码、测试和文档也应使用同一套路径。
 
 ---
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sediment Tidy"
+  short_description: "Converge and repair a Sediment KB"
+  default_prompt: "Use $sediment-tidy to canonicalize and repair this Sediment knowledge base."

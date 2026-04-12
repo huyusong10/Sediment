@@ -23,6 +23,5 @@ Thumbs.db
 .env
 
 # Test case results (keep the scripts, ignore results)
-testcase/results/
-testcase/material/
-testcase/judge/
+testcase/
+# Ignore all testcase artifacts and scripts

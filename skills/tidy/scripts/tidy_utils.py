@@ -9,6 +9,51 @@ from pathlib import Path
 
 
 _LINK_PATTERN = re.compile(r'\[\[([^\]]+)\]\]')
+_HEADING_PATTERN = re.compile(r'^##\s+(.+?)\s*$')
+
+
+def _graph_relevant_text(text: str, *, kind: str) -> str:
+    """Return only the text that should participate in the KB graph.
+
+    Provenance surfaces such as Source sections and placeholder "Appears in" notes
+    should not create graph links or placeholders.
+    """
+    lines = []
+    current_section = None
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        heading = _HEADING_PATTERN.match(stripped)
+        if heading:
+            current_section = heading.group(1).strip()
+            if current_section == 'Source':
+                continue
+            lines.append(raw_line)
+            continue
+
+        if current_section == 'Source':
+            continue
+
+        if kind == 'placeholder' and (
+            stripped.startswith('> Appears in:')
+            or stripped.startswith('> Referenced in:')
+        ):
+            continue
+
+        lines.append(raw_line)
+
+    return '\n'.join(lines)
+
+
+def graph_links_from_text(text: str, *, kind: str) -> list[str]:
+    """Extract graph links while ignoring provenance-only surfaces."""
+    relevant = _graph_relevant_text(text, kind=kind)
+    targets = []
+    for original_link in _LINK_PATTERN.findall(relevant):
+        target = original_link.split('|')[0].split('#')[0].strip()
+        if target:
+            targets.append(target)
+    return targets
 
 
 def _get_all_md_files(kb_path: str) -> list[Path]:
@@ -61,13 +106,18 @@ def find_dangling_links(kb_path: str) -> list[dict]:
     results = []
 
     for md_file in _get_all_md_files(kb_path):
+        kind = 'placeholder' if md_file.parent.name == 'placeholders' else 'formal'
         # Build the relative path label (e.g. "entries/foo.md")
         try:
             rel = md_file.relative_to(root)
         except ValueError:
             rel = md_file
 
-        lines = md_file.read_text(encoding='utf-8').splitlines()
+        filtered_text = _graph_relevant_text(
+            md_file.read_text(encoding='utf-8'),
+            kind=kind,
+        )
+        lines = filtered_text.splitlines()
         for line in lines:
             for match in _LINK_PATTERN.finditer(line):
                 original_link = match.group(1)
@@ -112,15 +162,15 @@ def count_placeholder_refs(kb_path: str) -> list[dict]:
 
     all_files = _get_all_md_files(kb_path)
     for md_file in all_files:
+        kind = 'placeholder' if md_file.parent.name == 'placeholders' else 'formal'
         try:
             rel = str(md_file.relative_to(root))
         except ValueError:
             rel = str(md_file)
 
         content = md_file.read_text(encoding='utf-8')
-        for original_link in _LINK_PATTERN.findall(content):
-            target = original_link.split('|')[0].split('#')[0].strip()
-            if target and target in ref_map:
+        for target in graph_links_from_text(content, kind=kind):
+            if target in ref_map:
                 ref_map[target].append(rel)
 
     results = [
@@ -162,12 +212,9 @@ def find_orphan_entries(kb_path: str) -> list[str]:
     # For each file, compute its outgoing links (by name)
     file_outlinks: dict[str, set[str]] = {}
     for md_file in all_files:
+        kind = 'placeholder' if md_file.parent.name == 'placeholders' else 'formal'
         content = md_file.read_text(encoding='utf-8')
-        links = set()
-        for ln in _LINK_PATTERN.findall(content):
-            target = ln.split('|')[0].split('#')[0].strip()
-            if target:
-                links.add(target)
+        links = set(graph_links_from_text(content, kind=kind))
         try:
             rel = str(md_file.relative_to(root))
         except ValueError:

@@ -245,6 +245,15 @@ step "注册 Skills（可选）"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 CLAUDE_CODE_SKILLS_DIR="$HOME/.claude/skills"
 
+list_skill_dirs() {
+    local root="$1"
+    find "$root" -mindepth 1 -maxdepth 1 -type d | while read -r skill_dir; do
+        if [[ -f "$skill_dir/SKILL.md" ]]; then
+            echo "$skill_dir"
+        fi
+    done | sort
+}
+
 if [[ -d "$SKILLS_DIR" ]]; then
     # Check if Claude Code is among selected hosts
     HAS_CLAUDE_CODE=false
@@ -256,41 +265,46 @@ if [[ -d "$SKILLS_DIR" ]]; then
     done
 
     if $HAS_CLAUDE_CODE; then
-        echo "  检测到以下 Skills 文件："
-        for skill_file in "$SKILLS_DIR"/*.md; do
-            echo "    - $(basename "$skill_file")"
-        done
-        echo ""
-        echo "  是否注册到 Claude Code？（symlink 到 ~/.claude/skills/）"
-        echo -n "  注册 Skills？[Y/n]: "
-        read -r SKILLS_INPUT
-        SKILLS_INPUT="${SKILLS_INPUT:-y}"
+        mapfile -t SKILL_DIRS < <(list_skill_dirs "$SKILLS_DIR")
 
-        if [[ "$SKILLS_INPUT" =~ ^[Yy]$ ]] || [[ -z "$SKILLS_INPUT" ]]; then
-            mkdir -p "$CLAUDE_CODE_SKILLS_DIR"
-
-            SKILL_LINK_COUNT=0
-            for skill_file in "$SKILLS_DIR"/*.md; do
-                BASENAME="$(basename "$skill_file")"
-                LINK_NAME="$CLAUDE_CODE_SKILLS_DIR/$BASENAME"
-
-                # Remove existing file or symlink
-                if [[ -L "$LINK_NAME" ]]; then
-                    rm "$LINK_NAME"
-                elif [[ -f "$LINK_NAME" ]]; then
-                    warn "$BASENAME 已存在（普通文件），跳过"
-                    continue
-                fi
-
-                ln -s "$skill_file" "$LINK_NAME"
-                SKILL_LINK_COUNT=$((SKILL_LINK_COUNT + 1))
-                ok "已注册: $BASENAME"
-            done
-            ok "共注册 $SKILL_LINK_COUNT 个 Skills"
+        if [[ ${#SKILL_DIRS[@]} -eq 0 ]]; then
+            warn "skills/ 目录存在，但未找到任何标准 Skill 目录（缺少 SKILL.md）"
         else
-            info "跳过 Skills 注册"
-            echo "  如需手动注册，运行："
-            echo "    ln -s $SKILLS_DIR/*.md $CLAUDE_CODE_SKILLS_DIR/"
+            echo "  检测到以下 Skill 目录："
+            for skill_dir in "${SKILL_DIRS[@]}"; do
+                echo "    - $(basename "$skill_dir")/"
+            done
+            echo ""
+            echo "  是否注册到 Claude Code？（symlink 目录到 ~/.claude/skills/）"
+            echo -n "  注册 Skills？[Y/n]: "
+            read -r SKILLS_INPUT
+            SKILLS_INPUT="${SKILLS_INPUT:-y}"
+
+            if [[ "$SKILLS_INPUT" =~ ^[Yy]$ ]] || [[ -z "$SKILLS_INPUT" ]]; then
+                mkdir -p "$CLAUDE_CODE_SKILLS_DIR"
+
+                SKILL_LINK_COUNT=0
+                for skill_dir in "${SKILL_DIRS[@]}"; do
+                    BASENAME="$(basename "$skill_dir")"
+                    LINK_NAME="$CLAUDE_CODE_SKILLS_DIR/$BASENAME"
+
+                    if [[ -L "$LINK_NAME" ]]; then
+                        rm "$LINK_NAME"
+                    elif [[ -e "$LINK_NAME" ]]; then
+                        warn "$BASENAME 已存在（非 symlink），跳过"
+                        continue
+                    fi
+
+                    ln -s "$skill_dir" "$LINK_NAME"
+                    SKILL_LINK_COUNT=$((SKILL_LINK_COUNT + 1))
+                    ok "已注册: $BASENAME"
+                done
+                ok "共注册 $SKILL_LINK_COUNT 个 Skills"
+            else
+                info "跳过 Skills 注册"
+                echo "  如需手动注册，运行："
+                echo "    ln -s $SKILLS_DIR/<skill-dir> $CLAUDE_CODE_SKILLS_DIR/"
+            fi
         fi
     fi
 else

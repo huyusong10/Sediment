@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sediment Ingest"
+  short_description: "Extract KB entries from source materials"
+  default_prompt: "Use $sediment-ingest to extract reusable KB entries from these materials."

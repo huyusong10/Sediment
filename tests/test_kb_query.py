@@ -3,7 +3,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from scripts.kb_query import (
+from skills.explore.scripts.kb_query import (
     audit_kb,
     inventory,
     neighbors,

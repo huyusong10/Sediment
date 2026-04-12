@@ -130,7 +130,28 @@ fi
 ok "依赖安装完成"
 
 # ──────────────────────────────────────────────────────────────────────
-# 6. .env configuration
+# 6. Validate built-in skills
+# ──────────────────────────────────────────────────────────────────────
+step "检查内置 Skills"
+
+REQUIRED_SKILLS=(
+    "skills/ingest/SKILL.md"
+    "skills/tidy/SKILL.md"
+    "skills/explore/SKILL.md"
+    "skills/health/SKILL.md"
+)
+
+for skill_file in "${REQUIRED_SKILLS[@]}"; do
+    if [[ ! -f "$skill_file" ]]; then
+        error "缺少内置 skill 文件: $skill_file"
+        exit 1
+    fi
+done
+
+ok "内置 skills 完整"
+
+# ──────────────────────────────────────────────────────────────────────
+# 7. .env configuration
 # ──────────────────────────────────────────────────────────────────────
 step "生成配置"
 
@@ -154,7 +175,7 @@ fi
 export SEDIMENT_KB_PATH="$KB_PATH"
 
 # ──────────────────────────────────────────────────────────────────────
-# 7. Start server
+# 8. Start server
 # ──────────────────────────────────────────────────────────────────────
 step "启动服务"
 echo "  选择启动方式："
@@ -256,7 +277,7 @@ case "$MODE_INPUT" in
 esac
 
 # ──────────────────────────────────────────────────────────────────────
-# 8. Verify & summary (only for background/systemd)
+# 9. Verify & summary (only for background/systemd)
 # ──────────────────────────────────────────────────────────────────────
 if [[ -n "$SERVER_PID" || "$MODE_INPUT" == "3" ]]; then
     step "验证服务"

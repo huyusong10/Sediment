@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sediment Explore"
+  short_description: "Answer questions from a Sediment KB"
+  default_prompt: "Use $sediment-explore to answer this question from the Sediment knowledge base."

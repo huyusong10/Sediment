@@ -6,7 +6,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from mcp_server import retrieval, server
+from mcp_server import server
 
 
 def _write(path: Path, content: str) -> None:
@@ -19,17 +19,10 @@ def _build_project(tmp_path: Path) -> tuple[Path, Path]:
     kb_path = project_root / "knowledge-base"
 
     _write(
-        project_root / "skills" / "explore.md",
+        project_root / "skills" / "explore" / "SKILL.md",
         """
         ---
         name: test-explore
-        runtime_contract:
-          shortlist_limit: 4
-          neighbor_depth: 1
-          max_context_entries: 6
-          max_snippets_per_entry: 2
-          snippet_char_limit: 240
-          cli_timeout_seconds: 30
         ---
 
         EXPLORE-RUNTIME-MARKER
@@ -93,7 +86,7 @@ def test_answer_question_does_not_fall_back_to_materials(tmp_path: Path, monkeyp
     kb_path = project_root / "knowledge-base"
 
     _write(
-        project_root / "skills" / "explore.md",
+        project_root / "skills" / "explore" / "SKILL.md",
         """
         ---
         name: test-explore
@@ -111,7 +104,7 @@ def test_answer_question_does_not_fall_back_to_materials(tmp_path: Path, monkeyp
         """,
     )
 
-    result = retrieval.answer_question("什么是外部秘密？", kb_path, project_root)
+    result = server.answer_question("什么是外部秘密？", kb_path, project_root)
     assert result["sources"] == []
     assert result["confidence"] == "low"
     assert "no formal entries" in result["answer"].lower()
@@ -124,7 +117,7 @@ def test_answer_question_returns_explicit_error_when_cli_is_unavailable(
     project_root, kb_path = _build_project(tmp_path)
 
     monkeypatch.setenv("SEDIMENT_CLI", "definitely-not-a-real-cli")
-    result = retrieval.answer_question("什么是热备份？", kb_path, project_root)
+    result = server.answer_question("什么是热备份？", kb_path, project_root)
 
     assert result["sources"] == []
     assert result["confidence"] == "low"

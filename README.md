@@ -92,6 +92,30 @@ uv sync
 
 This creates a `.venv` virtual environment and installs all dependencies automatically (defined in `pyproject.toml`).
 
+Built-in Sediment skills now follow the standard skill layout:
+
+```text
+skills/
+  ingest/
+    SKILL.md
+    agents/openai.yaml
+  tidy/
+    SKILL.md
+    agents/openai.yaml
+    scripts/tidy_utils.py
+  explore/
+    SKILL.md
+    agents/openai.yaml
+    scripts/kb_query.py
+  health/
+    SKILL.md
+    agents/openai.yaml
+    scripts/health_check.py
+```
+
+`SKILL.md` contains the skill instructions, while bundled scripts live inside the
+same skill directory so the runtime and documentation stay aligned.
+
 ### Configure and start the MCP Server
 
 Sediment runs as an HTTP server using SSE transport:
@@ -158,7 +182,7 @@ npx @anthropic/mcp-inspector --url http://localhost:8000/sediment/
 
 ### Ingest documents into the knowledge base
 
-Load `skills/ingest.md` as your agent's system prompt. The file includes YAML frontmatter with `name`, `description`, and `trigger` metadata for agents that support skill auto-discovery (Claude Code, etc.).
+Load `skills/ingest/SKILL.md` as your agent's system prompt. The file includes YAML frontmatter with `name` and `description` metadata for skill-aware agents.
 
 Then paste or point to the document you want to ingest. The agent will:
    - Extract atomic knowledge entries → write to `knowledge-base/entries/`
@@ -169,7 +193,7 @@ Then paste or point to the document you want to ingest. The agent will:
 ### Run a health check
 
 ```bash
-uv run python scripts/health_check.py knowledge-base
+uv run python skills/health/scripts/health_check.py knowledge-base
 ```
 
 Sample output:
@@ -239,7 +263,7 @@ Agent: [calls knowledge_ask("What is our API permission control policy?")]
 ```
 
 `knowledge_ask` internally:
-1. Reads `skills/explore.md` as a sub-agent system prompt (YAML frontmatter provides `name`/`description` metadata for skill-aware agents)
+1. Reads `skills/explore/SKILL.md` as a sub-agent system prompt (YAML frontmatter provides `name`/`description` metadata for skill-aware agents)
 2. Calls the configured CLI sub-agent to reason over the knowledge base
 3. Returns a synthesized answer with source citations
 
@@ -261,13 +285,13 @@ knowledge_read("entry-A")
 # Step 3 — Follow [[Related]] links to explore connected concepts
 ```
 
-Load `skills/explore.md` as your agent's system prompt for a guided exploration protocol that goes at least 2 link-levels deep before concluding.
+Load `skills/explore/SKILL.md` as your agent's system prompt for a guided exploration protocol that goes at least 2 link-levels deep before concluding.
 
 ### Tidying the knowledge base
 
 > Tidy operations require **admin access** (ability to write files to the knowledge base). All tidy suggestions are presented for human confirmation before any file is written.
 
-1. Load `skills/tidy.md` as your agent's system prompt.
+1. Load `skills/tidy/SKILL.md` as your agent's system prompt.
 2. The agent will diagnose the knowledge base and suggest targeted actions:
 
 | Action | Trigger | Effect |
@@ -296,7 +320,7 @@ uv run pytest tests/
 
 # Verify tidy utils against example data
 uv run python -c "
-from scripts.tidy_utils import *
+from skills.tidy.scripts.tidy_utils import *
 kb = 'knowledge-base'
 print('dangling:', find_dangling_links(kb))
 print('placeholder refs:', count_placeholder_refs(kb))
@@ -304,6 +328,10 @@ print('orphans:', find_orphan_entries(kb))
 print('contexts:', collect_ref_contexts(kb, '示例-占位文件说明'))
 "
 ```
+
+The repository no longer uses a shared top-level `scripts/` folder for Sediment
+runtime helpers. Skill-owned helpers live under `skills/*/scripts/` and should be
+imported from there in code, tests, and documentation.
 
 ---
 

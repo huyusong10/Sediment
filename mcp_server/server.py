@@ -15,7 +15,6 @@ Runs as an HTTP server using SSE transport, allowing remote clients to connect v
 import json
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 from importlib import resources
@@ -26,6 +25,7 @@ import yaml
 from mcp import types
 from mcp.server import Server
 
+from mcp_server.llm_cli import build_cli_command
 from skills.explore.scripts.kb_query import inventory, prepare_explore_context, validate_answer
 
 # ---------------------------------------------------------------------------
@@ -488,27 +488,13 @@ def _build_cli_command(
     payload_file: Path,
     skill_file: Path,
 ) -> tuple[list[str], str | None]:
-    placeholders = ('{prompt}', '{prompt_file}', '{payload_file}', '{skill_file}')
-    if any(token in cli_value for token in placeholders):
-        command = shlex.split(
-            cli_value.format(
-                prompt=prompt,
-                prompt_file=str(prompt_file),
-                payload_file=str(payload_file),
-                skill_file=str(skill_file),
-            )
-        )
-        return command, None
-
-    command = shlex.split(cli_value)
-    if not command:
-        raise RuntimeError('SEDIMENT_CLI did not resolve to a command.')
-
-    executable = Path(command[0]).name.lower()
-    if executable == 'claude':
-        return [*command, '-p', '--', prompt], None
-
-    return command, prompt
+    return build_cli_command(
+        cli_value,
+        prompt,
+        prompt_file=prompt_file,
+        payload_file=payload_file,
+        skill_file=skill_file,
+    )
 
 
 def _parse_cli_json(raw_output: str) -> dict[str, Any]:
@@ -568,6 +554,7 @@ def _make_router(sse):
     """
     async def _handle_direct_jsonrpc(scope, receive, send, body_bytes):
         """Handle a direct JSON-RPC POST without SSE session."""
+        body: dict[str, Any] | None = None
         try:
             body = json.loads(body_bytes.decode('utf-8'))
             method = body.get('method', '')

@@ -23,7 +23,10 @@
 
 ---
 
-Sediment is a white-box tacit-knowledge system for AI agents. It extracts reusable knowledge from documents, keeps it in plain Markdown, and exposes it through MCP for retrieval and maintenance.
+Sediment is a white-box tacit-knowledge system for AI agents. It focuses on a
+reliable runtime for inspecting, validating, and retrieving a Markdown
+knowledge base. Ingest and tidy are shipped as experimental workflow skills,
+not as fully productized runtime automation.
 
 Sediment v4 is built around a few non-negotiable ideas:
 - **White-box first**: the knowledge base is just files, not a hidden database
@@ -129,17 +132,20 @@ Environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `SEDIMENT_KB_PATH` | project `knowledge-base/` | Path to the KB root |
-| `SEDIMENT_CLI` | `claude` | CLI command used by `knowledge_ask` |
+| `SEDIMENT_CLI` | `claude` | CLI command used by `knowledge_ask` and experimental workflow harnesses |
 | `SEDIMENT_HOST` | `0.0.0.0` | HTTP bind address |
 | `SEDIMENT_PORT` | `8000` | HTTP port |
 | `SEDIMENT_SSE_PATH` | `/sediment/` | SSE endpoint path |
 
 ## Use The KB
 
-- **Ingest**: load `skills/ingest/SKILL.md` as the agent instruction and feed source materials
 - **Explore**: ask natural-language questions through `knowledge_ask`, or use `knowledge_list` + `knowledge_read`
-- **Tidy**: load `skills/tidy/SKILL.md` to repair graph gaps, invalid entries, and promotable placeholders
 - **Health**: run `uv run python skills/health/scripts/health_check.py knowledge-base`
+- **Ingest (experimental)**: load `skills/ingest/SKILL.md` as a workflow instruction and feed source materials
+- **Tidy (experimental)**: load `skills/tidy/SKILL.md` as a workflow instruction to repair graph gaps, invalid entries, and promotable placeholders
+
+Benchmark scripts under `testcase/` are internal evaluation harnesses, not part
+of Sediment's public runtime surface.
 
 `knowledge_ask` keeps the same public interface:
 

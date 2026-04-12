@@ -23,7 +23,9 @@
 
 ---
 
-Sediment 是一个面向 AI Agent 的白盒隐性知识系统。它从文档中提炼可复用知识，将结果保存为普通 Markdown 文件，并通过 MCP 提供检索与维护能力。
+Sediment 是一个面向 AI Agent 的白盒隐性知识系统。它当前重点提供
+稳定的 Markdown 知识库运行时：可读、可校验、可巡检、可检索。
+ingest 和 tidy 目前作为实验性工作流 skill 提供，而不是已经完全产品化的运行时自动化能力。
 
 Sediment v4 坚持几条核心原则：
 - **白盒优先**：知识库就是文件，不是隐藏数据库
@@ -129,17 +131,19 @@ uv run sediment-server
 | 变量名 | 默认值 | 说明 |
 |---|---|---|
 | `SEDIMENT_KB_PATH` | 项目 `knowledge-base/` | 知识库根目录 |
-| `SEDIMENT_CLI` | `claude` | `knowledge_ask` 使用的 CLI |
+| `SEDIMENT_CLI` | `claude` | `knowledge_ask` 以及实验性工作流脚本使用的 CLI |
 | `SEDIMENT_HOST` | `0.0.0.0` | HTTP 绑定地址 |
 | `SEDIMENT_PORT` | `8000` | HTTP 端口 |
 | `SEDIMENT_SSE_PATH` | `/sediment/` | SSE 端点路径 |
 
 ## 使用知识库
 
-- **摄入**：把 `skills/ingest/SKILL.md` 作为 Agent 指令，输入原始材料
 - **探索**：通过 `knowledge_ask` 提问，或直接使用 `knowledge_list` + `knowledge_read`
-- **整理**：把 `skills/tidy/SKILL.md` 作为整理指令，修复断链、坏条目和可提升 placeholder
 - **巡检**：运行 `uv run python skills/health/scripts/health_check.py knowledge-base`
+- **摄入（实验性）**：把 `skills/ingest/SKILL.md` 作为工作流说明，输入原始材料
+- **整理（实验性）**：把 `skills/tidy/SKILL.md` 作为工作流说明，修复断链、坏条目和可提升 placeholder
+
+`testcase/` 下的 benchmark 脚本用于内部评估，不属于 Sediment 公共运行时接口的一部分。
 
 `knowledge_ask` 的对外返回结构保持不变：
 

@@ -116,3 +116,35 @@ def test_answer_question_returns_explicit_error_when_cli_is_unavailable(
     assert result["sources"] == []
     assert result["confidence"] == "low"
     assert "unavailable" in result["error"].lower()
+
+
+def test_direct_jsonrpc_malformed_body_returns_error_payload() -> None:
+    class DummySSE:
+        async def handle_post_message(self, scope, receive, send):  # pragma: no cover
+            raise AssertionError("unexpected SSE POST fallback")
+
+        async def connect_sse(self, scope, receive, send):  # pragma: no cover
+            raise AssertionError("unexpected SSE connect")
+
+    router = server._make_router(DummySSE())
+    messages = [
+        {"type": "http.request", "body": b"{invalid", "more_body": False},
+    ]
+    sent: list[dict] = []
+
+    async def receive():
+        return messages.pop(0)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "headers": [(b"content-type", b"application/json")],
+    }
+
+    asyncio.run(router(scope, receive, send))
+
+    payload = json.loads(sent[-1]["body"].decode("utf-8"))
+    assert payload["error"]["code"] == -32603

@@ -208,6 +208,7 @@ def test_inventory_shortlist_neighbors_and_snippets(tmp_path: Path) -> None:
     assert data["aliases"]["热切换"] == ["热备份"]
     assert data["docs"]["热备份"]["entry_type"] == "concept"
     assert data["docs"]["泄洪前先确认热备份"]["entry_type"] == "lesson"
+    assert data["docs"]["热备份"]["summary"] == "热备份是在主链路失效前准备好的可接管路径能力。"
 
     ranked = shortlist("什么是热切换？", inventory_data=data, limit=3)
     assert ranked[0]["name"] == "热备份"
@@ -222,6 +223,17 @@ def test_inventory_shortlist_neighbors_and_snippets(tmp_path: Path) -> None:
     assert "Scope" in sections
 
 
+def test_snippets_prioritize_why_for_lesson_queries(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    excerpt_map = snippets(
+        ["泄洪前先确认热备份"],
+        question="为什么泄洪前要先确认热备份？",
+        inventory_data=inventory(kb_path),
+    )
+
+    assert excerpt_map["泄洪前先确认热备份"]["snippets"][0]["section"] == "Why"
+
+
 def test_validate_entry_supports_v4_types(tmp_path: Path) -> None:
     kb_path = _build_sample_kb(tmp_path)
 
@@ -232,6 +244,48 @@ def test_validate_entry_supports_v4_types(tmp_path: Path) -> None:
     assert concept["valid"] is True
     assert lesson["valid"] is True
     assert placeholder["valid"] is True
+
+
+def test_validate_entry_rejects_title_only_entries(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+
+    _write(
+        kb_path / "entries" / "空概念.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - doc.md
+        ---
+        # 空概念
+
+        ## Scope
+        适用于任何需要测试空摘要校验的场景。
+
+        ## Related
+        - [[热备份]] - 参考已有概念
+        """,
+    )
+    _write(
+        kb_path / "placeholders" / "空占位.md",
+        """
+        ---
+        type: placeholder
+        aliases: []
+        ---
+        # 空占位
+        """,
+    )
+
+    concept = validate_entry(path=kb_path / "entries" / "空概念.md")
+    placeholder = validate_entry(path=kb_path / "placeholders" / "空占位.md")
+
+    assert concept["valid"] is False
+    assert "summary/core proposition" in " ".join(concept["hard_failures"])
+    assert placeholder["valid"] is False
+    assert "gap description" in " ".join(placeholder["hard_failures"])
 
 
 def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> None:
@@ -288,6 +342,59 @@ def test_audit_kb_reports_v4_quality_and_concept_gaps(tmp_path: Path) -> None:
     assert any(item["name"] == "泄洪" for item in report["canonical_gaps"])
 
 
+def test_audit_kb_reports_invalid_placeholder_and_provenance_noise(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    _write(
+        kb_path / "entries" / "来源污染.md",
+        """
+        ---
+        type: lesson
+        status: inferred
+        aliases: []
+        sources:
+          - retro.md
+        ---
+        # 来源污染
+
+        先定义[[热备份]]，再执行变更。
+
+        ## Trigger
+        在执行高风险变更前。
+
+        ## Why
+        这样可以减少误判和切换期间的放大故障。
+
+        ## Risks
+        跳过这一步会放大恢复成本。
+
+        ## Sources
+        [[不该入图的来源]]
+
+        ## Related
+        - [[热备份]] - 前置概念
+        """,
+    )
+    _write(
+        kb_path / "placeholders" / "坏占位.md",
+        """
+        ---
+        type: placeholder
+        aliases: []
+        ---
+        # 坏占位
+
+        > Appears in: [[来源污染]]
+        """,
+    )
+
+    report = audit_kb(kb_path)
+
+    assert report["invalid_placeholder_count"] >= 1
+    assert "坏占位" in report["invalid_placeholder_entries"]
+    assert report["provenance_contamination_count"] >= 1
+    assert any(item["name"] == "来源污染" for item in report["provenance_contamination"])
+
+
 def test_provenance_sections_do_not_create_graph_noise(tmp_path: Path) -> None:
     kb_path = tmp_path / "knowledge-base"
     _write(
@@ -321,6 +428,30 @@ def test_provenance_sections_do_not_create_graph_noise(tmp_path: Path) -> None:
         [[2024年Q3支付模块故障复盘]] [[权限系统重构设计文档]]
         """,
     )
+    _write(
+        kb_path / "entries" / "来源别名.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - source_bundle.md
+        ---
+        # 来源别名
+
+        来源别名用于验证 Sources 标题不会污染图谱。
+
+        ## Scope
+        适用于来源字段兼容性测试。
+
+        ## Sources
+        [[另一份来源文档]]
+
+        ## Related
+        - [[权限模型]] - 同样依赖 provenance 兼容
+        """,
+    )
 
     dangling = find_dangling_links(str(kb_path))
     contexts = collect_ref_contexts(str(kb_path), "权限模型")
@@ -328,4 +459,5 @@ def test_provenance_sections_do_not_create_graph_noise(tmp_path: Path) -> None:
     dangling_names = {item["link"] for item in dangling}
     assert "2024年Q3支付模块故障复盘" not in dangling_names
     assert "权限系统重构设计文档" not in dangling_names
+    assert "另一份来源文档" not in dangling_names
     assert all("2024年Q3支付模块故障复盘" not in item for item in contexts)

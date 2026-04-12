@@ -18,8 +18,7 @@ from pathlib import Path
 # python skills/health/scripts/health_check.py knowledge-base
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
-from skills.explore.scripts.kb_query import audit_kb
-from skills.tidy.scripts.tidy_utils import count_placeholder_refs
+from mcp_server.kb import audit_kb, count_placeholder_refs
 
 
 def run_health_check(kb_path: str) -> dict:
@@ -58,6 +57,7 @@ def print_report(report: dict) -> None:
     print("STRUCTURE QUALITY")
     print("-----------------")
     print(f"Hard-fail entries:   {report['hard_fail_entry_count']}")
+    print(f"Bad placeholders:    {report['invalid_placeholder_count']}")
     print(f"Missing Scope:       {report['missing_scope_count']}")
     print(f"Missing Trigger:     {report['missing_trigger_count']}")
     print(f"Missing Why:         {report['missing_why_count']}")
@@ -73,6 +73,7 @@ def print_report(report: dict) -> None:
     print("------------")
     print(f"Dangling links:      {report['dangling_link_count']}")
     print(f"Orphan entries:      {report['orphan_entry_count']}")
+    print(f"Provenance noise:    {report['provenance_contamination_count']}")
     print(
         "Placeholder refs:    "
         f"high={report['placeholder_ref_buckets']['high']}  "
@@ -116,6 +117,10 @@ def build_recommendations(report: dict) -> list[str]:
     if report["dangling_link_count"] or report["orphan_entry_count"]:
         recommendations.append(
             "Run tidy graph repair to resolve dangling links and orphan entries."
+        )
+    if report["provenance_contamination_count"]:
+        recommendations.append(
+            "Clean provenance-only wikilinks so sources stay metadata instead of graph edges."
         )
     if not recommendations:
         recommendations.append("Knowledge base looks healthy. Continue ingesting documents.")

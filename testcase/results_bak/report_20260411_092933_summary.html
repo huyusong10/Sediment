@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sediment 测试报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                         'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f5f5f5;
+            color: #1a1a1a;
+            line-height: 1.6;
+            padding: 1.5rem;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        /* Header card */
+        .header-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            text-align: center;
+        }
+        .header-card.passed { border-top: 4px solid #22c55e; }
+        .header-card.failed { border-top: 4px solid #ef4444; }
+        .header-card h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+        .meta-row { font-size: 0.85rem; color: #888; margin-bottom: 0.25rem; }
+
+        .score-display {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+        .score-circle {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            border: 6px solid;
+        }
+        .score-value { font-size: 2rem; line-height: 1; }
+        .score-max { font-size: 0.85rem; font-weight: 400; opacity: 0.6; }
+        .score-badge {
+            font-size: 1.1rem;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+        }
+        .score-badge.passed { background: #dcfce7; color: #166534; }
+        .score-badge.failed { background: #fef2f2; color: #991b1b; }
+
+        .score-breakdown {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 1.5rem;
+        }
+        .bd-card {
+            background: #f8f8f8;
+            border-radius: 8px;
+            padding: 1rem 2rem;
+            text-align: center;
+        }
+        .bd-label { font-size: 0.8rem; color: #666; margin-bottom: 0.25rem; }
+        .bd-value { font-size: 1.5rem; font-weight: 700; }
+        .bd-max { font-size: 0.85rem; color: #888; font-weight: 400; }
+
+        /* Section */
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .section h2 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid #eee;
+        }
+        .section h3 {
+            font-size: 1rem;
+            margin: 1.5rem 0 0.5rem;
+            color: #555;
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: #f8f8f8;
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .stat-value { font-size: 1.8rem; font-weight: 700; display: block; }
+        .stat-label { font-size: 0.8rem; color: #666; display: block; margin-top: 0.25rem; }
+
+        /* Score tags */
+        .score-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .score-zero     { background: #fee2e2; color: #991b1b; }
+        .score-critical { background: #fecaca; color: #b91c1c; }
+        .score-low      { background: #fef3c7; color: #92400e; }
+        .score-mid      { background: #dbeafe; color: #1e40af; }
+        .score-good     { background: #dcfce7; color: #166534; }
+        .score-perfect  { background: #d1fae5; color: #065f46; border: 1px solid #065f46; }
+
+        /* Difficulty tags */
+        .diff-tag {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .difficulty-easy   { background: #dcfce7; color: #166534; }
+        .difficulty-medium { background: #dbeafe; color: #1e40af; }
+        .difficulty-hard   { background: #fef3c7; color: #92400e; }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        th {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            background: #f8f8f8;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #eee;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #f0f0f0;
+            vertical-align: top;
+        }
+        tr:nth-child(even) { background: #fafafa; }
+        tr:hover { background: #f0f0f0; }
+
+        /* Full detail table column widths */
+        .full-table { table-layout: fixed; }
+        .col-concept  { width: 12%; }
+        .col-score    { width: 8%; }
+        .col-def      { width: 35%; }
+        .col-ans      { width: 45%; }
+        .col-qid      { width: 8%; }
+        .col-qquestion{ width: 30%; }
+        .col-qscore   { width: 10%; }
+        .col-qmethod  { width: 10%; }
+        .col-qanswers { width: 42%; }
+
+        .detail-table { font-size: 0.85rem; }
+        .trend-table  { font-size: 0.9rem; }
+
+        /* Concept name column */
+        .concept-name { font-size: 0.9rem; }
+        /* Definition / Answer cells */
+        .def-cell, .ans-cell { font-size: 0.82rem; color: #444; }
+        .def-cell details, .ans-cell details { cursor: pointer; }
+        .def-cell summary, .ans-cell summary { list-style: none; }
+        .def-cell summary::-webkit-details-marker, .ans-cell summary::-webkit-details-marker { display: none; }
+
+        /* QA cells */
+        .q-id { white-space: nowrap; }
+        .q-question { max-width: 300px; }
+        .q-score { white-space: nowrap; }
+        .q-method { font-size: 0.8rem; color: #888; }
+        .q-answers details { margin-bottom: 0.25rem; cursor: pointer; }
+        .q-answers summary { list-style: none; }
+        .q-answers summary::-webkit-details-marker { display: none; }
+        .qa-box {
+            padding: 0.5rem;
+            background: #f8f8f8;
+            border-radius: 4px;
+            font-size: 0.82rem;
+            margin-top: 0.25rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .qa-box.std { border-left: 3px solid #166534; }
+        .qa-box.ans { border-left: 3px solid #1e40af; }
+
+        /* Bar chart */
+        .bar-container {
+            background: #eee;
+            border-radius: 4px;
+            height: 20px;
+            width: 150px;
+            overflow: hidden;
+        }
+        .bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #22c55e);
+            border-radius: 4px;
+        }
+
+        /* Details */
+        details { margin-top: 0.25rem; }
+        details summary {
+            padding: 0.25rem 0.5rem;
+            background: #f8f8f8;
+            border-radius: 4px;
+            font-weight: 500;
+            user-select: none;
+            font-size: 0.82rem;
+        }
+        details summary:hover { background: #f0f0f0; }
+
+        /* Report links */
+        .report-link {
+            color: #1e40af;
+            text-decoration: none;
+            font-size: 1.1rem;
+        }
+        .report-link:hover { text-decoration: underline; }
+
+        /* Utilities */
+        .dim { color: #888; font-size: 0.85rem; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 2rem;
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body { padding: 0.5rem; }
+            .section { padding: 1rem; }
+            .score-breakdown { flex-direction: column; align-items: center; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+
+    <div class="header-card failed">
+        <h1>Sediment 测试报告 — 总览</h1>
+        <div class="meta-row"><span>生成时间: 2026-04-11 09:29:33</span></div>
+        <div class="score-display">
+            <div class="score-circle" style="color: #ef4444">
+                <span class="score-value">66.9</span>
+                <span class="score-max">/100</span>
+            </div>
+            <div class="score-badge failed">
+                未通过（标准 ≥ 80）
+            </div>
+        </div>
+    </div>
+    
+<div class="section"><h2><a href="report_full.html" class="report-link">全量构建 详细报告</a></h2></div>
+
+    <div class="footer">
+        <p>报告生成时间: 2026-04-11 09:29:33</p>
+        <p>Sediment 测试方案</p>
+    </div>
+</div>
+</body>
+</html>

@@ -117,6 +117,22 @@ sources:
                 }
             ],
         }
+    elif "Sediment submission triage assistant." in prompt:
+        payload = {
+            "summary": (
+                "The submission overlaps with existing backup knowledge "
+                "and looks safe to ingest conservatively."
+            ),
+            "recommended_title": "热备份浏览器提案",
+            "recommended_type": "concept",
+            "duplicate_risk": "medium",
+            "committer_action": "ingest",
+            "committer_note": "Link it to 热备份 and 回音壁 before promoting it to a fact.",
+            "related_entries": [
+                {"name": "热备份", "reason": "Existing concept with adjacent scope."},
+                {"name": "回音壁", "reason": "Provides operational context for backup decisions."},
+            ],
+        }
     else:
         payload = {"ok": True, "backend": "mock"}
     _write_output(argv, json.dumps(payload, ensure_ascii=False))

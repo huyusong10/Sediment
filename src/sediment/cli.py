@@ -45,7 +45,7 @@ from sediment.llm_cli import (
     parse_json_object,
     resolve_executable,
 )
-from sediment.platform_services import get_health_payload, list_reviews_with_jobs
+from sediment.platform_services import get_health_payload, infer_mime_type, list_reviews_with_jobs
 from sediment.runtime import (
     admin_token,
     build_store,
@@ -856,6 +856,11 @@ def daemon_status() -> dict[str, Any]:
     }
 
 
+def effective_admin_auth_required() -> bool:
+    metadata = read_daemon_metadata()
+    return bool(admin_token() or metadata.get("startup_admin_token"))
+
+
 def wait_for_health(*, timeout_seconds: float) -> bool:
     deadline = time.time() + max(timeout_seconds, 0.2)
     while time.time() < deadline:
@@ -932,6 +937,7 @@ def start_daemon(args) -> int:
 
     paths = daemon_paths()
     cli_progress(f"Launching background services. Logs: {paths['log']}", enabled=enabled)
+    startup_admin_token = secrets.token_urlsafe(18)
     command = [
         sys.executable,
         "-m",
@@ -953,6 +959,7 @@ def start_daemon(args) -> int:
             cwd=str(project_root()),
             env={
                 **os.environ,
+                "SEDIMENT_STARTUP_ADMIN_TOKEN": startup_admin_token,
                 "PYTHONUNBUFFERED": "1",
                 "PYTHONPATH": (
                     f"{source_root()}{os.pathsep}{os.environ.get('PYTHONPATH', '').strip()}"
@@ -975,6 +982,7 @@ def start_daemon(args) -> int:
             "port": port(),
             "host": host(),
             "log_path": str(paths["log"]),
+            "startup_admin_token": startup_admin_token,
         }
     )
 
@@ -983,10 +991,12 @@ def start_daemon(args) -> int:
         print(f"Sediment daemon started (pid={process.pid}).")
         print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
         print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
+        print(f"Token:  {startup_admin_token}")
         print(f"Logs:   {paths['log']}")
         print_next_steps(
             f"Open the portal: {local_health_url().removesuffix('/healthz')}/portal",
             f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin",
+            f"Use this login token: {startup_admin_token}",
             f"Inspect status: {scoped_command('status')}",
         )
         return 0
@@ -1183,9 +1193,11 @@ def submit_text_command(args) -> int:
         return 1
 
     try:
-        cli_progress(f"Submitting text draft `{args.title}` to the buffer.", enabled=enabled)
+        cli_progress(f"Scanning KB context for text draft `{args.title}`.", enabled=enabled)
+        cli_progress("Generating a committer-facing submission suggestion.", enabled=enabled)
         record = submit_text_request(
             store=build_store(),
+            kb_path=kb_path(),
             title=args.title,
             content=content,
             submitter_name=args.submitter_name or current_actor_name(),
@@ -1207,6 +1219,11 @@ def submit_text_command(args) -> int:
         print(f"Created submission: {record['id']}")
         print(f"title: {record['title']}")
         print(f"status: {record['status']}")
+        analysis = record.get("analysis") or {}
+        if analysis:
+            print(f"analysis: {analysis.get('summary', '-')}")
+            print(f"suggested_type: {analysis.get('recommended_type', '-')}")
+            print(f"suggested_action: {analysis.get('committer_action', '-')}")
         print_next_steps(
             scoped_command("status"),
             scoped_command("review list"),
@@ -1214,21 +1231,57 @@ def submit_text_command(args) -> int:
     return 0
 
 
+def _build_cli_upload_request(path: Path) -> dict[str, Any]:
+    if path.is_dir():
+        uploads: list[dict[str, Any]] = []
+        for item in sorted(path.rglob("*")):
+            if not item.is_file():
+                continue
+            uploads.append(
+                {
+                    "filename": item.name,
+                    "relative_path": str(item.relative_to(path)),
+                    "mime_type": infer_mime_type(item.name) or "",
+                    "file_bytes": item.read_bytes(),
+                }
+            )
+        return {
+            "filename": path.name,
+            "mime_type": "application/zip",
+            "file_bytes": b"",
+            "uploads": uploads,
+        }
+    return {
+        "filename": path.name,
+        "mime_type": infer_mime_type(path.name) or "",
+        "file_bytes": path.read_bytes(),
+        "uploads": None,
+    }
+
+
 def submit_file_command(args) -> int:
     enabled = progress_enabled(args)
     file_path = Path(args.path).expanduser().resolve()
-    if not file_path.exists() or not file_path.is_file():
-        print(f"File not found: {file_path}", file=sys.stderr)
+    if not file_path.exists():
+        print(f"Path not found: {file_path}", file=sys.stderr)
         return 1
 
     try:
-        cli_progress(f"Uploading document `{file_path.name}` to the buffer.", enabled=enabled)
+        if file_path.is_dir():
+            mode = "folder"
+        elif file_path.suffix.lower() == ".zip":
+            mode = "archive"
+        else:
+            mode = "document"
+        cli_progress(f"Preparing {mode} upload `{file_path.name}`.", enabled=enabled)
+        upload_request = _build_cli_upload_request(file_path)
         record = submit_document_request(
             store=build_store(),
             uploads_dir=platform_paths()["uploads_dir"],
-            filename=args.filename or file_path.name,
-            mime_type=args.mime_type,
-            file_bytes=file_path.read_bytes(),
+            filename=args.filename or upload_request["filename"],
+            mime_type=args.mime_type or upload_request["mime_type"],
+            file_bytes=upload_request["file_bytes"],
+            uploads=upload_request["uploads"],
             submitter_name=args.submitter_name or current_actor_name(),
             submitter_ip="127.0.0.1",
             submitter_user_id="cli",
@@ -1268,7 +1321,7 @@ def status_command(args) -> int:
         host=host(),
         port=port(),
         sse_endpoint=sse_endpoint(),
-        auth_required=bool(admin_token()),
+        auth_required=effective_admin_auth_required(),
         run_jobs_in_process=run_jobs_in_process(),
         submission_rate_limit_count=submission_rate_limit_count(),
         submission_rate_limit_window_seconds=submission_rate_limit_window_seconds(),
@@ -1332,7 +1385,7 @@ def status_queue_command(args) -> int:
         host=host(),
         port=port(),
         sse_endpoint=sse_endpoint(),
-        auth_required=bool(admin_token()),
+        auth_required=effective_admin_auth_required(),
         run_jobs_in_process=run_jobs_in_process(),
         submission_rate_limit_count=submission_rate_limit_count(),
         submission_rate_limit_window_seconds=submission_rate_limit_window_seconds(),
@@ -2062,6 +2115,7 @@ def render_help(topic: str | None) -> str:
                 "  sediment server start",
                 "  sediment kb explore \"什么是热备份\"",
                 "  sediment submit text --title \"新概念\" --content \"...\"",
+                "  sediment submit file ./reports --name alice",
                 "  sediment review list",
                 "  sediment logs follow",
                 "",
@@ -2164,9 +2218,11 @@ def render_help(topic: str | None) -> str:
                 "sediment server",
                 "",
                 "Manage the per-instance daemon lifecycle.",
+                "Each foreground/background start prints a one-time admin login token.",
                 "",
                 "Commands:",
                 "  sediment server start",
+                "  sediment server run",
                 "  sediment server status",
                 "  sediment server stop",
             ]
@@ -2207,6 +2263,8 @@ def render_help(topic: str | None) -> str:
                 "  sediment submit text --title \"新概念\" --content \"...\" --type concept",
                 "  sediment submit text --title \"来自 stdin\" --type feedback < note.txt",
                 "  sediment submit file ./incident.docx --name alice",
+                "  sediment submit file ./incident-bundle.zip --name alice",
+                "  sediment submit file ./reports-folder --name alice",
             ]
         ),
     }
@@ -2450,7 +2508,10 @@ def build_parser() -> argparse.ArgumentParser:
     submit_text_parser.add_argument("--json", action="store_true")
     submit_text_parser.set_defaults(func=submit_text_command, needs_runtime_context=True)
 
-    submit_file_parser = submit_subparsers.add_parser("file", help="Submit a document file.")
+    submit_file_parser = submit_subparsers.add_parser(
+        "file",
+        help="Submit a document file, folder, or zip archive.",
+    )
     submit_file_parser.add_argument("path")
     submit_file_parser.add_argument("--filename")
     submit_file_parser.add_argument("--mime-type")

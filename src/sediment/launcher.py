@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -30,6 +31,7 @@ from sediment.settings import (
 class ProcessSpec:
     name: str
     command: list[str]
+    env: dict[str, str] | None = None
 
 
 @dataclass
@@ -83,9 +85,14 @@ def validate_environment(*, require_cli: bool = True) -> list[str]:
     return errors
 
 
-def build_process_specs(*, worker_poll_interval: float) -> list[ProcessSpec]:
+def build_process_specs(
+    *,
+    worker_poll_interval: float,
+    startup_admin_token: str | None = None,
+) -> list[ProcessSpec]:
     python = sys.executable
     config_path = str(current_config_path())
+    startup_admin_token = (startup_admin_token or "").strip() or secrets.token_urlsafe(18)
     worker_command = [python, "-m", "sediment.worker", "--config", config_path]
     if worker_poll_interval > 0:
         worker_command.extend(["--poll-interval", str(worker_poll_interval)])
@@ -101,6 +108,7 @@ def build_process_specs(*, worker_poll_interval: float) -> list[ProcessSpec]:
                 "--run-jobs-in-process",
                 "false",
             ],
+            env={"SEDIMENT_STARTUP_ADMIN_TOKEN": startup_admin_token},
         ),
         ProcessSpec(name="worker", command=worker_command),
     ]
@@ -124,6 +132,8 @@ def spawn_process(spec: ProcessSpec, *, sink: TextIO) -> ManagedProcess:
     env["PYTHONPATH"] = (
         f"{source_root()}{os.pathsep}{pythonpath}" if pythonpath else str(source_root())
     )
+    if spec.env:
+        env.update(spec.env)
     process = subprocess.Popen(
         spec.command,
         stdout=subprocess.PIPE,
@@ -278,13 +288,20 @@ def main(argv: list[str] | None = None) -> int:
     previous_sigint = signal.signal(signal.SIGINT, handle_signal)
     previous_sigterm = signal.signal(signal.SIGTERM, handle_signal)
     try:
-        specs = build_process_specs(worker_poll_interval=args.worker_poll_interval)
+        startup_admin_token = os.environ.get("SEDIMENT_STARTUP_ADMIN_TOKEN", "").strip()
+        if not startup_admin_token:
+            startup_admin_token = secrets.token_urlsafe(18)
+        specs = build_process_specs(
+            worker_poll_interval=args.worker_poll_interval,
+            startup_admin_token=startup_admin_token,
+        )
         print("[up] Sediment platform launcher")
         print(f"[up] KB path:  {configured_kb_path()}")
         print(f"[up] Port:     {configured_port()}")
         print(f"[up] Portal:   http://127.0.0.1:{configured_port()}/portal")
         print(f"[up] Admin:    http://127.0.0.1:{configured_port()}/admin")
         print(f"[up] Health:   http://127.0.0.1:{configured_port()}/healthz")
+        print(f"[up] Admin token: {startup_admin_token}")
         return run_managed_processes(
             specs,
             sink=sys.stdout,

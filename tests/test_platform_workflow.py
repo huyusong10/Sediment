@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import base64
 import importlib
+import io
 import sys
 import textwrap
 import time
+import zipfile
 from pathlib import Path
 
 from starlette.testclient import TestClient
@@ -169,6 +172,8 @@ def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> N
     payload = response.json()
     assert payload["status"] == "pending"
     assert payload["submitter_name"] == "Alice"
+    assert payload["analysis"]["recommended_type"] == "concept"
+    assert payload["analysis"]["related_entries"]
 
     limited = client.post(
         "/api/portal/submissions/text",
@@ -235,6 +240,36 @@ def test_ingest_job_review_and_apply(tmp_path: Path, monkeypatch) -> None:
     )
     assert entry.status_code == 200
     assert "热备份提交草案" in entry.json()["content"]
+
+
+def test_portal_document_archive_submission(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = _build_platform_project(tmp_path)
+    client, _server_module, _worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    bundle = io.BytesIO()
+    with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("notes/one.md", "# One\n\n来自 zip 的第一份文档。\n")
+        archive.writestr("notes/two.txt", "第二份文本\n")
+
+    response = client.post(
+        "/api/portal/submissions/document",
+        json={
+            "filename": "bundle.zip",
+            "mime_type": "application/zip",
+            "content_base64": base64.b64encode(bundle.getvalue()).decode("ascii"),
+            "submitter_name": "Alice",
+        },
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["mime_type"] == "application/zip"
+    assert payload["title"] == "bundle"
+    assert "notes/one.md" in payload["extracted_text"]
 
 
 def test_ingest_job_review_and_apply_with_symlinked_kb_path(tmp_path: Path, monkeypatch) -> None:

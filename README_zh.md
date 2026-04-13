@@ -72,7 +72,7 @@ sediment --help
 ```bash
 git clone https://github.com/huyusong10/Sediment.git
 cd Sediment
-uv tool install --from . sediment --compile-bytecode
+uv tool install --from . sediment --force --reinstall --compile-bytecode
 sediment --help
 ```
 
@@ -120,6 +120,8 @@ sediment doctor
 ```bash
 sediment server run
 ```
+
+服务启动后，Sediment 会在终端里打印一个一次性的管理台登录 token。进入 `/admin` 时，直接使用这个 token 即可登录。
 
 然后访问：
 
@@ -175,6 +177,13 @@ sediment --instance ops-prod review list
 ```bash
 uv run --project /path/to/Sediment sediment --help
 ```
+
+## Portal 工作流
+
+- 搜索是主界面：Portal 优先服务全文搜索，条目全文改成聚焦弹层，而不是长期占据一整块固定侧栏。
+- 文本提交在进入缓冲区之前，会先结合当前 KB 做一次 Agent 建议分析，让 committer 直接看到建议标题、建议类型、重复风险和相关条目。
+- 文档提交支持单文件、文件夹、多文件和 `.zip` 压缩包；Sediment 会自动解压支持的文档，并把提取出的文本送进缓冲区。
+- Quartz 4 被当作可选增强页，而不是基础运行时依赖。只要你已经构建好 Quartz 静态站点，Sediment 就会在 `/portal/graph-view` 自动嵌入；如果没有，核心安装也依然不需要 Node/npm。
 
 ## 项目结构
 

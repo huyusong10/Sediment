@@ -148,7 +148,8 @@ def test_server_daemon_lifecycle(monkeypatch, tmp_path: Path, capsys) -> None:
             ]
         )
         assert start_rc == 0
-        capsys.readouterr()
+        started_output = capsys.readouterr().out
+        assert "Token:" in started_output
 
         status_rc = cli.main(["server", "status", "--json"])
         assert status_rc == 0
@@ -516,6 +517,8 @@ def test_submit_text_command_and_status_urls(tmp_path: Path, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["title"] == "CLI 提案"
     assert payload["status"] == "pending"
+    assert payload["analysis"]["recommended_type"] == "concept"
+    assert payload["analysis"]["committer_action"] == "ingest"
 
     rc = cli.main(["status"])
     assert rc == 0
@@ -550,3 +553,28 @@ def test_submit_file_command_uses_shared_submission_backend(tmp_path: Path, caps
     payload = json.loads(capsys.readouterr().out)
     assert payload["submission_type"] == "document"
     assert payload["submitter_name"] == "alice"
+
+
+def test_submit_file_command_accepts_directories(tmp_path: Path, capsys) -> None:
+    _configure_cli_config(tmp_path, port=8126)
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+    (bundle_root / "notes").mkdir()
+    (bundle_root / "notes" / "one.md").write_text("# One\n\nfirst\n", encoding="utf-8")
+    (bundle_root / "notes" / "two.txt").write_text("second\n", encoding="utf-8")
+
+    rc = cli.main(
+        [
+            "submit",
+            "file",
+            str(bundle_root),
+            "--name",
+            "alice",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["submission_type"] == "document"
+    assert payload["mime_type"] == "application/zip"
+    assert payload["title"] == "bundle"

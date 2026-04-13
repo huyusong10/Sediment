@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-JSON_FIELDS = {"request_payload", "result_payload", "details"}
+JSON_FIELDS = {"request_payload", "result_payload", "details", "analysis"}
 
 
 def utc_now() -> str:
@@ -42,6 +42,7 @@ class PlatformStore:
                     submitter_user_id TEXT,
                     status TEXT NOT NULL,
                     dedupe_hash TEXT NOT NULL,
+                    analysis TEXT,
                     notes TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -110,6 +111,12 @@ class PlatformStore:
             )
             self._ensure_column(
                 conn,
+                table="submissions",
+                column="analysis",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
                 table="jobs",
                 column="attempt_count",
                 definition="INTEGER NOT NULL DEFAULT 0",
@@ -160,6 +167,7 @@ class PlatformStore:
         submitter_user_id: str | None,
         dedupe_hash: str,
         status: str = "pending",
+        analysis: dict[str, Any] | None = None,
         notes: str | None = None,
     ) -> dict[str, Any]:
         now = utc_now()
@@ -180,10 +188,11 @@ class PlatformStore:
                     submitter_user_id,
                     status,
                     dedupe_hash,
+                    analysis,
                     notes,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     submission_id,
@@ -198,6 +207,7 @@ class PlatformStore:
                     submitter_user_id,
                     status,
                     dedupe_hash,
+                    self._encode_json(analysis),
                     notes,
                     now,
                     now,

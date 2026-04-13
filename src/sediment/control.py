@@ -18,6 +18,7 @@ from sediment.platform_store import PlatformStore, utc_now
 def submit_text_request(
     *,
     store: PlatformStore,
+    kb_path: str | Path,
     title: str,
     content: str,
     submitter_name: str,
@@ -32,6 +33,7 @@ def submit_text_request(
 ) -> dict[str, Any]:
     return submit_text(
         store=store,
+        kb_path=kb_path,
         title=title,
         content=content,
         submitter_name=submitter_name,
@@ -53,6 +55,7 @@ def submit_document_request(
     filename: str,
     mime_type: str | None,
     file_bytes: bytes,
+    uploads: list[dict[str, Any]] | None = None,
     submitter_name: str,
     submitter_ip: str,
     submitter_user_id: str | None = None,
@@ -69,6 +72,7 @@ def submit_document_request(
         filename=filename,
         mime_type=resolved_mime,
         file_bytes=file_bytes,
+        uploads=uploads,
         submitter_name=submitter_name,
         submitter_ip=submitter_ip,
         submitter_user_id=submitter_user_id,

@@ -19,7 +19,7 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert page.status_code == 200
     assert 'data-testid="portal-search-input"' in page.text
     assert 'data-testid="portal-submit-text-button"' in page.text
-    assert 'data-testid="portal-graph"' in page.text
+    assert '/portal/graph-view' in page.text
     assert 'data-testid="portal-message"' in page.text
 
     home = client.get("/api/portal/home").json()
@@ -38,6 +38,7 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
         },
     )
     assert created.status_code == 201
+    assert created.json()["analysis"]["recommended_type"] == "concept"
 
     submissions = client.get("/api/admin/submissions").json()["submissions"]
     assert any(item["title"] == "网页提案" for item in submissions)

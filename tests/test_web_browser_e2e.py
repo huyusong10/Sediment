@@ -45,13 +45,15 @@ def _live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
 
     server_module = importlib.reload(server)
     worker_module = importlib.reload(worker)
-    monkeypatch.setattr(server_module, "ADMIN_TOKEN", admin_token)
+    monkeypatch.setattr(server_module, "ADMIN_TOKEN", "")
+    monkeypatch.setattr(server_module, "STARTUP_ADMIN_TOKEN", admin_token)
     monkeypatch.setattr(server_module, "SESSION_SECRET", "browser-e2e-session")
     monkeypatch.setattr(server_module, "RUN_JOBS_IN_PROCESS", False)
     monkeypatch.setattr(server_module, "TRUST_PROXY_HEADERS", False)
     monkeypatch.setattr(server_module, "TRUSTED_PROXY_CIDRS", ())
     monkeypatch.setattr(server_module, "JOB_STALE_AFTER_SECONDS", 1)
     monkeypatch.setattr(server_module, "JOB_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(server_module, "SUBMISSION_RATE_LIMIT_COUNT", 3)
 
     app = server_module.create_starlette_app()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
@@ -114,13 +116,33 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.get_by_test_id("portal-search-results")).to_contain_text("热备份")
             page.locator("#search-results .card").filter(has_text="热备份").first.click()
             expect(page.get_by_test_id("portal-entry-view")).to_contain_text("适用于需要连续服务的系统")
+            page.get_by_test_id("portal-entry-close").click()
 
             page.locator("#submit-name").fill("Alice")
             page.locator("#submit-title").fill("浏览器提案")
             page.locator("#submit-content").fill("这是一条来自真实浏览器流程的提案。")
             page.get_by_test_id("portal-submit-text-button").click()
             expect(page.locator("#submit-text-status")).to_contain_text("submission_id=")
+            expect(page.locator("#submit-text-analysis")).to_contain_text("Agent 建议")
             expect(page.get_by_test_id("portal-message")).to_contain_text("浏览器提案")
+
+            page.locator("#upload-name").fill("Alice")
+            page.get_by_test_id("portal-upload-file").set_input_files(
+                [
+                    {
+                        "name": "bundle-a.md",
+                        "mimeType": "text/markdown",
+                        "buffer": b"# Bundle A\n\nfirst\n",
+                    },
+                    {
+                        "name": "bundle-b.txt",
+                        "mimeType": "text/plain",
+                        "buffer": b"second\n",
+                    },
+                ]
+            )
+            page.get_by_test_id("portal-submit-file-button").click()
+            expect(page.locator("#submit-file-status")).to_contain_text("submission_id=")
 
 
 def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
@@ -143,6 +165,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
                 has_text="浏览器管理台提案"
             ).first
             expect(submission_card).to_be_visible()
+            expect(submission_card).to_contain_text("建议")
             submission_card.locator('button[data-action="run-ingest"]').click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("创建 ingest 任务")
 
@@ -177,3 +200,11 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             expect(page.get_by_test_id("portal-entry-view")).to_contain_text(
                 "适用于浏览器 E2E 编辑"
             )
+
+
+def test_portal_quartz_page_shows_optional_state(tmp_path: Path, monkeypatch) -> None:
+    with _live_server(tmp_path, monkeypatch) as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
+            expect(page).to_have_title(re.compile("Quartz Graph"))
+            expect(page.locator("body")).to_contain_text("Quartz 4 图谱")

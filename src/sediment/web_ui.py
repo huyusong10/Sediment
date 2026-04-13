@@ -345,6 +345,40 @@ def shared_shell(title: str, body: str, script: str) -> str:
       border: 1px dashed rgba(91, 70, 48, 0.2);
       color: var(--muted);
     }}
+    .modal-backdrop {{
+      position: fixed;
+      inset: 0;
+      background: rgba(29, 22, 16, 0.42);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 30;
+    }}
+    .modal-backdrop[hidden] {{
+      display: none;
+    }}
+    .modal-card {{
+      width: min(980px, 100%);
+      max-height: min(88vh, 920px);
+      overflow: auto;
+      padding: 22px;
+      border-radius: 24px;
+      background: rgba(255, 250, 241, 0.98);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+    }}
+    .upload-grid {{
+      display: grid;
+      gap: 12px;
+    }}
+    .quartz-frame {{
+      width: 100%;
+      min-height: 78vh;
+      border: 1px solid rgba(91, 70, 48, 0.12);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.72);
+    }}
     @media (max-width: 960px) {{
       .grid.cols-3,
       .grid.cols-2,
@@ -506,61 +540,39 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
           </div>
           <div class="nav">
             <a class="button primary" href="/portal">知识门户</a>
+            <a class="button" href="/portal/graph-view">Quartz 图谱</a>
             <a class="button" href="/admin">管理台</a>
           </div>
         </div>
         <h1>{knowledge_name}</h1>
         <p class="subtle">Sediment Knowledge Portal · 实例：{instance_name}</p>
-        <p>查看正式知识层、做全文搜索、浏览概念图谱，并把新的概念、文档和意见稳定送入提交缓冲区。</p>
+        <p>把主要空间留给全文搜索，把图谱交给独立的 Quartz 页面；门户负责稳定搜索、查看正式知识，并把新概念和文档送入提交缓冲区。</p>
       </section>
 
       <section class="panel" style="margin-top:20px;">
         <div class="stats" id="portal-stats"></div>
-        <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">门户已就绪，可以搜索知识、查看图谱，或把新材料提交到缓冲区。</div>
-      </section>
-
-      <section class="grid cols-2">
-        <div class="panel">
-          <div class="row spread">
-            <h2>全文搜索</h2>
-            <span class="subtle">标题、别名、摘要、正文</span>
-          </div>
-          <div class="row">
-            <input id="search-input" data-testid="portal-search-input" placeholder="搜索概念、规则、教训，比如：热备份 泄洪 暗流" />
-            <button class="primary" id="search-button" data-testid="portal-search-button">搜索</button>
-          </div>
-          <div id="search-status" class="subtle" style="margin-top:12px;" role="status" aria-live="polite">输入关键词后即可全文搜索。</div>
-          <div class="list" id="search-results" data-testid="portal-search-results" style="margin-top:14px;"></div>
-        </div>
-
-        <div class="panel">
-          <h2>条目全文</h2>
-          <div id="entry-view" data-testid="portal-entry-view" class="markdown empty">点击搜索结果或图谱节点后在这里查看。</div>
-        </div>
+        <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">门户已就绪，可以搜索知识，或把新材料提交到缓冲区。</div>
       </section>
 
       <section class="panel" style="margin-top:20px;">
         <div class="row spread">
-          <h2>知识图谱</h2>
-          <div class="legend">
-            <span style="color:#b85c2d">Concept</span>
-            <span style="color:#567d8c">Lesson</span>
-            <span style="color:#b39234">Placeholder</span>
-            <span style="color:#5a6a41">Index</span>
-          </div>
+          <h2>全文搜索</h2>
+          <span class="subtle">标题、别名、摘要、正文。点击结果可弹出全文。</span>
         </div>
-        <svg id="graph" data-testid="portal-graph" class="graph"></svg>
+        <div class="row">
+          <input id="search-input" data-testid="portal-search-input" placeholder="搜索概念、规则、教训，比如：热备份 泄洪 暗流" />
+          <button class="primary" id="search-button" data-testid="portal-search-button">搜索</button>
+        </div>
+        <div id="search-status" class="subtle" style="margin-top:12px;" role="status" aria-live="polite">输入关键词后即可全文搜索。</div>
+        <div class="list" id="search-results" data-testid="portal-search-results" style="margin-top:14px;"></div>
       </section>
 
-      <section class="grid cols-2">
-        <div class="panel">
+      <section class="panel" style="margin-top:20px;">
+        <div class="row spread">
           <h2>最近更新</h2>
-          <div class="list" id="recent-updates"></div>
+          <a class="button" href="/portal/graph-view">打开 Quartz 图谱页</a>
         </div>
-        <div class="panel">
-          <h2>热门条目</h2>
-          <div class="list" id="popular-entries"></div>
-        </div>
+        <div class="list" id="recent-updates"></div>
       </section>
 
       <section class="panel" style="margin-top:20px;">
@@ -581,20 +593,38 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
               </label>
               <label>内容<textarea id="submit-content" placeholder="写下你的概念、经验、修订建议或问题背景。"></textarea></label>
               <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">提交文本</button>
-              <div id="submit-text-status" class="subtle" role="status" aria-live="polite">文本提交会进入缓冲区，等待 committer 审核。</div>
+              <div id="submit-text-status" class="subtle" role="status" aria-live="polite">文本提交前会先经过 Agent 扫描知识库，并给出 committer 建议。</div>
+              <div id="submit-text-analysis" class="empty">这里会显示提交前后的建议摘要，帮助 committer 更快判断。</div>
             </div>
           </div>
           <div class="card">
             <h3>文档上传</h3>
             <div class="grid">
               <label>你的名字<input id="upload-name" placeholder="例如：Alice" /></label>
-              <label>上传文件<input id="upload-file" data-testid="portal-upload-file" type="file" accept=".txt,.md,.docx,.pptx" /></label>
+              <div class="upload-grid">
+                <label>上传文件 / 压缩包
+                  <input id="upload-file" data-testid="portal-upload-file" type="file" multiple accept=".txt,.md,.docx,.pptx,.zip" />
+                </label>
+                <label>上传文件夹
+                  <input id="upload-folder" data-testid="portal-upload-folder" type="file" webkitdirectory directory multiple />
+                </label>
+              </div>
               <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">上传文档</button>
-              <div id="submit-file-status" class="subtle" role="status" aria-live="polite">支持 `txt`、`md`、`docx`、`pptx`。</div>
+              <div id="submit-file-status" class="subtle" role="status" aria-live="polite">支持单文件、文件夹和 `zip` 压缩包。系统会自动解压并提取其中的文本。</div>
             </div>
           </div>
         </div>
       </section>
+
+      <div id="entry-modal" class="modal-backdrop" hidden>
+        <div class="modal-card">
+          <div class="row spread">
+            <h2 id="entry-modal-title">条目全文</h2>
+            <button id="entry-close-button" data-testid="portal-entry-close">关闭</button>
+          </div>
+          <div id="entry-view" data-testid="portal-entry-view" class="markdown empty">点击搜索结果后在这里查看。</div>
+        </div>
+      </div>
     </div>
     """
 
@@ -641,21 +671,11 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
               </div>
             </div>`).join('')
         : '<div class="empty">暂无最近更新</div>';
-
-      document.getElementById('popular-entries').innerHTML = payload.popular_entries.length
-        ? payload.popular_entries.map(item => `
-            <div class="card interactive" data-entry-name="${encodeURIComponent(item.name)}">
-              <div class="row spread">
-                <strong>${escapeHtml(item.name)}</strong>
-                <span class="tag">${item.inbound_count} 入链</span>
-              </div>
-              <div class="subtle">${escapeHtml(item.summary || '')}</div>
-            </div>`).join('')
-        : '<div class="empty">暂无条目</div>';
     }
 
-    async function loadEntry(encodedName) {
+    async function openEntry(encodedName) {
       const payload = await fetchJson(`/api/portal/entries/${encodedName}`);
+      document.getElementById('entry-modal-title').textContent = payload.name;
       document.getElementById('entry-view').innerHTML = `
         <div class="row spread">
           <h3>${escapeHtml(payload.name)}</h3>
@@ -663,6 +683,7 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
         </div>
         ${renderMarkdown(payload.content)}
       `;
+      document.getElementById('entry-modal').hidden = false;
       setPortalMessage(`已打开条目：${payload.name}`);
     }
 
@@ -687,11 +708,6 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
         : '<div class="empty">没有搜索到结果</div>';
     }
 
-    async function loadGraph() {
-      const payload = await fetchJson('/api/portal/graph');
-      drawGraph(document.getElementById('graph'), payload, (name) => loadEntry(encodeURIComponent(name)));
-    }
-
     async function submitText() {
       const payload = {
         title: document.getElementById('submit-title').value,
@@ -705,6 +721,7 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
         body: JSON.stringify(payload)
       });
       document.getElementById('submit-text-status').textContent = `文本提交成功，submission_id=${result.id}`;
+      document.getElementById('submit-text-analysis').innerHTML = renderSubmissionAnalysis(result.analysis);
       document.getElementById('submit-title').value = '';
       document.getElementById('submit-content').value = '';
       setPortalMessage(`已提交文本草案：${result.title}`);
@@ -713,18 +730,29 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
 
     async function submitFile() {
       const fileInput = document.getElementById('upload-file');
-      const file = fileInput.files[0];
-      if (!file) throw new Error('请先选择文件');
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (const byte of bytes) binary += String.fromCharCode(byte);
+      const folderInput = document.getElementById('upload-folder');
+      const files = Array.from(fileInput.files || []);
+      const folderFiles = Array.from(folderInput.files || []);
+      if (!files.length && !folderFiles.length) throw new Error('请先选择文件、压缩包或文件夹');
       const payload = {
-        submitter_name: document.getElementById('upload-name').value,
-        filename: file.name,
-        mime_type: file.type || inferMimeType(file.name),
-        content_base64: btoa(binary)
+        submitter_name: document.getElementById('upload-name').value
       };
+      if (folderFiles.length || files.length > 1) {
+        const bundle = await Promise.all((folderFiles.length ? folderFiles : files).map(async (file) => ({
+          filename: file.name,
+          relative_path: file.webkitRelativePath || file.name,
+          mime_type: file.type || inferMimeType(file.name),
+          content_base64: await encodeFileAsBase64(file)
+        })));
+        payload.filename = folderFiles.length ? inferBundleName(bundle) : 'document-bundle';
+        payload.mime_type = 'application/zip';
+        payload.files = bundle;
+      } else {
+        const file = files[0];
+        payload.filename = file.name;
+        payload.mime_type = file.type || inferMimeType(file.name);
+        payload.content_base64 = await encodeFileAsBase64(file);
+      }
       const response = await fetch('/api/portal/submissions/document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -734,8 +762,25 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
       if (!response.ok) throw new Error(data.error || '上传失败');
       document.getElementById('submit-file-status').textContent = `文档提交成功，submission_id=${data.id}`;
       fileInput.value = '';
+      folderInput.value = '';
       setPortalMessage(`已提交文档：${data.title}`);
       await loadHome();
+    }
+
+    async function encodeFileAsBase64(file) {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary);
+    }
+
+    function inferBundleName(files) {
+      const roots = new Set(files
+        .map(file => String(file.relative_path || '').split('/')[0])
+        .filter(Boolean));
+      if (roots.size === 1) return Array.from(roots)[0];
+      return 'document-bundle';
     }
 
     function inferMimeType(filename) {
@@ -744,22 +789,61 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
       if (lower.endsWith('.txt')) return 'text/plain';
       if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
       if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      if (lower.endsWith('.zip')) return 'application/zip';
       return 'application/octet-stream';
+    }
+
+    function renderSubmissionAnalysis(analysis) {
+      if (!analysis) return '<div class="empty">暂时没有建议。</div>';
+      const related = Array.isArray(analysis.related_entries) && analysis.related_entries.length
+        ? analysis.related_entries.map(item => `
+            <li><strong>${escapeHtml(item.name)}</strong> · ${escapeHtml(item.reason || '')}</li>
+          `).join('')
+        : '<li>暂无明显关联条目</li>';
+      const warnings = Array.isArray(analysis.warnings) && analysis.warnings.length
+        ? `<div class="subtle">${analysis.warnings.map(item => escapeHtml(item)).join('；')}</div>`
+        : '';
+      return `
+        <div class="card">
+          <div class="row spread">
+            <strong>Agent 建议</strong>
+            <span class="tag ${analysis.status === 'ok' ? 'ok' : 'warn'}">${escapeHtml(analysis.status || 'unknown')}</span>
+          </div>
+          <div class="subtle">${escapeHtml(analysis.summary || '')}</div>
+          <div class="subtle">建议标题：${escapeHtml(analysis.recommended_title || '-')}</div>
+          <div class="subtle">建议类型：${escapeHtml(analysis.recommended_type || '-')} · 风险：${escapeHtml(analysis.duplicate_risk || '-')} · 下一步：${escapeHtml(analysis.committer_action || '-')}</div>
+          <div class="subtle">Committer 提示：${escapeHtml(analysis.committer_note || '')}</div>
+          <ul>${related}</ul>
+          ${warnings}
+        </div>
+      `;
     }
 
     function handleEntryClick(event) {
       const card = event.target.closest('[data-entry-name]');
       if (!card) return;
-      loadEntry(card.dataset.entryName).catch(showError);
+      openEntry(card.dataset.entryName).catch(showError);
     }
 
     document.getElementById('search-results').addEventListener('click', handleEntryClick);
     document.getElementById('recent-updates').addEventListener('click', handleEntryClick);
-    document.getElementById('popular-entries').addEventListener('click', handleEntryClick);
 
     document.getElementById('search-button').addEventListener('click', () => withBusy('search-button', '搜索中...', () => runSearch()).catch(showError));
-    document.getElementById('submit-text-button').addEventListener('click', () => withBusy('submit-text-button', '提交中...', () => submitText()).catch(showError));
+    document.getElementById('submit-text-button').addEventListener('click', () => withBusy('submit-text-button', '分析中...', () => submitText()).catch(showError));
     document.getElementById('submit-file-button').addEventListener('click', () => withBusy('submit-file-button', '上传中...', () => submitFile()).catch(showError));
+    document.getElementById('entry-close-button').addEventListener('click', () => {
+      document.getElementById('entry-modal').hidden = true;
+    });
+    document.getElementById('entry-modal').addEventListener('click', (event) => {
+      if (event.target.id === 'entry-modal') {
+        document.getElementById('entry-modal').hidden = true;
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        document.getElementById('entry-modal').hidden = true;
+      }
+    });
     document.getElementById('search-input').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
         withBusy('search-button', '搜索中...', () => runSearch()).catch(showError);
@@ -774,9 +858,67 @@ def portal_html(*, knowledge_name: str, instance_name: str) -> str:
     }
 
     loadHome().catch(showError);
-    loadGraph().catch(showError);
     """
     return shared_shell(f"{knowledge_name} Portal", body, script)
+
+
+def portal_graph_html(
+    *,
+    knowledge_name: str,
+    instance_name: str,
+    quartz_available: bool,
+    quartz_path: str,
+) -> str:
+    content = (
+        """
+        <div class="panel" style="margin-top:20px;">
+          <div class="row spread">
+            <h2>Quartz 4 图谱</h2>
+            <span class="subtle">嵌入只读 Quartz 页面</span>
+          </div>
+          <iframe class="quartz-frame" data-testid="portal-quartz-frame" src="/quartz/"></iframe>
+        </div>
+        """
+        if quartz_available
+        else f"""
+        <div class="panel" style="margin-top:20px;">
+          <div class="row spread">
+            <h2>Quartz 4 图谱</h2>
+            <span class="subtle">可选增强能力</span>
+          </div>
+          <div class="markdown">
+            <p>当前实例还没有可嵌入的 Quartz 站点，所以这里暂时不显示图谱。</p>
+            <p>为了不把 Node/npm 变成 Sediment 的基础安装前提，Quartz 页面被设计成可选能力。只要把构建好的静态站点放到 <code>{quartz_path}</code>，Sediment 就会自动在这里嵌入它。</p>
+            <p>官方文档里，Quartz 4 的全文搜索和图谱都是内建能力，但需要独立的构建链和 ContentIndex 支持，所以更适合作为增强页，而不是核心运行时依赖。</p>
+          </div>
+        </div>
+        """
+    )
+    body = f"""
+    <div class="page">
+      <section class="hero">
+        <div class="hero-top">
+          <div class="brand">
+            {_logo_inline()}
+            <div class="brand-copy">
+              <span>Sediment</span>
+              <strong>{knowledge_name}</strong>
+            </div>
+          </div>
+          <div class="nav">
+            <a class="button" href="/portal">知识门户</a>
+            <a class="button primary" href="/portal/graph-view">Quartz 图谱</a>
+            <a class="button" href="/admin">管理台</a>
+          </div>
+        </div>
+        <h1>{knowledge_name}</h1>
+        <p class="subtle">Quartz Graph View · 实例：{instance_name}</p>
+        <p>这里承载更完整的只读知识图谱体验，让 Portal 首页保持轻量，把主空间留给搜索与提交。</p>
+      </section>
+      {content}
+    </div>
+    """
+    return shared_shell(f"{knowledge_name} Quartz Graph", body, "")
 
 
 def admin_login_html(*, knowledge_name: str, instance_name: str) -> str:
@@ -798,12 +940,12 @@ def admin_login_html(*, knowledge_name: str, instance_name: str) -> str:
         </div>
         <h1>{knowledge_name}</h1>
         <p class="subtle">Sediment Admin Sign-in · 实例：{instance_name}</p>
-        <p>管理台只开放给 committer 和平台维护者。登录成功后会建立一个同站受控 session，之后的审核与编辑请求会自动带上权限。</p>
+        <p>管理台只开放给 committer 和平台维护者。可以使用服务器启动时终端里显示的一次性 token，或 config 中配置的持久 token 登录。</p>
       </section>
 
       <section class="panel" style="margin-top:20px; max-width:560px;">
         <div class="grid">
-          <label>Admin Token<input id="admin-session-token" data-testid="admin-login-token" type="password" placeholder="输入 config.yaml 中配置的 admin token" /></label>
+          <label>Admin Token<input id="admin-session-token" data-testid="admin-login-token" type="password" placeholder="输入启动时终端显示的 token，或 config.yaml 中配置的 token" /></label>
           <button class="primary" id="login-button" data-testid="admin-login-button">登录管理台</button>
           <div id="login-status" data-testid="admin-login-status" class="subtle" role="status" aria-live="polite">需要有效 token 才能进入后台。</div>
         </div>
@@ -1081,6 +1223,7 @@ def admin_html(*, knowledge_name: str, instance_name: str) -> str:
               </div>
               <div class="subtle">${escapeHtml(item.submitter_name)} · ${escapeHtml(item.submission_type)}</div>
               <div class="subtle">${escapeHtml(item.created_at || '')}</div>
+              ${renderAdminSubmissionAnalysis(item.analysis)}
               <div class="row" style="margin-top:10px;">
                 <button data-action="triage-submission" data-submission-id="${item.id}" data-status="triaged">标记已归类</button>
                 <button data-action="triage-submission" data-submission-id="${item.id}" data-status="rejected">拒绝提交</button>
@@ -1089,6 +1232,18 @@ def admin_html(*, knowledge_name: str, instance_name: str) -> str:
             </div>
           `).join('')
         : '<div class="empty">暂无提交。</div>';
+    }
+
+    function renderAdminSubmissionAnalysis(analysis) {
+      if (!analysis) return '';
+      const related = Array.isArray(analysis.related_entries) && analysis.related_entries.length
+        ? analysis.related_entries.slice(0, 3).map(item => escapeHtml(item.name)).join('、')
+        : '暂无明显关联条目';
+      return `
+        <div class="subtle" style="margin-top:8px;">建议：${escapeHtml(analysis.recommended_type || '-')} · ${escapeHtml(analysis.duplicate_risk || '-')} 风险 · ${escapeHtml(analysis.committer_action || '-')}</div>
+        <div class="subtle">${escapeHtml(analysis.summary || '')}</div>
+        <div class="subtle">关联：${related}</div>
+      `;
     }
 
     async function loadReviews() {

@@ -26,6 +26,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -146,7 +147,7 @@ from sediment.skills.explore.scripts.kb_query import (
     prepare_explore_context,
     validate_answer,
 )
-from sediment.web_ui import admin_html, admin_login_html, portal_html
+from sediment.web_ui import admin_html, admin_login_html, portal_graph_html, portal_html
 
 KB_PATH = runtime_kb_path()
 INSTANCE_NAME = runtime_instance_name()
@@ -157,6 +158,7 @@ HOST = runtime_host()
 PORT = runtime_port()
 SSE_ENDPOINT = runtime_sse_endpoint()
 ADMIN_TOKEN = runtime_admin_token()
+STARTUP_ADMIN_TOKEN = os.environ.get("SEDIMENT_STARTUP_ADMIN_TOKEN", "").strip()
 SESSION_SECRET = runtime_session_secret()
 ADMIN_SESSION_COOKIE_NAME = runtime_admin_session_cookie_name()
 ADMIN_SESSION_TTL_SECONDS = runtime_admin_session_ttl_seconds()
@@ -172,6 +174,7 @@ JOB_MAX_ATTEMPTS = runtime_job_max_attempts()
 JOB_STALE_AFTER_SECONDS = runtime_job_stale_after_seconds()
 RUN_JOBS_IN_PROCESS = runtime_run_jobs_in_process()
 _PROJECT_ROOT = INSTANCE_ROOT
+QUARTZ_SITE_DIR = runtime_platform_paths()["state_dir"] / "quartz" / "site"
 
 DEFAULT_CONTRACT = {
     "shortlist_limit": 8,
@@ -253,10 +256,19 @@ def _agent_runner():
 
 
 def _session_secret_bytes() -> bytes | None:
-    secret = SESSION_SECRET or ADMIN_TOKEN
+    secret = SESSION_SECRET or STARTUP_ADMIN_TOKEN or ADMIN_TOKEN
     if not secret:
         return None
     return hashlib.sha256(secret.encode("utf-8")).digest()
+
+
+def _admin_auth_required() -> bool:
+    return bool(ADMIN_TOKEN or STARTUP_ADMIN_TOKEN)
+
+
+def _token_matches(candidate: str) -> bool:
+    token = candidate.strip()
+    return bool(token) and token in {ADMIN_TOKEN, STARTUP_ADMIN_TOKEN}
 
 
 def _build_admin_session_cookie() -> str:
@@ -290,13 +302,13 @@ def _verify_admin_session_cookie(cookie_value: str | None) -> bool:
 
 
 def _is_admin_authorized(request) -> bool:
-    if not ADMIN_TOKEN:
+    if not _admin_auth_required():
         return True
     headers = dict(request.headers)
     auth_header = headers.get("authorization", "")
     if not auth_header.startswith("Bearer "):
         return _verify_admin_session_cookie(request.cookies.get(ADMIN_SESSION_COOKIE_NAME))
-    return auth_header.removeprefix("Bearer ").strip() == ADMIN_TOKEN
+    return _token_matches(auth_header.removeprefix("Bearer "))
 
 
 def _set_admin_session_cookie(response) -> None:
@@ -391,9 +403,22 @@ def _tool_definitions() -> list[types.Tool]:
                     "filename": {"type": "string"},
                     "mime_type": {"type": "string"},
                     "content_base64": {"type": "string"},
+                    "files": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "filename": {"type": "string"},
+                                "relative_path": {"type": "string"},
+                                "mime_type": {"type": "string"},
+                                "content_base64": {"type": "string"},
+                            },
+                            "required": ["filename", "content_base64"],
+                        },
+                    },
                     "submitter_name": {"type": "string"},
                 },
-                "required": ["filename", "mime_type", "content_base64", "submitter_name"],
+                "required": ["submitter_name"],
             },
         ),
         types.Tool(
@@ -483,6 +508,7 @@ async def _dispatch_tool(name: str, arguments: dict):
             mime_type=arguments.get("mime_type", ""),
             content_base64=arguments.get("content_base64", ""),
             submitter_name=arguments.get("submitter_name", ""),
+            files=arguments.get("files"),
         )
     if name == "knowledge_health_report":
         return await _knowledge_health_report()
@@ -540,19 +566,23 @@ async def _knowledge_submit_text(
     submitter_name: str,
     submission_type: str = "text",
 ) -> str:
-    record = submit_text_request(
-        store=_platform_store(),
-        title=title,
-        content=content,
-        submitter_name=submitter_name,
-        submitter_ip="mcp",
-        submission_type=submission_type,
-        submitter_user_id="mcp",
-        rate_limit_count=1_000_000,
-        rate_limit_window_seconds=1,
-        max_text_chars=MAX_TEXT_SUBMISSION_CHARS,
-        dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
-    )
+    try:
+        record = submit_text_request(
+            store=_platform_store(),
+            kb_path=KB_PATH,
+            title=title,
+            content=content,
+            submitter_name=submitter_name,
+            submitter_ip="mcp",
+            submission_type=submission_type,
+            submitter_user_id="mcp",
+            rate_limit_count=1_000_000,
+            rate_limit_window_seconds=1,
+            max_text_chars=MAX_TEXT_SUBMISSION_CHARS,
+            dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
+        )
+    except (PermissionError, FileExistsError, ValueError) as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
     return json.dumps(record, ensure_ascii=False)
 
 
@@ -562,25 +592,35 @@ async def _knowledge_submit_document(
     mime_type: str,
     content_base64: str,
     submitter_name: str,
+    files: list[dict[str, Any]] | None = None,
 ) -> str:
     try:
-        file_bytes = base64.b64decode(content_base64)
+        file_bytes = (
+            base64.b64decode(content_base64, validate=True)
+            if content_base64
+            else b""
+        )
+        decoded_files = _decode_uploaded_files(files or [])
     except ValueError as exc:
         return json.dumps({"error": f"invalid base64 payload: {exc}"}, ensure_ascii=False)
-    record = submit_document_request(
-        store=_platform_store(),
-        uploads_dir=_platform_paths()["uploads_dir"],
-        filename=filename,
-        mime_type=mime_type,
-        file_bytes=file_bytes,
-        submitter_name=submitter_name,
-        submitter_ip="mcp",
-        submitter_user_id="mcp",
-        rate_limit_count=1_000_000,
-        rate_limit_window_seconds=1,
-        max_upload_bytes=MAX_UPLOAD_BYTES,
-        dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
-    )
+    try:
+        record = submit_document_request(
+            store=_platform_store(),
+            uploads_dir=_platform_paths()["uploads_dir"],
+            filename=filename,
+            mime_type=mime_type,
+            file_bytes=file_bytes,
+            uploads=decoded_files,
+            submitter_name=submitter_name,
+            submitter_ip="mcp",
+            submitter_user_id="mcp",
+            rate_limit_count=1_000_000,
+            rate_limit_window_seconds=1,
+            max_upload_bytes=MAX_UPLOAD_BYTES,
+            dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
+        )
+    except (PermissionError, FileExistsError, ValueError) as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
     return json.dumps(record, ensure_ascii=False)
 
 
@@ -602,7 +642,7 @@ async def _knowledge_platform_status() -> str:
         host=HOST,
         port=PORT,
         sse_endpoint=SSE_ENDPOINT,
-        auth_required=bool(ADMIN_TOKEN),
+        auth_required=_admin_auth_required(),
         run_jobs_in_process=RUN_JOBS_IN_PROCESS,
         submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
         submission_rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
@@ -994,9 +1034,39 @@ async def _request_json_or_empty(request) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _decode_uploaded_files(raw_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    decoded: list[dict[str, Any]] = []
+    for item in raw_files:
+        if not isinstance(item, dict):
+            continue
+        payload = str(item.get("content_base64", "")).strip()
+        if not payload:
+            continue
+        decoded.append(
+            {
+                "filename": str(item.get("filename", "")),
+                "relative_path": str(item.get("relative_path", "")),
+                "mime_type": str(item.get("mime_type", "")),
+                "file_bytes": base64.b64decode(payload, validate=True),
+            }
+        )
+    return decoded
+
+
 async def _portal_page(request):
     return _html_response(
         portal_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME)
+    )
+
+
+async def _portal_graph_page(request):
+    return _html_response(
+        portal_graph_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            quartz_available=_quartz_site_available(),
+            quartz_path=str(QUARTZ_SITE_DIR),
+        )
     )
 
 
@@ -1045,11 +1115,16 @@ async def _api_portal_graph(request):
     return _json_response(graph_payload(KB_PATH))
 
 
+def _quartz_site_available() -> bool:
+    return (QUARTZ_SITE_DIR / "index.html").exists()
+
+
 async def _api_portal_submit_text(request):
     body = await request.json()
     try:
         record = submit_text_request(
             store=_platform_store(),
+            kb_path=KB_PATH,
             title=str(body.get("title", "")),
             content=str(body.get("content", "")),
             submitter_name=str(body.get("submitter_name", "")),
@@ -1078,13 +1153,19 @@ async def _api_portal_submit_text(request):
 async def _api_portal_submit_document(request):
     body = await request.json()
     try:
-        file_bytes = base64.b64decode(str(body.get("content_base64", "")), validate=True)
+        file_bytes = (
+            base64.b64decode(str(body.get("content_base64", "")), validate=True)
+            if str(body.get("content_base64", "")).strip()
+            else b""
+        )
+        decoded_files = _decode_uploaded_files(body.get("files") or [])
         record = submit_document_request(
             store=_platform_store(),
             uploads_dir=_platform_paths()["uploads_dir"],
             filename=str(body.get("filename", "")),
             mime_type=str(body.get("mime_type", "")),
             file_bytes=file_bytes,
+            uploads=decoded_files,
             submitter_name=str(body.get("submitter_name", "")),
             submitter_ip=detect_submitter_ip(
                 dict(request.headers),
@@ -1135,7 +1216,7 @@ def _system_status_payload(store: PlatformStore) -> dict[str, Any]:
         host=HOST,
         port=PORT,
         sse_endpoint=SSE_ENDPOINT,
-        auth_required=bool(ADMIN_TOKEN),
+        auth_required=_admin_auth_required(),
         run_jobs_in_process=RUN_JOBS_IN_PROCESS,
         submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
         submission_rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
@@ -1153,7 +1234,7 @@ async def _api_admin_session_status(request):
     return _json_response(
         {
             "authenticated": _is_admin_authorized(request),
-            "auth_required": bool(ADMIN_TOKEN),
+            "auth_required": _admin_auth_required(),
             "cookie_name": ADMIN_SESSION_COOKIE_NAME,
             "session_ttl_seconds": ADMIN_SESSION_TTL_SECONDS,
         }
@@ -1163,16 +1244,16 @@ async def _api_admin_session_status(request):
 async def _api_admin_session_create(request):
     body = await _request_json_or_empty(request)
     token = str(body.get("token", ""))
-    if ADMIN_TOKEN and token != ADMIN_TOKEN:
+    if _admin_auth_required() and not _token_matches(token):
         return _json_response({"error": "invalid admin token"}, status=401)
     response = _json_response(
         {
             "authenticated": True,
-            "auth_required": bool(ADMIN_TOKEN),
+            "auth_required": _admin_auth_required(),
             "session_ttl_seconds": ADMIN_SESSION_TTL_SECONDS,
         }
     )
-    if ADMIN_TOKEN:
+    if _admin_auth_required():
         _set_admin_session_cookie(response)
     _platform_store().add_audit_log(
         actor_name="admin-session",
@@ -1180,13 +1261,15 @@ async def _api_admin_session_create(request):
         action="admin.session.create",
         target_type="session",
         target_id=request.client.host if request.client else "unknown",
-        details={"auth_required": bool(ADMIN_TOKEN)},
+        details={"auth_required": _admin_auth_required()},
     )
     return response
 
 
 async def _api_admin_session_delete(request):
-    response = _json_response({"authenticated": False, "auth_required": bool(ADMIN_TOKEN)})
+    response = _json_response(
+        {"authenticated": False, "auth_required": _admin_auth_required()}
+    )
     _clear_admin_session_cookie(response)
     _platform_store().add_audit_log(
         actor_name="admin-session",
@@ -1194,7 +1277,7 @@ async def _api_admin_session_delete(request):
         action="admin.session.delete",
         target_type="session",
         target_id=request.client.host if request.client else "unknown",
-        details={"auth_required": bool(ADMIN_TOKEN)},
+        details={"auth_required": _admin_auth_required()},
     )
     return response
 
@@ -1654,21 +1737,36 @@ class SecurityHeadersMiddleware:
                 from starlette.datastructures import MutableHeaders
 
                 headers = MutableHeaders(raw=message["headers"])
-                headers.setdefault("X-Content-Type-Options", "nosniff")
-                headers.setdefault("X-Frame-Options", "DENY")
-                headers.setdefault("Referrer-Policy", "no-referrer")
-                headers.setdefault(
-                    "Content-Security-Policy",
-                    "default-src 'self'; "
-                    "img-src 'self' data:; "
-                    "style-src 'self' 'unsafe-inline'; "
-                    "script-src 'self' 'unsafe-inline'; "
-                    "connect-src 'self'; "
-                    "base-uri 'self'; "
-                    "form-action 'self'; "
-                    "frame-ancestors 'none'",
-                )
                 path = scope.get("path", "")
+                headers.setdefault("X-Content-Type-Options", "nosniff")
+                headers.setdefault("Referrer-Policy", "no-referrer")
+                if path.startswith("/quartz"):
+                    headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+                    headers.setdefault(
+                        "Content-Security-Policy",
+                        "default-src 'self'; "
+                        "img-src 'self' data: blob:; "
+                        "style-src 'self' 'unsafe-inline'; "
+                        "script-src 'self' 'unsafe-inline'; "
+                        "connect-src 'self'; "
+                        "font-src 'self' data:; "
+                        "base-uri 'self'; "
+                        "form-action 'self'; "
+                        "frame-ancestors 'self'",
+                    )
+                else:
+                    headers.setdefault("X-Frame-Options", "DENY")
+                    headers.setdefault(
+                        "Content-Security-Policy",
+                        "default-src 'self'; "
+                        "img-src 'self' data:; "
+                        "style-src 'self' 'unsafe-inline'; "
+                        "script-src 'self' 'unsafe-inline'; "
+                        "connect-src 'self'; "
+                        "base-uri 'self'; "
+                        "form-action 'self'; "
+                        "frame-ancestors 'none'",
+                    )
                 if path.startswith("/admin") or path.startswith("/api/admin"):
                     headers.setdefault("Cache-Control", "no-store")
             await send(message)
@@ -1681,47 +1779,52 @@ def create_starlette_app():
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.routing import Mount, Route
+    from starlette.staticfiles import StaticFiles
 
     _platform_store()
     sse = SseServerTransport("")
+    routes = [
+        Route("/", _root_page),
+        Route("/healthz", _healthz),
+        Route("/portal", _portal_page),
+        Route("/portal/graph-view", _portal_graph_page),
+        Route("/admin", _admin_page),
+        Route("/api/admin/session", _api_admin_session_status, methods=["GET"]),
+        Route("/api/admin/session", _api_admin_session_create, methods=["POST"]),
+        Route("/api/admin/session", _api_admin_session_delete, methods=["DELETE"]),
+        Route("/api/portal/home", _api_portal_home),
+        Route("/api/portal/search", _api_portal_search),
+        Route("/api/portal/entries/{name:str}", _api_portal_entry),
+        Route("/api/portal/graph", _api_portal_graph),
+        Route("/api/portal/submissions/text", _api_portal_submit_text, methods=["POST"]),
+        Route("/api/portal/submissions/document", _api_portal_submit_document, methods=["POST"]),
+        Route("/api/admin/overview", _api_admin_overview),
+        Route("/api/admin/system/status", _api_admin_system_status),
+        Route("/api/admin/audit", _api_admin_audit_logs),
+        Route("/api/admin/health/summary", _api_admin_health_summary),
+        Route("/api/admin/health/issues", _api_admin_health_issues),
+        Route("/api/admin/submissions", _api_admin_submissions),
+        Route("/api/admin/submissions/{submission_id:str}", _api_admin_submission_detail),
+        Route("/api/admin/submissions/{submission_id:str}/triage", _api_admin_submission_triage, methods=["POST"]),
+        Route("/api/admin/submissions/{submission_id:str}/run-ingest", _api_admin_run_ingest, methods=["POST"]),
+        Route("/api/admin/jobs", _api_admin_jobs),
+        Route("/api/admin/jobs/{job_id:str}", _api_admin_job_detail),
+        Route("/api/admin/jobs/{job_id:str}/retry", _api_admin_job_retry, methods=["POST"]),
+        Route("/api/admin/jobs/{job_id:str}/cancel", _api_admin_job_cancel, methods=["POST"]),
+        Route("/api/admin/tidy", _api_admin_tidy, methods=["POST"]),
+        Route("/api/admin/reviews", _api_admin_reviews),
+        Route("/api/admin/reviews/{review_id:str}", _api_admin_review_detail),
+        Route("/api/admin/reviews/{review_id:str}/approve", _api_admin_review_approve, methods=["POST"]),
+        Route("/api/admin/reviews/{review_id:str}/reject", _api_admin_review_reject, methods=["POST"]),
+        Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
+        Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
+        Mount(SSE_ENDPOINT, app=_make_router(sse), routes=False),
+    ]
+    if _quartz_site_available():
+        routes.append(Mount("/quartz", app=StaticFiles(directory=str(QUARTZ_SITE_DIR), html=True)))
     return Starlette(
         middleware=[Middleware(SecurityHeadersMiddleware)],
-        routes=[
-            Route("/", _root_page),
-            Route("/healthz", _healthz),
-            Route("/portal", _portal_page),
-            Route("/admin", _admin_page),
-            Route("/api/admin/session", _api_admin_session_status, methods=["GET"]),
-            Route("/api/admin/session", _api_admin_session_create, methods=["POST"]),
-            Route("/api/admin/session", _api_admin_session_delete, methods=["DELETE"]),
-            Route("/api/portal/home", _api_portal_home),
-            Route("/api/portal/search", _api_portal_search),
-            Route("/api/portal/entries/{name:str}", _api_portal_entry),
-            Route("/api/portal/graph", _api_portal_graph),
-            Route("/api/portal/submissions/text", _api_portal_submit_text, methods=["POST"]),
-            Route("/api/portal/submissions/document", _api_portal_submit_document, methods=["POST"]),
-            Route("/api/admin/overview", _api_admin_overview),
-            Route("/api/admin/system/status", _api_admin_system_status),
-            Route("/api/admin/audit", _api_admin_audit_logs),
-            Route("/api/admin/health/summary", _api_admin_health_summary),
-            Route("/api/admin/health/issues", _api_admin_health_issues),
-            Route("/api/admin/submissions", _api_admin_submissions),
-            Route("/api/admin/submissions/{submission_id:str}", _api_admin_submission_detail),
-            Route("/api/admin/submissions/{submission_id:str}/triage", _api_admin_submission_triage, methods=["POST"]),
-            Route("/api/admin/submissions/{submission_id:str}/run-ingest", _api_admin_run_ingest, methods=["POST"]),
-            Route("/api/admin/jobs", _api_admin_jobs),
-            Route("/api/admin/jobs/{job_id:str}", _api_admin_job_detail),
-            Route("/api/admin/jobs/{job_id:str}/retry", _api_admin_job_retry, methods=["POST"]),
-            Route("/api/admin/jobs/{job_id:str}/cancel", _api_admin_job_cancel, methods=["POST"]),
-            Route("/api/admin/tidy", _api_admin_tidy, methods=["POST"]),
-            Route("/api/admin/reviews", _api_admin_reviews),
-            Route("/api/admin/reviews/{review_id:str}", _api_admin_review_detail),
-            Route("/api/admin/reviews/{review_id:str}/approve", _api_admin_review_approve, methods=["POST"]),
-            Route("/api/admin/reviews/{review_id:str}/reject", _api_admin_review_reject, methods=["POST"]),
-            Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
-            Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
-            Mount(SSE_ENDPOINT, app=_make_router(sse), routes=False),
-        ],
+        routes=routes,
     )
 
 
@@ -1732,6 +1835,8 @@ def main(argv: list[str] | None = None):
     print(f"Sediment MCP Server listening on http://{HOST}:{PORT}")
     print(f"Portal:        http://{HOST}:{PORT}/portal")
     print(f"Admin:         http://{HOST}:{PORT}/admin")
+    if STARTUP_ADMIN_TOKEN:
+        print(f"Startup token: {STARTUP_ADMIN_TOKEN}")
     print(f"Health:        http://{HOST}:{PORT}/healthz")
     print(f"SSE endpoint:  http://{HOST}:{PORT}{SSE_ENDPOINT}")
     print(f"POST endpoint: http://{HOST}:{PORT}{SSE_ENDPOINT}")

@@ -3,10 +3,14 @@ from __future__ import annotations
 import base64
 import difflib
 import hashlib
+import io
 import ipaddress
+import json
 import re
 import shutil
+import subprocess
 import tempfile
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -28,7 +32,56 @@ ALLOWED_MIME_TYPES = {
     "text/markdown",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/zip",
+    "application/x-zip-compressed",
 }
+ZIP_MIME_TYPES = {"application/zip", "application/x-zip-compressed"}
+SUPPORTED_UPLOAD_SUFFIXES = {".txt", ".md", ".docx", ".pptx"}
+SUBMISSION_ANALYSIS_SCHEMA = json.dumps(
+    {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "summary": {"type": "string"},
+            "recommended_title": {"type": "string"},
+            "recommended_type": {
+                "type": "string",
+                "enum": ["concept", "lesson", "feedback"],
+            },
+            "duplicate_risk": {
+                "type": "string",
+                "enum": ["low", "medium", "high"],
+            },
+            "committer_action": {
+                "type": "string",
+                "enum": ["manual_review", "ingest", "merge_or_link"],
+            },
+            "committer_note": {"type": "string"},
+            "related_entries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "name": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["name", "reason"],
+                },
+            },
+        },
+        "required": [
+            "summary",
+            "recommended_title",
+            "recommended_type",
+            "duplicate_risk",
+            "committer_action",
+            "committer_note",
+            "related_entries",
+        ],
+    },
+    ensure_ascii=False,
+)
 
 
 def infer_mime_type(filename: str) -> str | None:
@@ -41,6 +94,8 @@ def infer_mime_type(filename: str) -> str | None:
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     if lower.endswith(".pptx"):
         return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    if lower.endswith(".zip"):
+        return "application/zip"
     return None
 
 
@@ -161,9 +216,465 @@ def extract_upload_text(file_path: str | Path, mime_type: str) -> str:
     raise ValueError(f"Unsupported mime type: {mime_type}")
 
 
+def analyze_text_submission(
+    *,
+    kb_path: str | Path,
+    title: str,
+    content: str,
+    submission_type: str,
+) -> dict[str, Any]:
+    cleaned_title = normalize_name(title, fallback="未命名提交")
+    cleaned_content = content.strip()
+    shortlist = search_kb(kb_path, f"{cleaned_title}\n{cleaned_content}", limit=6)
+    fallback = _fallback_submission_analysis(
+        title=cleaned_title,
+        submission_type=submission_type,
+        shortlist=shortlist,
+    )
+    try:
+        from sediment.llm_cli import build_cli_command, collect_output, parse_json_object
+        from sediment.settings import load_settings
+
+        settings = load_settings()
+        timeout_seconds = min(
+            max(15, int(settings["agent"]["exec_timeout_seconds"])),
+            90,
+        )
+        prompt = _build_submission_analysis_prompt(
+            title=cleaned_title,
+            content=cleaned_content,
+            submission_type=submission_type,
+            shortlist=shortlist,
+        )
+        with tempfile.TemporaryDirectory(prefix="sediment-submit-analysis-") as temp_dir:
+            temp_root = Path(temp_dir)
+            prompt_file = temp_root / "prompt.txt"
+            payload_file = temp_root / "payload.json"
+            prompt_file.write_text(prompt, encoding="utf-8")
+            payload_file.write_text(
+                json.dumps(
+                    {
+                        "title": cleaned_title,
+                        "submission_type": submission_type,
+                        "content": cleaned_content,
+                        "shortlist": shortlist,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            invocation = build_cli_command(
+                settings,
+                prompt,
+                prompt_file=prompt_file,
+                payload_file=payload_file,
+                cwd=Path(settings["workspace_root"]),
+                extra_args=["--json-schema", SUBMISSION_ANALYSIS_SCHEMA],
+            )
+            result = subprocess.run(
+                invocation.command,
+                input=invocation.stdin_data,
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+                cwd=str(Path(settings["workspace_root"])),
+            )
+        if result.returncode != 0:
+            detail = (
+                result.stderr.strip()
+                or result.stdout.strip()
+                or f"exit code {result.returncode}"
+            )
+            fallback["status"] = "degraded"
+            fallback["warnings"] = [f"Agent analysis failed: {detail}"]
+            return fallback
+        raw_output = collect_output(invocation, stdout=result.stdout, stderr=result.stderr)
+        parsed = parse_json_object(raw_output)
+        normalized = _normalize_submission_analysis(
+            parsed,
+            title=cleaned_title,
+            submission_type=submission_type,
+            shortlist=shortlist,
+        )
+        normalized["status"] = "ok"
+        return normalized
+    except Exception as exc:  # noqa: BLE001
+        fallback["status"] = "degraded"
+        fallback["warnings"] = [f"Agent analysis unavailable: {exc}"]
+        return fallback
+
+
+def prepare_document_submission(
+    *,
+    filename: str,
+    mime_type: str,
+    file_bytes: bytes,
+    uploads: list[dict[str, Any]] | None,
+    max_upload_bytes: int,
+) -> dict[str, Any]:
+    normalized_uploads, skipped = _expand_document_uploads(
+        filename=filename,
+        mime_type=mime_type,
+        file_bytes=file_bytes,
+        uploads=uploads,
+        max_upload_bytes=max_upload_bytes,
+    )
+    if not normalized_uploads:
+        raise ValueError("could not find a supported document to ingest")
+
+    extracted_parts: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="sediment-upload-extract-") as temp_dir:
+        temp_root = Path(temp_dir)
+        for index, upload in enumerate(normalized_uploads, start=1):
+            temp_path = temp_root / f"{index}_{sanitize_filename(Path(upload['filename']).name)}"
+            temp_path.write_bytes(upload["file_bytes"])
+            text = extract_upload_text(temp_path, upload["mime_type"]).strip()
+            if not text:
+                continue
+            extracted_parts.append(f"## {upload['relative_path']}\n\n{text}")
+
+    if not extracted_parts:
+        raise ValueError("could not extract text from uploaded document")
+
+    source_label = _bundle_label(filename=filename, uploads=normalized_uploads)
+    notes_parts: list[str] = []
+    if skipped:
+        notes_parts.append("Skipped unsupported files: " + ", ".join(skipped[:8]))
+    notes = " | ".join(notes_parts) if notes_parts else None
+
+    original_is_archive = mime_type in ZIP_MIME_TYPES
+    if uploads or len(normalized_uploads) > 1 or original_is_archive:
+        if original_is_archive and not uploads:
+            stored_bytes = file_bytes
+            stored_filename = sanitize_filename(filename or "upload.zip")
+        else:
+            stored_bytes = _zip_document_bundle(normalized_uploads)
+            stored_filename = sanitize_filename(source_label)
+            if not stored_filename.lower().endswith(".zip"):
+                stored_filename = f"{stored_filename}.zip"
+        stored_mime_type = "application/zip"
+    else:
+        only = normalized_uploads[0]
+        stored_bytes = only["file_bytes"]
+        stored_filename = sanitize_filename(only["filename"])
+        stored_mime_type = only["mime_type"]
+
+    return {
+        "title": source_label,
+        "filename": stored_filename,
+        "mime_type": stored_mime_type,
+        "file_bytes": stored_bytes,
+        "extracted_text": "\n\n".join(extracted_parts).strip(),
+        "notes": notes,
+        "file_count": len(normalized_uploads),
+    }
+
+
+def _build_submission_analysis_prompt(
+    *,
+    title: str,
+    content: str,
+    submission_type: str,
+    shortlist: list[dict[str, Any]],
+) -> str:
+    shortlist_payload = [
+        {
+            "name": item["name"],
+            "entry_type": item["entry_type"],
+            "status": item["status"],
+            "summary": item["summary"],
+            "snippet": item["snippet"],
+            "score": item["score"],
+        }
+        for item in shortlist
+    ]
+    return "\n\n".join(
+        [
+            "You are the Sediment submission triage assistant.",
+            "Review this incoming user submission against the current KB shortlist.",
+            "Be conservative. Suggest a better title or type only when clearly helpful.",
+            "Return JSON only. No markdown fences and no prose before or after the JSON object.",
+            "Focus on helping a human committer judge the submission quickly.",
+            json.dumps(
+                {
+                    "submission": {
+                        "title": title,
+                        "type": submission_type,
+                        "content": content,
+                    },
+                    "kb_shortlist": shortlist_payload,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        ]
+    )
+
+
+def _fallback_submission_analysis(
+    *,
+    title: str,
+    submission_type: str,
+    shortlist: list[dict[str, Any]],
+) -> dict[str, Any]:
+    related_entries = [
+        {"name": item["name"], "reason": item["summary"] or item["snippet"] or "相关条目"}
+        for item in shortlist[:4]
+    ]
+    highest_score = shortlist[0]["score"] if shortlist else 0
+    duplicate_risk = "high" if highest_score >= 16 else "medium" if shortlist else "low"
+    committer_action = "merge_or_link" if duplicate_risk == "high" else "ingest"
+    if submission_type == "feedback":
+        committer_action = "manual_review"
+    summary = (
+        "Agent analysis is unavailable, but Sediment found related KB entries for manual review."
+        if shortlist
+        else "Agent analysis is unavailable. The submission is stored and ready for manual review."
+    )
+    return {
+        "status": "fallback",
+        "summary": summary,
+        "recommended_title": title,
+        "recommended_type": (
+            submission_type
+            if submission_type in {"concept", "lesson", "feedback"}
+            else "concept"
+        ),
+        "duplicate_risk": duplicate_risk,
+        "committer_action": committer_action,
+        "committer_note": (
+            "Compare against the related entries before running ingest."
+            if shortlist
+            else "No obvious duplicate was found from the KB shortlist."
+        ),
+        "related_entries": related_entries,
+        "warnings": [],
+    }
+
+
+def _normalize_submission_analysis(
+    payload: dict[str, Any],
+    *,
+    title: str,
+    submission_type: str,
+    shortlist: list[dict[str, Any]],
+) -> dict[str, Any]:
+    fallback = _fallback_submission_analysis(
+        title=title,
+        submission_type=submission_type,
+        shortlist=shortlist,
+    )
+    related_entries = payload.get("related_entries")
+    normalized_entries: list[dict[str, str]] = []
+    if isinstance(related_entries, list):
+        for item in related_entries[:6]:
+            if not isinstance(item, dict):
+                continue
+            name = normalize_name(str(item.get("name", "")), fallback="")
+            reason = normalize_name(str(item.get("reason", "")), fallback="相关条目")
+            if name:
+                normalized_entries.append({"name": name, "reason": reason})
+    return {
+        "summary": normalize_name(str(payload.get("summary", "")), fallback=fallback["summary"]),
+        "recommended_title": normalize_name(
+            str(payload.get("recommended_title", "")),
+            fallback=fallback["recommended_title"],
+        ),
+        "recommended_type": (
+            str(payload.get("recommended_type", "")).strip()
+            if str(payload.get("recommended_type", "")).strip() in {"concept", "lesson", "feedback"}
+            else fallback["recommended_type"]
+        ),
+        "duplicate_risk": (
+            str(payload.get("duplicate_risk", "")).strip()
+            if str(payload.get("duplicate_risk", "")).strip() in {"low", "medium", "high"}
+            else fallback["duplicate_risk"]
+        ),
+        "committer_action": (
+            str(payload.get("committer_action", "")).strip()
+            if str(payload.get("committer_action", "")).strip()
+            in {"manual_review", "ingest", "merge_or_link"}
+            else fallback["committer_action"]
+        ),
+        "committer_note": normalize_name(
+            str(payload.get("committer_note", "")),
+            fallback=fallback["committer_note"],
+        ),
+        "related_entries": normalized_entries or fallback["related_entries"],
+        "warnings": [],
+    }
+
+
+def _expand_document_uploads(
+    *,
+    filename: str,
+    mime_type: str,
+    file_bytes: bytes,
+    uploads: list[dict[str, Any]] | None,
+    max_upload_bytes: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if uploads:
+        return _normalize_supplied_uploads(uploads, max_upload_bytes=max_upload_bytes)
+    normalized_mime = mime_type or infer_mime_type(filename or "") or ""
+    if normalized_mime in ZIP_MIME_TYPES:
+        return _extract_zip_upload(
+            filename=filename or "upload.zip",
+            file_bytes=file_bytes,
+            max_upload_bytes=max_upload_bytes,
+        )
+    if normalized_mime not in ALLOWED_MIME_TYPES:
+        raise ValueError("unsupported upload type")
+    return (
+        [
+            {
+                "filename": filename or "upload.bin",
+                "relative_path": sanitize_relative_upload_path(filename or "upload.bin"),
+                "mime_type": normalized_mime,
+                "file_bytes": file_bytes,
+            }
+        ],
+        [],
+    )
+
+
+def _normalize_supplied_uploads(
+    uploads: list[dict[str, Any]],
+    *,
+    max_upload_bytes: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    normalized: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    total_bytes = 0
+    for item in uploads:
+        if not isinstance(item, dict):
+            continue
+        raw_bytes = item.get("file_bytes", b"")
+        if not isinstance(raw_bytes, bytes) or not raw_bytes:
+            continue
+        filename = str(item.get("filename") or item.get("relative_path") or "upload.bin")
+        relative_path = sanitize_relative_upload_path(
+            str(item.get("relative_path") or filename),
+            fallback=filename,
+        )
+        mime_type = str(item.get("mime_type") or infer_mime_type(filename) or "").strip()
+        if _is_ignorable_upload(relative_path):
+            skipped.append(relative_path)
+            continue
+        total_bytes += len(raw_bytes)
+        if total_bytes > max(1, max_upload_bytes):
+            raise ValueError("uploaded document bundle is too large")
+        if mime_type in ZIP_MIME_TYPES:
+            expanded, expanded_skipped = _extract_zip_upload(
+                filename=filename,
+                file_bytes=raw_bytes,
+                max_upload_bytes=max_upload_bytes,
+            )
+            normalized.extend(expanded)
+            skipped.extend(expanded_skipped)
+            continue
+        if mime_type not in ALLOWED_MIME_TYPES:
+            skipped.append(relative_path)
+            continue
+        normalized.append(
+            {
+                "filename": filename,
+                "relative_path": relative_path,
+                "mime_type": mime_type,
+                "file_bytes": raw_bytes,
+            }
+        )
+    return normalized, skipped
+
+
+def _extract_zip_upload(
+    *,
+    filename: str,
+    file_bytes: bytes,
+    max_upload_bytes: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    supported: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    total_unpacked = 0
+    with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+        infos = [item for item in archive.infolist() if not item.is_dir()]
+        if len(infos) > 200:
+            raise ValueError("archive contains too many files")
+        for info in infos:
+            relative_path = sanitize_relative_upload_path(info.filename, fallback=filename)
+            if _is_ignorable_upload(relative_path):
+                skipped.append(relative_path)
+                continue
+            mime_type = infer_mime_type(relative_path) or ""
+            if mime_type not in ALLOWED_MIME_TYPES or mime_type in ZIP_MIME_TYPES:
+                skipped.append(relative_path)
+                continue
+            total_unpacked += max(0, int(info.file_size))
+            if total_unpacked > max(1, max_upload_bytes) * 4:
+                raise ValueError("archive expands beyond the safe size limit")
+            supported.append(
+                {
+                    "filename": Path(relative_path).name,
+                    "relative_path": relative_path,
+                    "mime_type": mime_type,
+                    "file_bytes": archive.read(info),
+                }
+            )
+    return supported, skipped
+
+
+def _zip_document_bundle(uploads: list[dict[str, Any]]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in uploads:
+            archive.writestr(item["relative_path"], item["file_bytes"])
+    return buffer.getvalue()
+
+
+def _bundle_label(*, filename: str, uploads: list[dict[str, Any]]) -> str:
+    if filename and filename.strip():
+        base = Path(filename).stem.strip()
+        if base:
+            return base
+    roots = {
+        item["relative_path"].split("/", 1)[0]
+        for item in uploads
+        if "/" in item["relative_path"]
+    }
+    if len(roots) == 1:
+        return next(iter(roots))
+    if len(uploads) == 1:
+        return Path(uploads[0]["filename"]).stem or uploads[0]["filename"]
+    return "document-bundle"
+
+
+def sanitize_relative_upload_path(raw_value: str, *, fallback: str | None = None) -> str:
+    value = (raw_value or fallback or "upload.bin").replace("\\", "/").strip().lstrip("/")
+    parts: list[str] = []
+    for part in value.split("/"):
+        token = part.strip()
+        if not token or token in {".", ".."}:
+            continue
+        parts.append(sanitize_filename(token))
+    if not parts:
+        return sanitize_filename(fallback or "upload.bin")
+    return "/".join(parts)
+
+
+def _is_ignorable_upload(relative_path: str) -> bool:
+    lower = relative_path.lower()
+    return (
+        lower.startswith("__macosx/")
+        or lower.endswith(".ds_store")
+        or lower.endswith("thumbs.db")
+    )
+
+
 def submit_text(
     *,
     store: PlatformStore,
+    kb_path: str | Path,
     title: str,
     content: str,
     submitter_name: str,
@@ -195,6 +706,13 @@ def submit_text(
     ):
         raise FileExistsError("duplicate submission already exists in the review buffer")
 
+    analysis = analyze_text_submission(
+        kb_path=kb_path,
+        title=cleaned_title,
+        content=cleaned_content,
+        submission_type=submission_type,
+    )
+
     record = store.create_submission(
         submission_type=submission_type,
         title=cleaned_title,
@@ -206,6 +724,7 @@ def submit_text(
         submitter_ip=submitter_ip,
         submitter_user_id=submitter_user_id,
         dedupe_hash=dedupe_hash,
+        analysis=analysis,
         notes=notes,
     )
     store.add_audit_log(
@@ -227,6 +746,7 @@ def submit_document(
     filename: str,
     mime_type: str,
     file_bytes: bytes,
+    uploads: list[dict[str, Any]] | None = None,
     submitter_name: str,
     submitter_ip: str,
     submitter_user_id: str | None = None,
@@ -236,26 +756,29 @@ def submit_document(
     max_upload_bytes: int = 10 * 1024 * 1024,
     dedupe_window_seconds: int = 86_400,
 ) -> dict[str, Any]:
-    if mime_type not in ALLOWED_MIME_TYPES:
-        raise ValueError("unsupported upload type")
     if store.submission_count_for_ip(
         submitter_ip,
         within_seconds=max(1, rate_limit_window_seconds),
     ) >= max(1, rate_limit_count):
         raise PermissionError("submission rate limit exceeded for this IP")
-    if len(file_bytes) > max(1, max_upload_bytes):
+    if not uploads and len(file_bytes) > max(1, max_upload_bytes):
         raise ValueError("uploaded file is too large")
 
     cleaned_submitter = normalize_name(submitter_name, fallback="Anonymous")
-    safe_filename = sanitize_filename(filename or "upload.bin")
-    temp_submission_id = hashlib.sha256(file_bytes).hexdigest()[:16]
+    prepared = prepare_document_submission(
+        filename=filename,
+        mime_type=mime_type,
+        file_bytes=file_bytes,
+        uploads=uploads,
+        max_upload_bytes=max_upload_bytes,
+    )
+    safe_filename = sanitize_filename(prepared["filename"] or "upload.bin")
+    temp_submission_id = hashlib.sha256(prepared["file_bytes"]).hexdigest()[:16]
     stored_path = Path(uploads_dir) / f"{temp_submission_id}_{safe_filename}"
     stored_path.parent.mkdir(parents=True, exist_ok=True)
-    stored_path.write_bytes(file_bytes)
-    extracted_text = extract_upload_text(stored_path, mime_type)
-    if not extracted_text:
-        raise ValueError("could not extract text from uploaded document")
-    dedupe_hash = build_submission_hash(safe_filename, mime_type, extracted_text)
+    stored_path.write_bytes(prepared["file_bytes"])
+    extracted_text = str(prepared["extracted_text"]).strip()
+    dedupe_hash = build_submission_hash(safe_filename, prepared["mime_type"], extracted_text)
     if dedupe_window_seconds > 0 and store.find_recent_submission_by_hash(
         dedupe_hash,
         within_seconds=dedupe_window_seconds,
@@ -265,16 +788,16 @@ def submit_document(
 
     record = store.create_submission(
         submission_type="document",
-        title=safe_filename,
-        raw_text=base64.b64encode(file_bytes).decode("ascii"),
+        title=str(prepared["title"]),
+        raw_text=base64.b64encode(prepared["file_bytes"]).decode("ascii"),
         extracted_text=extracted_text,
         stored_file_path=str(stored_path),
-        mime_type=mime_type,
+        mime_type=str(prepared["mime_type"]),
         submitter_name=cleaned_submitter,
         submitter_ip=submitter_ip,
         submitter_user_id=submitter_user_id,
         dedupe_hash=dedupe_hash,
-        notes=notes,
+        notes=prepared["notes"] or notes,
     )
     store.add_audit_log(
         actor_name=cleaned_submitter,
@@ -283,7 +806,11 @@ def submit_document(
         action="submission.create_document",
         target_type="submission",
         target_id=record["id"],
-        details={"filename": safe_filename, "mime_type": mime_type},
+        details={
+            "filename": safe_filename,
+            "mime_type": prepared["mime_type"],
+            "file_count": prepared["file_count"],
+        },
     )
     return record
 
@@ -313,21 +840,6 @@ def get_portal_home(kb_path: str | Path, *, store: PlatformStore) -> dict[str, A
     )[:8]
     for item in recent:
         item["updated_at"] = int(item["updated_at"])
-    hottest = sorted(
-        (
-            {
-                "name": name,
-                "entry_type": doc["entry_type"],
-                "status": doc["status"],
-                "inbound_count": doc["inbound_count"],
-                "summary": doc["summary"],
-            }
-            for name, doc in docs.items()
-            if doc["kind"] == "formal"
-        ),
-        key=lambda item: (item["inbound_count"], len(item["summary"])),
-        reverse=True,
-    )[:8]
     return {
         "counts": {
             "formal_entries": len(data["entries"]),
@@ -337,7 +849,6 @@ def get_portal_home(kb_path: str | Path, *, store: PlatformStore) -> dict[str, A
             "health_issues": len(build_health_issue_queue(kb_path)),
         },
         "recent_updates": recent,
-        "popular_entries": hottest,
         "health_summary": summarize_health_report(report),
     }
 

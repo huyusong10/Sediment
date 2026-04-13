@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+from mcp_server.i18n import query_language_rules
 from mcp_server.kb import (
     ParsedEntry,
     RetrievalCandidate,
@@ -23,50 +25,7 @@ from mcp_server.kb import (
     validate_entry as core_validate_entry,
 )
 
-STOP_WORDS = {
-    "什么",
-    "哪些",
-    "多少",
-    "几种",
-    "为什么",
-    "如何",
-    "怎么",
-    "怎样",
-    "可以",
-    "应该",
-    "需要",
-    "里面",
-    "中",
-    "里",
-    "从",
-    "看",
-    "和",
-    "与",
-    "及",
-    "是",
-    "的",
-    "了",
-    "在",
-    "由",
-    "把",
-    "将",
-    "对",
-    "有",
-    "一个",
-    "这个",
-    "那个",
-    "这些",
-    "那些",
-    "定义",
-    "作用",
-    "流程",
-    "步骤",
-    "逻辑",
-    "问题",
-    "系统",
-    "知识",
-    "文档",
-}
+LANGUAGE_RULES = query_language_rules()
 
 
 def inventory(kb_path: str | Path) -> dict[str, Any]:
@@ -536,11 +495,14 @@ def _entry_objects(data: dict[str, Any]) -> dict[str, ParsedEntry]:
 
 
 def _extract_terms(question: str) -> list[str]:
+    languages = _active_languages(question)
+    stop_words = _merged_stop_words(languages)
+    split_pattern = _merged_split_pattern(languages)
     results = []
     for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]*|[\u4e00-\u9fff]{2,24}", question):
-        for part in re.split(r"[和与及、/]", token.strip()):
+        for part in re.split(split_pattern, token.strip()):
             part = part.strip()
-            if len(part) < 2 or part in STOP_WORDS:
+            if len(part) < 2 or part.casefold() in stop_words:
                 continue
             if part not in results:
                 results.append(part)
@@ -630,21 +592,11 @@ def _selection_reason(reason_bits: list[str], entry: ParsedEntry, question_mode:
 
 
 def _question_focus(question: str) -> str:
+    languages = _active_languages(question)
     lowered = question.lower()
-    if any(marker in question for marker in ("什么是", "定义", "含义")):
-        return "definition"
-    if any(marker in question for marker in ("适用于什么场景", "适用场景", "范围", "边界", "前提")):
-        return "scope"
-    if any(marker in question for marker in ("为什么", "原因", "为何")):
-        return "why"
-    if any(marker in question for marker in ("什么时候", "何时")) or "when" in lowered:
-        return "when"
-    if any(marker in question for marker in ("风险", "坑", "误区", "避免")):
-        return "risk"
-    if any(marker in question for marker in ("区别", "差异", "对比")) or "compare" in lowered:
-        return "comparison"
-    if "how" in lowered:
-        return "guidance"
+    for focus in ("definition", "scope", "why", "when", "risk", "comparison", "guidance"):
+        if _match_focus_marker(question, lowered, focus, languages):
+            return focus
     return "open"
 
 
@@ -659,6 +611,55 @@ def _question_mode(question: str) -> str:
     if focus == "comparison":
         return "comparison"
     return "open"
+
+
+def _active_languages(question: str) -> tuple[str, ...]:
+    override = os.environ.get("SEDIMENT_QUERY_LANGS", "").strip()
+    if override:
+        requested = tuple(
+            lang.strip().lower()
+            for lang in override.split(",")
+            if lang.strip().lower() in LANGUAGE_RULES
+        )
+        if requested:
+            return requested
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", question))
+    has_latin = bool(re.search(r"[A-Za-z]", question))
+    if has_cjk and has_latin:
+        return ("zh", "en")
+    if has_cjk:
+        return ("zh",)
+    return ("en",) if has_latin else ("zh", "en")
+
+
+def _merged_stop_words(languages: tuple[str, ...]) -> set[str]:
+    words: set[str] = set()
+    for lang in languages:
+        for item in LANGUAGE_RULES[lang]["stop_words"]:
+            words.add(str(item).casefold())
+    return words
+
+
+def _merged_split_pattern(languages: tuple[str, ...]) -> str:
+    patterns = [LANGUAGE_RULES[lang]["token_splitter"] for lang in languages]
+    return "|".join(f"(?:{pattern})" for pattern in patterns)
+
+
+def _match_focus_marker(
+    question: str,
+    lowered_question: str,
+    focus: str,
+    languages: tuple[str, ...],
+) -> bool:
+    for lang in languages:
+        markers = LANGUAGE_RULES[lang]["focus_markers"].get(focus, ())
+        for marker in markers:
+            if lang == "en":
+                if marker in lowered_question:
+                    return True
+            elif marker in question:
+                return True
+    return False
 
 
 def _truncate(text: str, limit: int) -> str:

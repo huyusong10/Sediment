@@ -30,7 +30,7 @@ def _build_sample_kb(root: Path) -> Path:
         ---
         type: concept
         status: fact
-        aliases: [热切换]
+        aliases: [热切换, hot swap]
         sources:
           - backup_design.md
         ---
@@ -280,6 +280,25 @@ def test_snippets_prioritize_why_for_lesson_queries(tmp_path: Path) -> None:
         inventory_data=inventory(kb_path),
     )
 
+    assert excerpt_map["泄洪前先确认热备份"]["snippets"][0]["section"] == "Why"
+
+
+def test_multilingual_query_support_for_shortlist_and_focus(tmp_path: Path, monkeypatch) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    data = inventory(kb_path)
+
+    ranked = shortlist("What is hot swap?", inventory_data=data, limit=3)
+    assert ranked[0]["name"] == "热备份"
+
+    monkeypatch.setenv("SEDIMENT_QUERY_LANGS", "EN")
+    ranked_with_override = shortlist("What is hot swap?", inventory_data=data, limit=3)
+    assert ranked_with_override[0]["name"] == "热备份"
+
+    excerpt_map = snippets(
+        ["泄洪前先确认热备份"],
+        question="Why should we confirm backup before draining traffic?",
+        inventory_data=data,
+    )
     assert excerpt_map["泄洪前先确认热备份"]["snippets"][0]["section"] == "Why"
 
 

@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from mcp_server.i18n import kb_localized_aliases, kb_sentence_markers
+
 FORMAL_ENTRY_TYPES = {"concept", "lesson"}
 VALID_STATUSES = {"fact", "inferred", "disputed"}
 
@@ -24,14 +26,10 @@ PROVENANCE_LINE_PREFIXES = (
 SECTION_ALIASES = {
     "source": "Source",
     "sources": "Source",
-    "来源": "Source",
     "related": "Related",
-    "相关": "Related",
     "scope": "Scope",
     "context": "Scope",
-    "上下文": "Scope",
     "trigger": "Trigger",
-    "触发": "Trigger",
     "when to apply": "Trigger",
     "why": "Why",
     "why this matters": "Why",
@@ -39,27 +37,9 @@ SECTION_ALIASES = {
     "evidence/reasoning": "Why",
     "risks": "Risks",
     "common pitfalls": "Risks",
-    "风险": "Risks",
 }
-SENTENCE_STYLE_MARKERS = (
-    "必须",
-    "应该",
-    "需要",
-    "优先",
-    "避免",
-    "防止",
-    "不要",
-    "不能",
-    "导致",
-    "如果",
-    "当",
-    "先",
-    "再",
-    "前",
-    "后",
-    "时",
-    "须",
-)
+SECTION_ALIASES.update(kb_localized_aliases())
+SENTENCE_STYLE_MARKERS = kb_sentence_markers()
 
 
 @dataclass(slots=True)

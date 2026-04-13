@@ -11,9 +11,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from docx import Document
-from pptx import Presentation
-
 from sediment.kb import (
     audit_kb,
     index_config,
@@ -141,10 +138,14 @@ def extract_upload_text(file_path: str | Path, mime_type: str) -> str:
     if mime_type == "text/markdown":
         return path.read_text(encoding="utf-8", errors="replace")
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        from docx import Document
+
         doc = Document(path)
         paragraphs = [item.text.strip() for item in doc.paragraphs if item.text.strip()]
         return "\n\n".join(paragraphs).strip()
     if mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+        from pptx import Presentation
+
         presentation = Presentation(path)
         chunks: list[str] = []
         for slide_index, slide in enumerate(presentation.slides, start=1):

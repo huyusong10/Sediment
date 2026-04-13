@@ -63,6 +63,8 @@ This installs the `sediment` CLI with `uv`, then leaves you with a normal comman
 sediment --help
 ```
 
+The installer replaces and reinstalls an existing `sediment` CLI by default, so rerunning it works as a reliable upgrade path too.
+
 ### Manual Mode
 
 If you prefer to inspect the source and install it yourself:
@@ -70,7 +72,7 @@ If you prefer to inspect the source and install it yourself:
 ```bash
 git clone https://github.com/huyusong10/Sediment.git
 cd Sediment
-uv tool install --from . sediment
+uv tool install --from . sediment --compile-bytecode
 sediment --help
 ```
 
@@ -89,14 +91,29 @@ Initialize a Sediment instance in your workspace:
 ```bash
 mkdir my-sediment-workspace
 cd my-sediment-workspace
-sediment init \
-  --instance-name ops-prod \
-  --knowledge-name "Ops Knowledge Base"
+sediment init
 ```
 
-Check the instance:
+`sediment init` opens an interactive setup wizard in a normal terminal. It asks for the instance
+name, knowledge name, agent backend, host, and port. Press Enter to accept the suggested default
+value for any field.
+
+If you prefer a scriptable path:
 
 ```bash
+sediment init \
+  --instance-name ops-prod \
+  --knowledge-name "Ops Knowledge Base" \
+  --backend claude-code \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --no-interactive
+```
+
+List the known instances and check the current one:
+
+```bash
+sediment instance list
 sediment doctor
 ```
 
@@ -127,6 +144,7 @@ It treats knowledge as infrastructure:
 
 ```bash
 sediment init
+sediment instance list
 sediment doctor
 sediment status
 sediment server start
@@ -143,6 +161,17 @@ Sediment stores runtime configuration per instance in:
 ```
 
 That keeps instances local to each workspace while still allowing global instance management through the CLI.
+
+When you run commands inside an instance root, or inside its `knowledge-base/` directory, Sediment
+resolves the local config automatically. In those cases you usually do not need `--instance`.
+
+Use `--instance NAME` when you want to manage an instance from somewhere else:
+
+```bash
+sediment --instance ops-prod doctor
+sediment --instance ops-prod server start
+sediment --instance ops-prod review list
+```
 
 If you prefer not to install the CLI yet, you can still run it directly from the repo:
 

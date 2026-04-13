@@ -33,6 +33,4 @@ config/sediment/config.yaml
 .ruff_cache/
 
 # Benchmarks and local evaluation data
-benchmarks/judge/
-benchmarks/material/
-benchmarks/results*/
+benchmarks/

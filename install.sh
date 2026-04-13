@@ -13,7 +13,7 @@ step()  { echo -e "\n${BOLD}── $* ──${NC}"; }
 
 REPO_SLUG="${SEDIMENT_REPO:-huyusong10/Sediment}"
 REF="${SEDIMENT_REF:-master}"
-FORCE_INSTALL=0
+FORCE_INSTALL=1
 KEEP_SOURCE=0
 DOWNLOAD_ROOT="${TMPDIR:-/tmp}"
 
@@ -22,12 +22,12 @@ usage() {
 Sediment installer
 
 Usage:
-  bash install.sh [--repo owner/name] [--ref git-ref] [--force] [--keep-source]
+  bash install.sh [--repo owner/name] [--ref git-ref] [--no-force] [--keep-source]
 
 Options:
   --repo         GitHub repository slug to install from (default: huyusong10/Sediment)
   --ref          Git ref, branch, or tag to install from (default: master)
-  --force        Reinstall Sediment even if it already exists
+  --no-force     Fail instead of replacing and reinstalling an existing Sediment CLI installation
   --keep-source  Keep the downloaded source tree in /tmp for debugging
   -h, --help     Show this help
 EOF
@@ -45,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force)
       FORCE_INSTALL=1
+      shift
+      ;;
+    --no-force)
+      FORCE_INSTALL=0
       shift
       ;;
     --keep-source)
@@ -134,17 +138,20 @@ else
 fi
 
 step "Install Sediment CLI"
-INSTALL_ARGS=(tool install --from "$SOURCE_DIR" sediment)
+INSTALL_ARGS=(tool install --from "$SOURCE_DIR" sediment --compile-bytecode)
 if [[ $FORCE_INSTALL -eq 1 ]]; then
-  INSTALL_ARGS+=(--force)
+  INSTALL_ARGS+=(--force --reinstall)
 fi
 if uv "${INSTALL_ARGS[@]}"; then
-  ok "Sediment CLI installed."
+  if [[ $FORCE_INSTALL -eq 1 ]]; then
+    ok "Sediment CLI installed or fully refreshed."
+  else
+    ok "Sediment CLI installed."
+  fi
 else
   if [[ $FORCE_INSTALL -eq 0 ]]; then
-    warn "Normal install failed. Retrying with --force."
-    uv tool install --from "$SOURCE_DIR" sediment --force
-    ok "Sediment CLI reinstalled."
+    error "Sediment installation failed without overwrite. Rerun without --no-force to replace and reinstall the existing CLI."
+    exit 1
   else
     error "Sediment installation failed."
     exit 1

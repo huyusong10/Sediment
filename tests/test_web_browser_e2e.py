@@ -144,6 +144,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             ).first
             expect(submission_card).to_be_visible()
             submission_card.locator('button[data-action="run-ingest"]').click()
+            expect(page.get_by_test_id("admin-message")).to_contain_text("创建 ingest 任务")
 
             assert live["worker_module"].process_queue_until_idle(max_jobs=1) == 1
 

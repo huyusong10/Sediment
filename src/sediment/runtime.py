@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from sediment.agent_runner import get_agent_runner
-from sediment.platform_services import ensure_platform_state, parse_trusted_proxy_cidrs
-from sediment.platform_store import PlatformStore
 from sediment.settings import load_settings
+
+if TYPE_CHECKING:
+    from sediment.platform_store import PlatformStore
 
 
 def workspace_root() -> Path:
@@ -78,6 +79,8 @@ def trust_proxy_headers() -> bool:
 
 
 def trusted_proxy_cidrs():
+    from sediment.platform_services import parse_trusted_proxy_cidrs
+
     return parse_trusted_proxy_cidrs(",".join(load_settings()["network"]["trusted_proxy_cidrs"]))
 
 
@@ -127,6 +130,9 @@ def platform_paths() -> dict[str, Path]:
 
 
 def build_store() -> PlatformStore:
+    from sediment.platform_services import ensure_platform_state
+    from sediment.platform_store import PlatformStore
+
     paths = platform_paths()
     store = PlatformStore(paths["db_path"])
     ensure_platform_state(
@@ -141,6 +147,8 @@ def build_store() -> PlatformStore:
 
 
 def build_agent_runner(*, store: PlatformStore | None = None):
+    from sediment.agent_runner import get_agent_runner
+
     store = store or build_store()
     return get_agent_runner(
         project_root=workspace_root(),

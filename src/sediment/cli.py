@@ -14,7 +14,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from sediment import launcher, worker
 from sediment.control import (
@@ -73,6 +73,7 @@ from sediment.runtime import (
 from sediment.settings import (
     CONFIG_RELATIVE_PATH,
     current_config_path,
+    discover_local_config_path,
     load_settings,
     load_settings_for_path,
     set_active_config_path,
@@ -81,6 +82,10 @@ from sediment.settings import (
 
 
 def scoped_command(command: str) -> str:
+    local = discover_local_config_path()
+    current = current_config_path()
+    if local is not None and local.resolve() == current.resolve():
+        return f"sediment {command}"
     return f"sediment --instance {instance_name()} {command}"
 
 
@@ -91,6 +96,286 @@ def print_next_steps(*steps: str) -> None:
     print("Next:")
     for step in steps:
         print(f"- {step}")
+
+
+def progress_enabled(args) -> bool:
+    return not getattr(args, "json", False) and not getattr(args, "quiet", False)
+
+
+def cli_progress(message: str, *, enabled: bool = True) -> None:
+    if enabled:
+        print(f"[sediment] {message}")
+
+
+def cli_supports_color() -> bool:
+    return (
+        sys.stdout.isatty()
+        and os.environ.get("NO_COLOR") is None
+        and os.environ.get("TERM", "").lower() != "dumb"
+    )
+
+
+def cli_style(text: str, *, color: str | None = None, bold: bool = False) -> str:
+    if not cli_supports_color():
+        return text
+    colors = {
+        "red": "31",
+        "green": "32",
+        "yellow": "33",
+        "blue": "34",
+        "cyan": "36",
+    }
+    codes: list[str] = []
+    if bold:
+        codes.append("1")
+    if color in colors:
+        codes.append(colors[color])
+    if not codes:
+        return text
+    return f"\033[{';'.join(codes)}m{text}\033[0m"
+
+
+def doctor_badge(item: dict[str, Any]) -> str:
+    if bool(item.get("ok")):
+        label = "OK"
+        color = "green"
+    elif item.get("severity") == "warning":
+        label = "WARN"
+        color = "yellow"
+    else:
+        label = "FAIL"
+        color = "red"
+    return cli_style(label, color=color, bold=True)
+
+
+def summarize_text(text: str, *, limit: int = 120) -> str:
+    value = " ".join(str(text).split())
+    if len(value) <= limit:
+        return value
+    return value[: limit - 3] + "..."
+
+
+def _run_agent_simple_probe(
+    settings: dict[str, Any],
+    *,
+    backend: str,
+    progress: Callable[[str], None],
+) -> dict[str, Any]:
+    prompt = "You are Sediment doctor. Reply with OK only."
+    timeout_seconds = int(settings["agent"]["doctor_timeout_seconds"])
+    last_preview = ""
+    for attempt in (1, 2):
+        progress(
+            "Running simple "
+            f"{backend} generation probe "
+            f"(timeout: {timeout_seconds}s, attempt {attempt}/2)."
+        )
+        with tempfile.TemporaryDirectory(prefix="sediment-doctor-") as temp_dir:
+            temp_root = Path(temp_dir)
+            invocation = build_cli_command(
+                settings,
+                prompt,
+                prompt_file=temp_root / "prompt.txt",
+                payload_file=temp_root / "payload.json",
+                skill_file=temp_root / "skill.md",
+                cwd=temp_root,
+            )
+            started_at = time.perf_counter()
+            try:
+                result = subprocess.run(
+                    invocation.command,
+                    input=invocation.stdin_data,
+                    cwd=str(temp_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                duration_ms = int((time.perf_counter() - started_at) * 1000)
+                last_preview = f"Timed out after {timeout_seconds}s"
+                if attempt == 2:
+                    return {
+                        "ok": False,
+                        "detail": f"Agent probe timed out after {timeout_seconds}s.",
+                        "duration_ms": duration_ms,
+                        "preview": last_preview,
+                    }
+                progress("Probe timed out; retrying once.")
+                continue
+
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            raw_output = collect_output(
+                invocation,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+            preview = summarize_text(raw_output or f"exit code {result.returncode}")
+            last_preview = preview
+            if result.returncode != 0:
+                if attempt == 2:
+                    return {
+                        "ok": False,
+                        "detail": f"Agent probe failed: {preview}",
+                        "duration_ms": duration_ms,
+                        "preview": preview,
+                    }
+                progress("Probe returned a non-zero exit status; retrying once.")
+                continue
+            if raw_output.strip():
+                return {
+                    "ok": True,
+                    "detail": f"Agent responded to a simple generation probe: {preview}",
+                    "duration_ms": duration_ms,
+                    "backend": backend,
+                }
+            if attempt == 2:
+                return {
+                    "ok": False,
+                    "detail": "Agent probe returned an empty response.",
+                    "duration_ms": duration_ms,
+                    "preview": preview,
+                }
+            progress("Probe returned an empty response; retrying once.")
+
+    return {
+        "ok": False,
+        "detail": f"Agent probe failed: {last_preview or 'unknown error'}",
+        "duration_ms": None,
+        "preview": last_preview,
+    }
+
+
+def _run_agent_structured_probe(
+    settings: dict[str, Any],
+    *,
+    backend: str,
+    progress: Callable[[str], None],
+) -> dict[str, Any]:
+    schema = json.dumps(
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "ok": {"type": "boolean"},
+                "backend": {"type": "string"},
+            },
+            "required": ["ok", "backend"],
+        }
+    )
+    prompt = (
+        "You are Sediment doctor. Return JSON only with "
+        f'{{"ok": true, "backend": "{backend}"}} and no extra text.'
+    )
+    timeout_seconds = int(settings["agent"]["doctor_timeout_seconds"])
+    last_preview = ""
+    for attempt in (1, 2):
+        progress(
+            "Running structured "
+            f"{backend} generation probe "
+            f"(timeout: {timeout_seconds}s, attempt {attempt}/2)."
+        )
+        with tempfile.TemporaryDirectory(prefix="sediment-doctor-") as temp_dir:
+            temp_root = Path(temp_dir)
+            invocation = build_cli_command(
+                settings,
+                prompt,
+                prompt_file=temp_root / "prompt.txt",
+                payload_file=temp_root / "payload.json",
+                skill_file=temp_root / "skill.md",
+                cwd=temp_root,
+                extra_args=["--json-schema", schema],
+            )
+            started_at = time.perf_counter()
+            try:
+                result = subprocess.run(
+                    invocation.command,
+                    input=invocation.stdin_data,
+                    cwd=str(temp_root),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                duration_ms = int((time.perf_counter() - started_at) * 1000)
+                last_preview = f"Timed out after {timeout_seconds}s"
+                if attempt == 2:
+                    return {
+                        "ok": False,
+                        "detail": f"Structured probe timed out after {timeout_seconds}s.",
+                        "duration_ms": duration_ms,
+                        "preview": last_preview,
+                    }
+                progress("Structured probe timed out; retrying once.")
+                continue
+
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
+            raw_output = collect_output(
+                invocation,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+            preview = summarize_text(raw_output or f"exit code {result.returncode}")
+            last_preview = preview
+            if result.returncode != 0:
+                if attempt == 2:
+                    return {
+                        "ok": False,
+                        "detail": f"Structured probe failed: {preview}",
+                        "duration_ms": duration_ms,
+                        "preview": preview,
+                    }
+                progress("Structured probe returned a non-zero exit status; retrying once.")
+                continue
+            try:
+                payload = parse_json_object(raw_output)
+            except RuntimeError:
+                if attempt == 2:
+                    return {
+                        "ok": False,
+                        "detail": "Agent CLI did not return a JSON object.",
+                        "duration_ms": duration_ms,
+                        "preview": preview,
+                    }
+                progress("Structured probe returned non-JSON output; retrying once.")
+                continue
+
+            ok = bool(payload.get("ok")) and str(payload.get("backend", "")).strip()
+            if ok:
+                returned_backend = str(payload.get("backend", backend))
+                return {
+                    "ok": True,
+                    "detail": (
+                        "Structured probe succeeded for backend "
+                        f"{returned_backend}."
+                    ),
+                    "duration_ms": duration_ms,
+                    "backend": returned_backend,
+                }
+            if attempt == 2:
+                return {
+                    "ok": False,
+                    "detail": f"Structured probe returned an unexpected payload: {preview}",
+                    "duration_ms": duration_ms,
+                    "preview": preview,
+                }
+            progress("Structured probe payload was incomplete; retrying once.")
+
+    return {
+        "ok": False,
+        "detail": f"Structured probe failed: {last_preview or 'unknown error'}",
+        "duration_ms": None,
+        "preview": last_preview,
+    }
+
+
+def doctor_status(checks: list[dict[str, Any]]) -> str:
+    if any(not item["ok"] and item.get("severity", "error") == "error" for item in checks):
+        return "failed"
+    if any(not item["ok"] for item in checks):
+        return "warn"
+    return "ok"
 
 
 def daemon_paths() -> dict[str, Path]:
@@ -239,6 +524,120 @@ def _pick_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _should_run_init_wizard(args) -> bool:
+    if getattr(args, "json", False):
+        return False
+    interactive = getattr(args, "interactive", None)
+    if interactive is not None:
+        return bool(interactive)
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _prompt_init_value(
+    label: str,
+    default: str,
+    *,
+    validate: Callable[[str], str] | None = None,
+) -> str:
+    while True:
+        raw_value = input(f"{label} [{default}]: ").strip()
+        if not raw_value or raw_value.lower() == "skip":
+            return default
+        if validate is None:
+            return raw_value
+        try:
+            return validate(raw_value)
+        except ValueError as exc:
+            print(f"  {exc}")
+
+
+def _prompt_init_yes_no(label: str, *, default: bool) -> bool:
+    default_token = "Y/n" if default else "y/N"
+    while True:
+        raw_value = input(f"{label} [{default_token}]: ").strip().lower()
+        if not raw_value or raw_value == "skip":
+            return default
+        if raw_value in {"y", "yes"}:
+            return True
+        if raw_value in {"n", "no"}:
+            return False
+        print("  Please answer yes or no.")
+
+
+def _parse_init_port(value: str) -> str:
+    number = int(value)
+    if number < 1 or number > 65535:
+        raise ValueError("Port must be between 1 and 65535.")
+    return str(number)
+
+
+def _parse_init_backend(value: str) -> str:
+    candidate = value.strip().lower()
+    choices = {"claude-code", "codex", "opencode"}
+    if candidate not in choices:
+        allowed = ", ".join(sorted(choices))
+        raise ValueError(f"Backend must be one of: {allowed}.")
+    return candidate
+
+
+def _parse_init_host(value: str) -> str:
+    candidate = value.strip()
+    if not candidate:
+        raise ValueError("Host must not be empty.")
+    return candidate
+
+
+def _run_init_wizard(
+    *,
+    target_root: Path,
+    defaults: dict[str, Any],
+) -> dict[str, Any]:
+    print(cli_style("Sediment init wizard", color="cyan", bold=True))
+    print("Press Enter to keep the suggested value. Type `skip` to do the same explicitly.")
+    print("Host and port prompts already show their defaults, so Enter accepts them immediately.")
+    print(f"Working directory: {target_root}")
+    print("")
+
+    instance_label = _prompt_init_value(
+        "Instance name",
+        str(defaults["instance_name"]),
+    )
+    knowledge_label = _prompt_init_value(
+        "Knowledge name",
+        str(defaults["knowledge_name"]),
+    )
+    backend = _prompt_init_value(
+        "Agent backend (claude-code/codex/opencode)",
+        str(defaults["backend"]),
+        validate=_parse_init_backend,
+    )
+    host_value = _prompt_init_value(
+        "Bind host",
+        str(defaults["host"]),
+        validate=_parse_init_host,
+    )
+    port_value = int(
+        _prompt_init_value(
+            "Bind port",
+            str(defaults["port"]),
+            validate=_parse_init_port,
+        )
+    )
+    create_kb = _prompt_init_yes_no(
+        "Create knowledge-base scaffold",
+        default=bool(defaults["create_kb"]),
+    )
+    print("")
+    return {
+        "instance_name": instance_label,
+        "knowledge_name": knowledge_label,
+        "backend": backend,
+        "host": host_value,
+        "port": port_value,
+        "create_kb": create_kb,
+    }
+
+
 def _detect_available_backend() -> str | None:
     for backend in ("claude-code", "codex", "opencode"):
         settings = {"agent": {"backend": backend, "command": None}}
@@ -254,6 +653,7 @@ def _write_instance_scaffold(
     instance_label: str,
     knowledge_label: str,
     backend: str,
+    host_value: str,
     port_value: int,
     create_kb: bool,
 ) -> dict[str, Any]:
@@ -272,7 +672,7 @@ def _write_instance_scaffold(
             "state_dir": ".sediment_state",
         },
         "server": {
-            "host": "127.0.0.1",
+            "host": host_value,
             "port": int(port_value),
             "sse_path": "/sediment/",
             "run_jobs_in_process": False,
@@ -504,6 +904,11 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
 
 
 def start_daemon(args) -> int:
+    enabled = progress_enabled(args)
+    cli_progress(
+        f"Starting Sediment daemon for instance `{instance_name()}`.",
+        enabled=enabled,
+    )
     errors = launcher.validate_environment(require_cli=True)
     if errors and not args.skip_checks:
         print("Cannot start Sediment daemon:", file=sys.stderr)
@@ -526,6 +931,7 @@ def start_daemon(args) -> int:
         clear_daemon_metadata()
 
     paths = daemon_paths()
+    cli_progress(f"Launching background services. Logs: {paths['log']}", enabled=enabled)
     command = [
         sys.executable,
         "-m",
@@ -572,6 +978,7 @@ def start_daemon(args) -> int:
         }
     )
 
+    cli_progress("Waiting for the health endpoint to become ready.", enabled=enabled)
     if wait_for_health(timeout_seconds=args.startup_timeout):
         print(f"Sediment daemon started (pid={process.pid}).")
         print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
@@ -609,6 +1016,10 @@ def start_daemon(args) -> int:
 
 
 def server_run(args) -> int:
+    cli_progress(
+        f"Running Sediment in the foreground for instance `{instance_name()}`.",
+        enabled=progress_enabled(args),
+    )
     argv = [
         "--worker-poll-interval",
         str(args.worker_poll_interval),
@@ -670,6 +1081,10 @@ def server_status(args) -> int:
 
 
 def kb_explore(args) -> int:
+    cli_progress(
+        f"Exploring the knowledge base for: {args.question}",
+        enabled=progress_enabled(args),
+    )
     result = _server_module().answer_question(
         args.question,
         kb_path().resolve(),
@@ -720,12 +1135,15 @@ def kb_read(args) -> int:
 
 
 def kb_tidy(args) -> int:
+    enabled = progress_enabled(args)
+    cli_progress(f"Resolving tidy issue for `{args.target}`.", enabled=enabled)
     store = build_store()
     issue = resolve_tidy_issue(
         kb_path=kb_path(),
         target=args.target,
         issue_type=args.issue_type,
     )
+    cli_progress(f"Queueing tidy job for issue type `{issue['type']}`.", enabled=enabled)
     job = enqueue_tidy_job(
         store=store,
         kb_path=kb_path(),
@@ -734,6 +1152,7 @@ def kb_tidy(args) -> int:
         max_attempts=job_max_attempts(),
     )
     if args.process_once:
+        cli_progress("Processing the queued tidy job immediately.", enabled=enabled)
         worker.process_queue_until_idle(max_jobs=1)
         job = store.get_job(job["id"]) or job
 
@@ -753,6 +1172,7 @@ def kb_tidy(args) -> int:
 
 
 def submit_text_command(args) -> int:
+    enabled = progress_enabled(args)
     content = args.content
     if not content and args.content_file:
         content = Path(args.content_file).read_text(encoding="utf-8")
@@ -763,6 +1183,7 @@ def submit_text_command(args) -> int:
         return 1
 
     try:
+        cli_progress(f"Submitting text draft `{args.title}` to the buffer.", enabled=enabled)
         record = submit_text_request(
             store=build_store(),
             title=args.title,
@@ -794,12 +1215,14 @@ def submit_text_command(args) -> int:
 
 
 def submit_file_command(args) -> int:
+    enabled = progress_enabled(args)
     file_path = Path(args.path).expanduser().resolve()
     if not file_path.exists() or not file_path.is_file():
         print(f"File not found: {file_path}", file=sys.stderr)
         return 1
 
     try:
+        cli_progress(f"Uploading document `{file_path.name}` to the buffer.", enabled=enabled)
         record = submit_document_request(
             store=build_store(),
             uploads_dir=platform_paths()["uploads_dir"],
@@ -944,41 +1367,161 @@ def status_health_command(args) -> int:
     return 0
 
 
-def build_doctor_payload() -> dict[str, Any]:
+def build_doctor_payload(
+    progress: Callable[[str], None] | None = None,
+    *,
+    full: bool = False,
+) -> dict[str, Any]:
+    progress = progress or (lambda _message: None)
+    progress("Loading instance configuration.")
     settings = load_settings()
     checks: list[dict[str, Any]] = []
+    notes: list[str] = []
 
-    def record(name: str, ok: bool, detail: str, **extra: Any) -> None:
-        checks.append({"name": name, "ok": ok, "detail": detail, **extra})
+    def record(
+        name: str,
+        ok: bool,
+        detail: str,
+        *,
+        severity: str = "error",
+        **extra: Any,
+    ) -> None:
+        checks.append(
+            {
+                "name": name,
+                "ok": ok,
+                "detail": detail,
+                "severity": severity,
+                **extra,
+            }
+        )
 
     config_path = current_config_path()
     record(
         "config.file",
         bool(settings.get("config_exists")),
         f"Using config file: {config_path}",
+        severity="error",
         path=str(config_path),
     )
 
+    configured_instance_root = instance_root()
+    record(
+        "paths.instance_root",
+        configured_instance_root.exists() and configured_instance_root.is_dir(),
+        f"instance_root={configured_instance_root}",
+        severity="error",
+        path=str(configured_instance_root),
+    )
+
+    progress("Checking knowledge base path.")
     configured_kb = kb_path()
     record(
         "paths.knowledge_base",
         configured_kb.exists() and configured_kb.is_dir(),
         f"knowledge_base={configured_kb}",
+        severity="error",
         path=str(configured_kb),
     )
 
+    progress("Checking registry path.")
+    registry_path = instance_registry_path()
+    try:
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        if registry_path.exists():
+            registry_path.read_text(encoding="utf-8")
+        else:
+            probe = registry_path.parent / ".doctor-registry-write-check"
+            probe.write_text("ok\n", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+        record(
+            "paths.registry",
+            True,
+            f"registry={registry_path}",
+            severity="error",
+            path=str(registry_path),
+        )
+    except OSError as exc:
+        record(
+            "paths.registry",
+            False,
+            f"registry is not writable: {exc}",
+            severity="error",
+            path=str(registry_path),
+        )
+
+    progress("Checking writable state directory.")
     state_dir = platform_paths()["state_dir"]
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
         probe = state_dir / ".doctor-write-check"
         probe.write_text("ok\n", encoding="utf-8")
         probe.unlink(missing_ok=True)
-        record("paths.state_dir", True, f"state_dir is writable: {state_dir}", path=str(state_dir))
+        record(
+            "paths.state_dir",
+            True,
+            f"state_dir is writable: {state_dir}",
+            severity="error",
+            path=str(state_dir),
+        )
     except OSError as exc:
-        record("paths.state_dir", False, f"state_dir is not writable: {exc}", path=str(state_dir))
+        record(
+            "paths.state_dir",
+            False,
+            f"state_dir is not writable: {exc}",
+            severity="error",
+            path=str(state_dir),
+        )
 
-    executable = resolve_executable(settings)
+    progress("Checking configured server port.")
+    daemon = daemon_status()
+    bind_host = host()
+    bind_port = port()
+    if daemon["running"]:
+        record(
+            "server.port",
+            True,
+            f"Port {bind_port} is already serving the current Sediment daemon.",
+            severity="error",
+            host=bind_host,
+            port=bind_port,
+        )
+    else:
+        try:
+            family = (
+                socket.AF_INET6
+                if ":" in bind_host and "." not in bind_host
+                else socket.AF_INET
+            )
+            bind_target: tuple[Any, ...]
+            if family == socket.AF_INET6:
+                bind_target = (bind_host, bind_port, 0, 0)
+            else:
+                bind_target = (bind_host, bind_port)
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                probe.bind(bind_target)
+            record(
+                "server.port",
+                True,
+                f"Port {bind_port} is available on host {bind_host}.",
+                severity="error",
+                host=bind_host,
+                port=bind_port,
+            )
+        except OSError as exc:
+            record(
+                "server.port",
+                False,
+                f"Port {bind_port} is not available on host {bind_host}: {exc}",
+                severity="error",
+                host=bind_host,
+                port=bind_port,
+            )
+
     backend = settings["agent"]["backend"]
+    progress(f"Resolving agent backend executable for {backend}.")
+    executable = resolve_executable(settings)
     record(
         "agent.executable",
         bool(executable),
@@ -987,12 +1530,15 @@ def build_doctor_payload() -> dict[str, Any]:
             if executable
             else f"Could not resolve executable for backend {backend}"
         ),
+        severity="error",
         backend=backend,
         executable=executable,
     )
 
     if executable:
         try:
+            progress(f"Running `{backend} --help` probe (timeout: 10s).")
+            started_at = time.perf_counter()
             result = subprocess.run(
                 help_command(settings),
                 cwd=str(project_root()),
@@ -1001,102 +1547,158 @@ def build_doctor_payload() -> dict[str, Any]:
                 timeout=10,
                 check=False,
             )
+            duration_ms = int((time.perf_counter() - started_at) * 1000)
             ok = result.returncode == 0
-            detail = (
-                result.stderr.strip()
-                or result.stdout.strip()
-                or f"exit code {result.returncode}"
+            preview = summarize_text(result.stderr.strip() or result.stdout.strip())
+            if ok:
+                detail = "Help command responded successfully."
+            else:
+                detail = f"Help command failed: {preview or f'exit code {result.returncode}'}"
+            record(
+                "agent.help",
+                ok,
+                detail,
+                severity="warning",
+                backend=backend,
+                duration_ms=duration_ms,
+                preview=preview,
             )
-            record("agent.help", ok, detail, backend=backend)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            record("agent.help", False, f"Failed to run help command: {exc}", backend=backend)
+            record(
+                "agent.help",
+                False,
+                f"Failed to run help command: {exc}",
+                severity="warning",
+                backend=backend,
+            )
 
-        try:
-            schema = json.dumps(
-                {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "properties": {
-                        "ok": {"type": "boolean"},
-                        "backend": {"type": "string"},
-                    },
-                    "required": ["ok", "backend"],
-                }
+        simple_probe = _run_agent_simple_probe(
+            settings,
+            backend=backend,
+            progress=progress,
+        )
+        record(
+            "agent.simple_probe",
+            bool(simple_probe["ok"]),
+            str(simple_probe["detail"]),
+            severity="error",
+            backend=str(simple_probe.get("backend", backend)),
+            duration_ms=simple_probe.get("duration_ms"),
+            preview=simple_probe.get("preview"),
+        )
+        if full:
+            structured_probe = _run_agent_structured_probe(
+                settings,
+                backend=backend,
+                progress=progress,
             )
-            prompt = (
-                "You are Sediment doctor. Return JSON only with "
-                '{"ok": true, "backend": "<backend-name>"} and no extra text.'
+            record(
+                "agent.structured_probe",
+                bool(structured_probe["ok"]),
+                str(structured_probe["detail"]),
+                severity="warning",
+                backend=str(structured_probe.get("backend", backend)),
+                duration_ms=structured_probe.get("duration_ms"),
+                preview=structured_probe.get("preview"),
             )
-            with tempfile.TemporaryDirectory(prefix="sediment-doctor-") as temp_dir:
-                temp_root = Path(temp_dir)
-                invocation = build_cli_command(
-                    settings,
-                    prompt,
-                    prompt_file=temp_root / "prompt.txt",
-                    payload_file=temp_root / "payload.json",
-                    skill_file=temp_root / "skill.md",
-                    cwd=temp_root,
-                    extra_args=["--json-schema", schema],
+            if not structured_probe["ok"]:
+                notes.append(
+                    "The backend still passed the simple probe, so normal prompts work. "
+                    "Only the stricter structured JSON probe was unstable, which may affect "
+                    "tidy, ingest, and other schema-driven workflows."
                 )
-                result = subprocess.run(
-                    invocation.command,
-                    input=invocation.stdin_data,
-                    cwd=str(temp_root),
-                    capture_output=True,
-                    text=True,
-                    timeout=int(settings["agent"]["doctor_timeout_seconds"]),
-                    check=False,
-                )
-                raw_output = collect_output(
-                    invocation,
-                    stdout=result.stdout,
-                    stderr=result.stderr,
-                )
-                if result.returncode != 0:
-                    detail = raw_output or f"exit code {result.returncode}"
-                    record("agent.probe", False, f"Agent probe failed: {detail}", backend=backend)
-                else:
-                    payload = parse_json_object(raw_output)
-                    ok = bool(payload.get("ok")) and str(payload.get("backend", "")).strip()
-                    record(
-                        "agent.probe",
-                        bool(ok),
-                        f"Agent probe succeeded for backend {payload.get('backend', backend)}",
-                        backend=str(payload.get("backend", backend)),
-                    )
-        except (OSError, RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
-            record("agent.probe", False, f"Agent probe failed: {exc}", backend=backend)
+        else:
+            notes.append(
+                "Structured JSON probe skipped in quick mode. "
+                f"Run `{scoped_command('doctor --full')}` if ingest, tidy, or "
+                "other structured workflows feel unstable."
+            )
+    else:
+        notes.append(
+            "Agent probes were skipped because the configured backend executable "
+            "could not be resolved."
+        )
 
     return {
-        "status": "ok" if all(item["ok"] for item in checks) else "failed",
+        "status": doctor_status(checks),
+        "mode": "full" if full else "quick",
         "config_path": str(config_path),
         "instance_name": settings["instance"]["name"],
         "knowledge_name": settings["knowledge"]["name"],
         "backend": backend,
         "checks": checks,
+        "notes": notes,
     }
 
 
 def doctor_command(args) -> int:
-    payload = build_doctor_payload()
+    enabled = progress_enabled(args)
+    cli_progress(
+        f"Running doctor for instance `{instance_name()}`.",
+        enabled=enabled,
+    )
+    payload = build_doctor_payload(
+        progress=lambda message: cli_progress(message, enabled=enabled),
+        full=bool(args.full),
+    )
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return 0 if payload["status"] == "ok" else 1
+        return 0 if payload["status"] != "failed" else 1
 
-    print("Sediment doctor")
-    print(f"- config: {payload['config_path']}")
-    print(f"- instance: {payload['instance_name']}")
-    print(f"- knowledge: {payload['knowledge_name']}")
-    print(f"- backend: {payload['backend']}")
+    overall_map = {
+        "ok": ("PASS", "green"),
+        "warn": ("WARN", "yellow"),
+        "failed": ("FAIL", "red"),
+    }
+    overall_label, overall_color = overall_map[payload["status"]]
+    overall = cli_style(overall_label, color=overall_color, bold=True)
+    print(cli_style("Sediment doctor", color="cyan", bold=True))
+    print(f"status: {overall}")
+    print(f"mode: {payload['mode']}")
+    print(f"instance: {payload['instance_name']}")
+    print(f"knowledge: {payload['knowledge_name']}")
+    print(f"backend: {payload['backend']}")
+    print(f"config: {payload['config_path']}")
+    print("")
+    print(cli_style("Checks", bold=True))
     for item in payload["checks"]:
-        label = "ok" if item["ok"] else "fail"
-        print(f"- [{label}] {item['name']}: {item['detail']}")
-    return 0 if payload["status"] == "ok" else 1
+        duration = ""
+        if item.get("duration_ms") is not None:
+            duration = f" ({item['duration_ms']}ms)"
+        print(f"{doctor_badge(item):>4}  {item['name']}{duration}")
+        print(f"      {item['detail']}")
+    if payload.get("notes"):
+        print("")
+        print(cli_style("Notes", bold=True))
+        for note in payload["notes"]:
+            print(f"- {note}")
+    blocked = [
+        item["name"]
+        for item in payload["checks"]
+        if not item["ok"] and item.get("severity", "error") == "error"
+    ]
+    warnings = [
+        item["name"]
+        for item in payload["checks"]
+        if not item["ok"] and item.get("severity", "error") == "warning"
+    ]
+    if blocked or warnings:
+        print("")
+        print(cli_style("Next", bold=True))
+        if blocked:
+            print(f"- Fix the blocking checks above: {', '.join(blocked)}")
+        if warnings:
+            print(f"- Review the warning checks above: {', '.join(warnings)}")
+        re_run = "doctor --json" if payload["mode"] == "quick" else "doctor --full --json"
+        print(f"- Re-run machine-readable diagnostics: {scoped_command(re_run)}")
+    return 0 if payload["status"] != "failed" else 1
 
 
 def init_command(args) -> int:
+    enabled = progress_enabled(args)
     target_root = Path.cwd().resolve()
     config_target = target_root / CONFIG_RELATIVE_PATH
+    cli_progress(f"Initializing Sediment instance in {target_root}.", enabled=enabled)
 
     if config_target.exists() and not args.force:
         print(
@@ -1123,8 +1725,50 @@ def init_command(args) -> int:
             )
             return 2
 
-    instance_label = args.instance_name or _slugify_instance_name(target_root.name)
-    knowledge_label = args.knowledge_name or f"{target_root.name} Knowledge Base"
+    detected_backend = _detect_available_backend()
+    backend_default = args.backend or detected_backend or "claude-code"
+    if args.backend:
+        cli_progress(f"Using requested backend `{args.backend}`.", enabled=enabled)
+    elif detected_backend:
+        cli_progress(
+            f"Detected available agent backend `{detected_backend}`.",
+            enabled=enabled,
+        )
+    else:
+        cli_progress(
+            "No installed agent backend was detected; defaulting to `claude-code` in the scaffold.",
+            enabled=enabled,
+        )
+    host_value = args.host or "127.0.0.1"
+    port_value = args.port or _pick_free_port()
+    create_kb = not args.no_kb
+
+    defaults = {
+        "instance_name": args.instance_name or _slugify_instance_name(target_root.name),
+        "knowledge_name": args.knowledge_name or f"{target_root.name} Knowledge Base",
+        "backend": backend_default,
+        "host": host_value,
+        "port": port_value,
+        "create_kb": create_kb,
+    }
+
+    if _should_run_init_wizard(args):
+        try:
+            wizard = _run_init_wizard(target_root=target_root, defaults=defaults)
+        except (EOFError, KeyboardInterrupt):
+            print("\nSediment init cancelled.", file=sys.stderr)
+            return 130
+        instance_label = wizard["instance_name"]
+        knowledge_label = wizard["knowledge_name"]
+        backend = wizard["backend"]
+        host_value = wizard["host"]
+        port_value = int(wizard["port"])
+        create_kb = bool(wizard["create_kb"])
+    else:
+        instance_label = str(defaults["instance_name"])
+        knowledge_label = str(defaults["knowledge_name"])
+        backend = str(defaults["backend"])
+
     existing = get_registered_instance(instance_label)
     if existing is not None:
         existing_config = Path(existing["config_path"]).expanduser().resolve()
@@ -1135,27 +1779,20 @@ def init_command(args) -> int:
             )
             return 1
 
-    backend = args.backend
-    if backend == "auto":
-        backend = _detect_available_backend()
-        if backend is None:
-            print(
-                "No supported Agent CLI was detected. Install Claude Code CLI, Codex CLI, "
-                "or OpenCode CLI, or pass --backend explicitly.",
-                file=sys.stderr,
-            )
-            return 2
+    cli_progress(f"Using backend `{backend}`.", enabled=enabled)
 
-    port_value = args.port or _pick_free_port()
+    cli_progress(f"Writing instance scaffold to {config_target}.", enabled=enabled)
     scaffold = _write_instance_scaffold(
         target_root=target_root,
         config_target=config_target,
         instance_label=instance_label,
         knowledge_label=knowledge_label,
         backend=backend,
+        host_value=host_value,
         port_value=port_value,
-        create_kb=not args.no_kb,
+        create_kb=create_kb,
     )
+    cli_progress("Registering instance in the local registry.", enabled=enabled)
     register_instance(
         instance_name=instance_label,
         config_path=config_target,
@@ -1163,23 +1800,22 @@ def init_command(args) -> int:
     )
     set_active_config_path(config_target)
 
-    doctor = build_doctor_payload()
     payload = {
         "instance_name": instance_label,
         "knowledge_name": knowledge_label,
         "config_path": str(config_target),
         "instance_root": str(target_root),
         "backend": backend,
+        "host": host_value,
         "port": port_value,
-        "knowledge_base_created": not args.no_kb,
+        "knowledge_base_created": create_kb,
         "registry_path": str(instance_registry_path()),
         "admin_token": scaffold["auth"]["admin_token"],
-        "doctor_status": doctor["status"],
     }
 
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
-        return 0 if doctor["status"] == "ok" else 1
+        return 0
 
     print("Sediment instance initialized")
     print(f"- instance: {instance_label}")
@@ -1187,15 +1823,16 @@ def init_command(args) -> int:
     print(f"- root: {target_root}")
     print(f"- config: {config_target}")
     print(f"- backend: {backend}")
+    print(f"- host: {host_value}")
     print(f"- port: {port_value}")
     print(f"- registry: {instance_registry_path()}")
     print(f"- admin_token: {scaffold['auth']['admin_token']}")
-    print(f"- doctor: {doctor['status']}")
-    if doctor["status"] != "ok":
-        print("Run `sediment doctor` after fixing the reported issues.", file=sys.stderr)
-        return 1
+    print("- doctor: skipped during init")
+    print(
+        "Tip: if the agent backend, permissions, or port look suspicious, run "
+        f"`{scoped_command('doctor')}`.",
+    )
     print_next_steps(
-        scoped_command("doctor"),
         scoped_command("server start"),
         scoped_command("status"),
     )
@@ -1336,6 +1973,10 @@ def review_show_command(args) -> int:
 def _review_decision_command(args, decision: str) -> int:
     store = build_store()
     try:
+        cli_progress(
+            f"Applying review decision `{decision}` to `{args.review_id}`.",
+            enabled=progress_enabled(args),
+        )
         payload = apply_review_decision(
             store=store,
             kb_path=kb_path(),
@@ -1415,12 +2056,19 @@ def render_help(topic: str | None) -> str:
                 "Sediment help",
                 "",
                 "Core workflow:",
-                "  sediment init --instance-name ops-prod --knowledge-name \"生产运维知识库\"",
+                "  sediment init",
+                "  sediment instance list",
+                "  sediment doctor",
+                "  sediment server start",
+                "  sediment kb explore \"什么是热备份\"",
+                "  sediment submit text --title \"新概念\" --content \"...\"",
+                "  sediment review list",
+                "  sediment logs follow",
+                "",
+                "Anywhere management:",
                 "  sediment --instance ops-prod doctor",
                 "  sediment --instance ops-prod server start",
-                "  sediment --instance ops-prod submit text --title \"新概念\" --content \"...\"",
                 "  sediment --instance ops-prod review list",
-                "  sediment --instance ops-prod logs follow",
                 "",
                 "Global options:",
                 "  --instance NAME   use a registered instance from anywhere",
@@ -1442,13 +2090,18 @@ def render_help(topic: str | None) -> str:
             [
                 "sediment init",
                 "",
-                "Create a Sediment instance in the current directory, write",
-                "./config/sediment/config.yaml, register the instance globally, create",
-                "a KB scaffold, and run the same health checks used by `sediment doctor`.",
+                "Create a Sediment instance in the current directory.",
+                "",
+                "In a normal terminal, `sediment init` opens an interactive setup wizard.",
+                "Press Enter to keep defaults, or pass --no-interactive for scripts and CI.",
+                "If you work inside the instance root or its knowledge-base directory,",
+                "Sediment resolves the local config automatically and you usually do not need",
+                "`--instance`.",
                 "",
                 "Examples:",
+                "  sediment init",
                 "  sediment init --instance-name ops-prod --knowledge-name \"生产运维知识库\"",
-                "  sediment init --backend codex --port 8123",
+                "  sediment init --backend codex --host 0.0.0.0 --port 8123 --no-interactive",
             ]
         ),
         "instance": "\n".join(
@@ -1488,10 +2141,10 @@ def render_help(topic: str | None) -> str:
                 "Inspect and resolve pending review items without opening the web UI.",
                 "",
                 "Commands:",
-                "  sediment --instance ops-prod review list",
-                "  sediment --instance ops-prod review show <review-id>",
-                "  sediment --instance ops-prod review approve <review-id> --reviewer-name alice",
-                "  sediment --instance ops-prod review reject <review-id> "
+                "  sediment review list",
+                "  sediment review show <review-id>",
+                "  sediment review approve <review-id> --reviewer-name alice",
+                "  sediment review reject <review-id> "
                 "--comment \"needs more evidence\"",
             ]
         ),
@@ -1502,8 +2155,8 @@ def render_help(topic: str | None) -> str:
                 "Read daemon logs for the current instance. Use --component all|server|worker|up.",
                 "",
                 "Commands:",
-                "  sediment --instance ops-prod logs show --lines 80",
-                "  sediment --instance ops-prod logs follow --component worker",
+                "  sediment logs show --lines 80",
+                "  sediment logs follow --component worker",
             ]
         ),
         "server": "\n".join(
@@ -1513,9 +2166,9 @@ def render_help(topic: str | None) -> str:
                 "Manage the per-instance daemon lifecycle.",
                 "",
                 "Commands:",
-                "  sediment --instance ops-prod server start",
-                "  sediment --instance ops-prod server status",
-                "  sediment --instance ops-prod server stop",
+                "  sediment server start",
+                "  sediment server status",
+                "  sediment server stop",
             ]
         ),
         "kb": "\n".join(
@@ -1525,17 +2178,22 @@ def render_help(topic: str | None) -> str:
                 "Explore and maintain the formal knowledge layer.",
                 "",
                 "Commands:",
-                "  sediment --instance ops-prod kb list",
-                "  sediment --instance ops-prod kb explore \"什么是热备份\"",
-                "  sediment --instance ops-prod kb tidy \"薄弱条目\"",
+                "  sediment kb list",
+                "  sediment kb explore \"什么是热备份\"",
+                "  sediment kb tidy \"薄弱条目\"",
             ]
         ),
         "doctor": "\n".join(
             [
                 "sediment doctor",
                 "",
-                "Check config discovery, KB path, writable state directory, selected Agent CLI,",
-                "and a minimal probe prompt against the configured backend.",
+                "Run a layered health check for the current Sediment instance.",
+                "",
+                "Quick mode checks config discovery, paths, port availability, executable",
+                "resolution, CLI help, and a simple generation probe.",
+                "",
+                "Use `sediment doctor --full` to also run the stricter structured JSON probe",
+                "used by tidy and other schema-driven workflows.",
             ]
         ),
         "submit": "\n".join(
@@ -1605,6 +2263,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--instance",
         help="Use a registered Sediment instance by name.",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress logs for non-JSON commands.",
+    )
     parser.add_argument("--registry", help=argparse.SUPPRESS)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -1616,13 +2279,20 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--knowledge-name")
     init_parser.add_argument(
         "--backend",
-        choices=["auto", "claude-code", "codex", "opencode"],
-        default="auto",
+        choices=["claude-code", "codex", "opencode"],
+        default=None,
     )
+    init_parser.add_argument("--host", default=None)
     init_parser.add_argument("--port", type=int)
     init_parser.add_argument("--force", action="store_true")
     init_parser.add_argument("--allow-nested", action="store_true")
     init_parser.add_argument("--no-kb", action="store_true")
+    init_parser.add_argument(
+        "--interactive",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Run an interactive init wizard in the terminal. Enabled by default on TTYs.",
+    )
     init_parser.add_argument("--json", action="store_true")
     init_parser.set_defaults(func=init_command, needs_runtime_context=False)
 
@@ -1843,6 +2513,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser = subparsers.add_parser(
         "doctor",
         help="Check whether Sediment and its configured agent backend are healthy.",
+    )
+    doctor_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Also run the stricter structured JSON probe used by schema-driven workflows.",
     )
     doctor_parser.add_argument("--json", action="store_true")
     doctor_parser.set_defaults(func=doctor_command, needs_runtime_context=True)

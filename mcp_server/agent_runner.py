@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import socket
 import subprocess
@@ -14,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from mcp_server.kb import inventory
-from mcp_server.llm_cli import build_cli_command
+from mcp_server.llm_cli import build_cli_command, collect_output
 from mcp_server.platform_services import (
     build_diff,
     content_hash,
@@ -23,6 +22,7 @@ from mcp_server.platform_services import (
     validate_target_content,
 )
 from mcp_server.platform_store import PlatformStore, utc_now
+from mcp_server.settings import load_settings
 
 INGEST_SCHEMA = json.dumps(
     {
@@ -399,9 +399,8 @@ class AgentRunner:
         return resource.read_text(encoding="utf-8")
 
     def _run_cli_json(self, *, prompt: str, schema: str, job_id: str) -> dict[str, Any]:
-        cli_value = os.environ.get("SEDIMENT_CLI", "").strip()
-        if not cli_value:
-            raise RuntimeError("SEDIMENT_CLI is not configured; local agent runner is unavailable")
+        settings = load_settings()
+        timeout_seconds = int(settings["agent"]["exec_timeout_seconds"])
         with tempfile.TemporaryDirectory(prefix="sediment-agent-") as temp_dir:
             temp_root = Path(temp_dir)
             prompt_file = temp_root / "prompt.txt"
@@ -410,17 +409,18 @@ class AgentRunner:
             prompt_file.write_text(prompt, encoding="utf-8")
             payload_file.write_text(prompt, encoding="utf-8")
             skill_file.write_text(prompt, encoding="utf-8")
-            command, stdin_data = build_cli_command(
-                cli_value,
+            invocation = build_cli_command(
+                settings,
                 prompt,
                 prompt_file=prompt_file,
                 payload_file=payload_file,
                 skill_file=skill_file,
+                cwd=self.project_root,
                 extra_args=["--json-schema", schema],
             )
             try:
                 process = subprocess.Popen(
-                    command,
+                    invocation.command,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -428,11 +428,13 @@ class AgentRunner:
                     cwd=str(self.project_root),
                 )
                 if process.stdin is not None:
-                    process.stdin.write(stdin_data or "")
+                    process.stdin.write(invocation.stdin_data or "")
                     process.stdin.close()
                     process.stdin = None
             except FileNotFoundError as exc:  # pragma: no cover - environment dependent
-                raise RuntimeError(f"agent CLI unavailable: {exc.filename or cli_value}") from exc
+                raise RuntimeError(
+                    f"agent CLI unavailable: {exc.filename or invocation.command[0]}"
+                ) from exc
 
             started = time.monotonic()
             while True:
@@ -447,7 +449,7 @@ class AgentRunner:
                     raise RuntimeError("job cancelled by admin")
                 if process.poll() is not None:
                     break
-                if time.monotonic() - started > 240:
+                if time.monotonic() - started > timeout_seconds:
                     process.terminate()
                     try:
                         process.wait(timeout=5)
@@ -460,7 +462,7 @@ class AgentRunner:
             if process.returncode != 0:
                 detail = stderr.strip() or stdout.strip() or f"exit code {process.returncode}"
                 raise RuntimeError(f"agent CLI failed: {detail}")
-            raw_output = stdout.strip() or stderr.strip()
+            raw_output = collect_output(invocation, stdout=stdout, stderr=stderr)
             if not raw_output:
                 raise RuntimeError("agent CLI returned no output")
             return self._parse_cli_json(raw_output)

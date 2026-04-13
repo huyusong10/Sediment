@@ -122,52 +122,80 @@ skills/
 
 ## Run The Platform
 
+Sediment now loads its runtime configuration from
+[`config/sediment/config.yaml`](config/sediment/config.yaml) by default. You can
+override it per command with `--config /path/to/config.yaml`.
+
+If that project-local file is absent, Sediment falls back to a user-level config:
+
+- macOS: `~/Library/Application Support/Sediment/config.yaml`
+- Windows: `%APPDATA%/Sediment/config.yaml`
+- Linux: `$XDG_CONFIG_HOME/sediment/config.yaml` or `~/.config/sediment/config.yaml`
+
+Example:
+
 ```bash
-export SEDIMENT_KB_PATH=/path/to/your/knowledge-base
-export SEDIMENT_CLI=claude
-uv run sediment-server
-uv run sediment-worker
+cp config/sediment/config.yaml /your/workspace/config/sediment/config.yaml
+uv run sediment server run
 ```
 
-The server hosts three surfaces at once:
+The default config is repository-local and cross-platform. Path fields are
+resolved through `paths.workspace_root`, and `agent.command` supports either a
+single string or an explicit YAML list to avoid quoting issues on Windows.
+
+For daemon-style control, use the same entrypoint:
+
+```bash
+uv run sediment server start
+uv run sediment server status
+uv run sediment server stop
+```
+
+`uv run sediment up` is kept as a short alias for foreground local startup.
+
+The platform hosts three surfaces at once:
 
 - `MCP` via SSE / JSON-RPC
 - `Portal` at `/portal`
 - `Admin` at `/admin`
 
-The worker is the default execution path for queued `ingest` / `tidy` jobs.
-For single-process local debugging you can also set `SEDIMENT_RUN_JOBS_IN_PROCESS=1`
-and run only the server, but production deployments should keep the worker
-separate.
+Under the hood, queued `ingest` / `tidy` jobs still run through the worker role.
+Normal deployments should keep queue execution separate.
 
-Environment variables:
+Compatibility shims are still available for lower-level debugging:
 
-| Variable | Default | Description |
-|---|---|---|
-| `SEDIMENT_KB_PATH` | project `knowledge-base/` | Path to the KB root |
-| `SEDIMENT_CLI` | `claude` | CLI command used by `knowledge_ask` and experimental workflow harnesses |
-| `SEDIMENT_HOST` | `0.0.0.0` | HTTP bind address |
-| `SEDIMENT_PORT` | `8000` | HTTP port |
-| `SEDIMENT_SSE_PATH` | `/sediment/` | SSE endpoint path |
-| `SEDIMENT_ADMIN_TOKEN` | empty | Optional Bearer token required for `/admin` and admin APIs |
-| `SEDIMENT_SESSION_SECRET` | `SEDIMENT_ADMIN_TOKEN` | Optional signing secret for admin session cookies |
-| `SEDIMENT_ADMIN_SESSION_COOKIE_NAME` | `sediment_admin_session` | Cookie name for web-admin sessions |
-| `SEDIMENT_ADMIN_SESSION_TTL_SECONDS` | `43200` | Admin session lifetime in seconds |
-| `SEDIMENT_SECURE_COOKIES` | `0` | Mark admin cookies as `Secure`; enable this behind HTTPS |
-| `SEDIMENT_TRUST_PROXY_HEADERS` | `0` | Whether to trust `X-Forwarded-For` / `X-Real-IP` |
-| `SEDIMENT_TRUSTED_PROXY_CIDRS` | empty | Comma-separated proxy CIDRs allowed to supply real client IPs |
-| `SEDIMENT_SUBMISSION_RATE_LIMIT_COUNT` | `1` | Max submissions per IP inside the rate-limit window |
-| `SEDIMENT_SUBMISSION_RATE_LIMIT_WINDOW_SECONDS` | `60` | Submission rate-limit window |
-| `SEDIMENT_SUBMISSION_DEDUPE_WINDOW_SECONDS` | `86400` | Exact-duplicate submission dedupe window |
-| `SEDIMENT_MAX_TEXT_SUBMISSION_CHARS` | `20000` | Max size of a text submission |
-| `SEDIMENT_MAX_UPLOAD_BYTES` | `10485760` | Max uploaded document size |
-| `SEDIMENT_STATE_DIR` | `.sediment_state/` | Root directory for platform DB, uploads, and worker workspaces |
-| `SEDIMENT_DB_PATH` | `.sediment_state/platform.db` | SQLite path for submissions, jobs, reviews, and audit logs |
-| `SEDIMENT_UPLOADS_DIR` | `.sediment_state/uploads/` | Stored uploaded documents |
-| `SEDIMENT_WORKSPACES_DIR` | `.sediment_state/workspaces/` | Isolated worker workspaces for ingest/tidy jobs |
-| `SEDIMENT_JOB_MAX_ATTEMPTS` | `3` | Automatic retry ceiling for worker jobs |
-| `SEDIMENT_JOB_STALE_AFTER_SECONDS` | `900` | Heartbeat timeout before a running job is recovered |
-| `SEDIMENT_RUN_JOBS_IN_PROCESS` | `0` | Run jobs in the server process instead of an external worker |
+- `uv run sediment-server`
+- `uv run sediment-worker`
+- `uv run sediment-up`
+
+Key config sections:
+
+- `paths`: workspace root, knowledge base, state DB, uploads, worker workspaces
+- `server`: bind host/port, SSE path, in-process job mode
+- `auth`: admin token, session secret, secure cookie settings
+- `network`: trusted proxy and real-IP behavior
+- `submissions`: rate limits, dedupe window, upload/text size limits
+- `jobs`: retry ceiling and stale-job timeout
+- `agent`: selected backend plus backend-specific command/model options
+- `knowledge`: locale, query-language override, and index contract defaults
+
+Supported `agent.backend` values:
+
+- `claude-code`
+- `codex`
+- `opencode`
+
+Example agent block:
+
+```yaml
+agent:
+  backend: codex
+  command:
+    - codex
+  model: gpt-5-codex
+  sandbox: workspace-write
+  exec_timeout_seconds: 240
+```
 
 ## Portal And Admin
 
@@ -209,8 +237,10 @@ New platform tools include:
 - `knowledge_submit_text`
 - `knowledge_submit_document`
 - `knowledge_health_report`
+- `knowledge_platform_status`
 - `knowledge_submission_queue`
 - `knowledge_job_status`
+- `knowledge_tidy_request`
 - `knowledge_review_decide`
 
 REST/admin surfaces now also expose:
@@ -222,12 +252,20 @@ REST/admin surfaces now also expose:
 - `POST /api/admin/jobs/{id}/retry`
 - `POST /api/admin/jobs/{id}/cancel`
 
+The unified CLI surface is:
+
+- `sediment server ...` for lifecycle control, logs, and daemon status
+- `sediment kb ...` for explore, list, read, health, and tidy actions
+- `sediment status ...` for platform, daemon, queue, and KB-health summaries
+- `sediment doctor` for config, filesystem, and agent-backend health checks
+
 ## Use The KB
 
-- **Explore**: ask natural-language questions through `knowledge_ask`, or use `knowledge_list` + `knowledge_read`
-- **Health**: run `uv run python skills/health/scripts/health_check.py knowledge-base`
+- **Explore**: ask natural-language questions through `knowledge_ask`, or run `uv run sediment kb explore "your question"`
+- **Health**: run `uv run sediment kb health` or `uv run python skills/health/scripts/health_check.py knowledge-base`
+- **Inspect status**: run `uv run sediment status`, `uv run sediment status queue`, or `uv run sediment server status`
 - **Ingest (experimental)**: load `skills/ingest/SKILL.md` as a workflow instruction and feed source materials
-- **Tidy (experimental)**: load `skills/tidy/SKILL.md` as a workflow instruction to repair graph gaps, invalid entries, and promotable placeholders
+- **Tidy (experimental)**: load `skills/tidy/SKILL.md` as a workflow instruction, or queue a targeted repair with `uv run sediment kb tidy "<entry-name>"`
 - **Portal submissions**: send text or documents into the buffered review flow
 - **Admin review**: approve/reject queued ingest and tidy patches from the web UI or admin APIs
 
@@ -264,15 +302,17 @@ uv build
 For local end-to-end development:
 
 ```bash
-export SEDIMENT_KB_PATH=/absolute/path/to/knowledge-base
-export SEDIMENT_CLI=claude
-export SEDIMENT_RUN_JOBS_IN_PROCESS=0
-uv run sediment-server
-uv run sediment-worker
+uv run sediment server run
 ```
 
-Tests use `tests/fixtures/mock_workflow_cli.py` to simulate the Agent runner, but
-real deployments should point `SEDIMENT_CLI` at an actual local coding CLI.
+Useful checks:
+
+```bash
+uv run sediment doctor
+uv run sediment doctor --json
+```
+
+Tests use `tests/fixtures/mock_workflow_cli.py` to simulate the Agent runner.
 
 When editing the runtime:
 - keep sources in frontmatter `sources`, never as `[[wikilinks]]`
@@ -284,16 +324,22 @@ When editing the runtime:
 
 Minimum deployment baseline:
 
-- set `SEDIMENT_ADMIN_TOKEN`
-- set `SEDIMENT_SESSION_SECRET`
-- enable `SEDIMENT_SECURE_COOKIES=1` behind HTTPS
-- run `sediment-server` and `sediment-worker` as separate processes
-- if you are behind a reverse proxy, enable `SEDIMENT_TRUST_PROXY_HEADERS=1` and restrict `SEDIMENT_TRUSTED_PROXY_CIDRS`
+- set `auth.admin_token`
+- set `auth.session_secret`
+- enable `auth.secure_cookies: true` behind HTTPS
+- use `sediment server run` for local/dev convenience
+- use `sediment server start|stop|status|logs` for daemon control
+- keep `server` and `worker` as separate roles in production, even if you launch them through one `sediment` entrypoint
+- if you are behind a reverse proxy, set `network.trust_proxy_headers: true` and restrict `network.trusted_proxy_cidrs`
 - monitor `/healthz` and the admin system-status panel
 
 The worker now writes job heartbeats, recovers stale `running` jobs after the
 configured timeout, supports explicit cancel / retry controls, and leaves a
 structured audit trail for session, queue, review, and writeback actions.
+
+`sediment server run` and `sediment up` are thin launchers around the split
+architecture. They start both roles, prefix logs with `[server]` / `[worker]`,
+wait for `/healthz`, and shut both children down together when you press `Ctrl+C`.
 
 ## License
 

@@ -14,8 +14,10 @@ dependencies = [
 ]
 
 [project.scripts]
-sediment-server = "mcp_server.server:main"
-sediment-worker = "mcp_server.worker:main"
+sediment = "mcp_server.cli:main"
+sediment-server = "mcp_server.cli:legacy_server_main"
+sediment-worker = "mcp_server.cli:legacy_worker_main"
+sediment-up = "mcp_server.cli:legacy_up_main"
 
 [build-system]
 requires = ["hatchling"]

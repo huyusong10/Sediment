@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -10,6 +9,7 @@ from typing import Any
 import yaml
 
 from mcp_server.i18n import kb_localized_aliases, kb_sentence_markers
+from mcp_server.settings import load_settings
 
 FORMAL_ENTRY_TYPES = {"concept", "lesson"}
 VALID_STATUSES = {"fact", "inferred", "disputed"}
@@ -293,13 +293,11 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
 
 
 def index_config() -> dict[str, Any]:
-    max_entries = _env_int("SEDIMENT_INDEX_MAX_ENTRIES", INDEX_DEFAULTS["max_entries"])
-    max_tokens = _env_int("SEDIMENT_INDEX_MAX_TOKENS", INDEX_DEFAULTS["max_tokens"])
-    root_file = os.environ.get("SEDIMENT_INDEX_ROOT_FILE", INDEX_DEFAULTS["root_file"]).strip()
-    segment_glob = os.environ.get(
-        "SEDIMENT_INDEX_SEGMENT_GLOB",
-        INDEX_DEFAULTS["segment_glob"],
-    ).strip()
+    settings = load_settings()["knowledge"]["index"]
+    max_entries = int(settings.get("max_entries", INDEX_DEFAULTS["max_entries"]))
+    max_tokens = int(settings.get("max_tokens", INDEX_DEFAULTS["max_tokens"]))
+    root_file = str(settings.get("root_file", INDEX_DEFAULTS["root_file"])).strip()
+    segment_glob = str(settings.get("segment_glob", INDEX_DEFAULTS["segment_glob"])).strip()
     return {
         "max_entries": max_entries,
         "max_tokens": max_tokens,
@@ -956,19 +954,6 @@ def validate_index(path: str | Path) -> dict[str, Any]:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
 def _priority_rank(priority: str) -> int:
     return {"high": 0, "medium": 1, "low": 2}.get(priority, 3)
 

@@ -40,15 +40,18 @@ Sources live in frontmatter `sources` and must remain plain text.
 ## Available Checks
 
 ```bash
-python -m skills.explore.scripts.kb_query audit-kb "$SEDIMENT_KB_PATH"
-python -m skills.explore.scripts.kb_query validate-entry "$SEDIMENT_KB_PATH/entries/ENTRY_NAME.md"
+uv run sediment kb health --json
+python -m skills.explore.scripts.kb_query validate-entry "<KB_PATH>/entries/ENTRY_NAME.md"
 
-python -c "from skills.tidy.scripts.tidy_utils import find_dangling_links; import json; print(json.dumps(find_dangling_links('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
-python -c "from skills.tidy.scripts.tidy_utils import count_placeholder_refs; import json; print(json.dumps(count_placeholder_refs('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
-python -c "from skills.tidy.scripts.tidy_utils import find_orphan_entries; import json; print(json.dumps(find_orphan_entries('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
-python -c "from skills.tidy.scripts.tidy_utils import collect_ref_contexts; import json; print(json.dumps(collect_ref_contexts('$SEDIMENT_KB_PATH', 'CONCEPT_NAME'), ensure_ascii=False, indent=2))"
-python -c "from skills.tidy.scripts.tidy_utils import plan_index_repairs; import json; print(json.dumps(plan_index_repairs('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
+python -c "from skills.tidy.scripts.tidy_utils import find_dangling_links; import json; print(json.dumps(find_dangling_links('<KB_PATH>'), ensure_ascii=False, indent=2))"
+python -c "from skills.tidy.scripts.tidy_utils import count_placeholder_refs; import json; print(json.dumps(count_placeholder_refs('<KB_PATH>'), ensure_ascii=False, indent=2))"
+python -c "from skills.tidy.scripts.tidy_utils import find_orphan_entries; import json; print(json.dumps(find_orphan_entries('<KB_PATH>'), ensure_ascii=False, indent=2))"
+python -c "from skills.tidy.scripts.tidy_utils import collect_ref_contexts; import json; print(json.dumps(collect_ref_contexts('<KB_PATH>', 'CONCEPT_NAME'), ensure_ascii=False, indent=2))"
+python -c "from skills.tidy.scripts.tidy_utils import plan_index_repairs; import json; print(json.dumps(plan_index_repairs('<KB_PATH>'), ensure_ascii=False, indent=2))"
 ```
+
+`<KB_PATH>` means the knowledge base root resolved from the active
+`config/sediment/config.yaml`.
 
 ## Main Tidy Actions
 

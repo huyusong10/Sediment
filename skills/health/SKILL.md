@@ -13,7 +13,7 @@ You interpret the v4 health report for humans.
 Run the health script first:
 
 ```bash
-python skills/health/scripts/health_check.py "$SEDIMENT_KB_PATH" --json
+uv run sediment kb health --json
 ```
 
 The report includes deterministic checks for:

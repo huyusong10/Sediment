@@ -661,7 +661,7 @@ def admin_login_html() -> str:
 
       <section class="panel" style="margin-top:20px; max-width:560px;">
         <div class="grid">
-          <label>Admin Token<input id="admin-session-token" type="password" placeholder="输入 SEDIMENT_ADMIN_TOKEN" /></label>
+          <label>Admin Token<input id="admin-session-token" type="password" placeholder="输入 config.yaml 中配置的 admin token" /></label>
           <button class="primary" id="login-button">登录管理台</button>
           <div id="login-status" class="subtle">需要有效 token 才能进入后台。</div>
         </div>

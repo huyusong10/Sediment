@@ -2,11 +2,63 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+
+
+def _read_prompt(argv: list[str]) -> str:
+    if "exec" in argv and "-" in argv:
+        return sys.stdin.read()
+    if "-p" in argv:
+        if "--" in argv:
+            return " ".join(argv[argv.index("--") + 1 :])
+        prompt_index = argv.index("-p") + 1
+        if prompt_index < len(argv):
+            return argv[prompt_index]
+    if "run" in argv:
+        filtered = argv[:]
+        if "--format" in filtered:
+            format_index = filtered.index("--format")
+            del filtered[format_index : format_index + 2]
+        if "--dir" in filtered:
+            dir_index = filtered.index("--dir")
+            del filtered[dir_index : dir_index + 2]
+        if len(filtered) > 1:
+            return " ".join(filtered[1:]) if filtered[0] == "run" else " ".join(filtered)
+    return sys.stdin.read()
+
+
+def _write_output(argv: list[str], text: str) -> None:
+    if "--output-last-message" in argv:
+        output_index = argv.index("--output-last-message") + 1
+        if output_index < len(argv):
+            Path(argv[output_index]).write_text(text, encoding="utf-8")
+            print('{"event":"done"}')
+            return
+    print(text)
 
 
 def main() -> int:
-    prompt = sys.stdin.read()
-    if "Sediment ingest runner." in prompt:
+    argv = sys.argv[1:]
+    if "--help" in argv:
+        print("mock workflow cli help")
+        return 0
+
+    prompt = _read_prompt(argv.copy())
+    if "internal Sediment explore runtime" in prompt:
+        payload = {
+            "answer": "热备份是在故障切换前准备好的可接管能力。",
+            "sources": ["热备份", "回音壁"],
+            "confidence": "high",
+            "exploration_summary": {
+                "entries_scanned": 2,
+                "entries_read": 2,
+                "links_followed": 1,
+                "mode": "definition-driven",
+            },
+            "gaps": [],
+            "contradictions": [],
+        }
+    elif "Sediment ingest runner." in prompt:
         payload = {
             "summary": "Generated one conservative ingest draft.",
             "warnings": [],
@@ -66,8 +118,8 @@ sources:
             ],
         }
     else:
-        payload = {"summary": "Unknown prompt", "warnings": ["no-op"], "drafts": []}
-    print(json.dumps(payload, ensure_ascii=False))
+        payload = {"ok": True, "backend": "mock"}
+    _write_output(argv, json.dumps(payload, ensure_ascii=False))
     return 0
 
 

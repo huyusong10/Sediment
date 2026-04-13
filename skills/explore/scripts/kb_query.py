@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from collections import deque
@@ -24,6 +23,7 @@ from mcp_server.kb import (
 from mcp_server.kb import (
     validate_entry as core_validate_entry,
 )
+from mcp_server.settings import load_settings
 
 LANGUAGE_RULES = query_language_rules()
 
@@ -676,7 +676,7 @@ def _question_mode(question: str) -> str:
 
 
 def _active_languages(question: str) -> tuple[str, ...]:
-    override = os.environ.get("SEDIMENT_QUERY_LANGS", "").strip()
+    override = str(load_settings()["knowledge"].get("query_languages", "")).strip()
     if override:
         requested = tuple(
             lang.strip().lower()

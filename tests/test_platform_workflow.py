@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import sys
 import textwrap
 import time
@@ -14,6 +15,7 @@ from mcp_server.platform_services import (
     parse_trusted_proxy_cidrs,
 )
 from mcp_server.platform_store import PlatformStore
+from tests.config_helpers import write_test_config
 
 
 def _write(path: Path, content: str) -> None:
@@ -123,27 +125,36 @@ def _configure_server(
     state_dir: Path,
     *,
     admin_token: str = "",
-) -> TestClient:
-    monkeypatch.setattr(server, "_PROJECT_ROOT", project_root)
-    monkeypatch.setattr(server, "KB_PATH", kb_path)
-    monkeypatch.setattr(server, "ADMIN_TOKEN", admin_token)
-    monkeypatch.setattr(server, "SESSION_SECRET", "test-session-secret")
-    monkeypatch.setattr(server, "RUN_JOBS_IN_PROCESS", False)
-    monkeypatch.setattr(server, "TRUST_PROXY_HEADERS", False)
-    monkeypatch.setattr(server, "TRUSTED_PROXY_CIDRS", ())
-    monkeypatch.setattr(server, "JOB_STALE_AFTER_SECONDS", 1)
-    monkeypatch.setattr(server, "JOB_MAX_ATTEMPTS", 2)
-    monkeypatch.setenv("SEDIMENT_STATE_DIR", str(state_dir))
-    monkeypatch.setenv("SEDIMENT_KB_PATH", str(kb_path))
+) -> tuple[TestClient, object, object]:
     cli_path = Path(__file__).parent / "fixtures" / "mock_workflow_cli.py"
-    monkeypatch.setenv("SEDIMENT_CLI", f"{sys.executable} {cli_path}")
-    app = server.create_starlette_app()
-    return TestClient(app)
+    write_test_config(
+        project_root,
+        kb_path=kb_path,
+        state_dir=state_dir,
+        agent_backend="claude-code",
+        agent_command=[sys.executable, str(cli_path)],
+    )
+    server_module = importlib.reload(server)
+    worker_module = importlib.reload(worker)
+    monkeypatch.setattr(server_module, "ADMIN_TOKEN", admin_token)
+    monkeypatch.setattr(server_module, "SESSION_SECRET", "test-session-secret")
+    monkeypatch.setattr(server_module, "RUN_JOBS_IN_PROCESS", False)
+    monkeypatch.setattr(server_module, "TRUST_PROXY_HEADERS", False)
+    monkeypatch.setattr(server_module, "TRUSTED_PROXY_CIDRS", ())
+    monkeypatch.setattr(server_module, "JOB_STALE_AFTER_SECONDS", 1)
+    monkeypatch.setattr(server_module, "JOB_MAX_ATTEMPTS", 2)
+    app = server_module.create_starlette_app()
+    return TestClient(app), server_module, worker_module
 
 
 def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)
-    client = _configure_server(monkeypatch, project_root, kb_path, tmp_path / "state")
+    client, _server_module, _worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
 
     response = client.post(
         "/api/portal/submissions/text",
@@ -174,7 +185,12 @@ def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> N
 def test_ingest_job_review_and_apply(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)
     state_dir = tmp_path / "state"
-    client = _configure_server(monkeypatch, project_root, kb_path, state_dir)
+    client, _server_module, worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+    )
 
     submission = client.post(
         "/api/portal/submissions/text",
@@ -190,7 +206,7 @@ def test_ingest_job_review_and_apply(tmp_path: Path, monkeypatch) -> None:
     assert run.status_code == 202
     job_id = run.json()["id"]
 
-    processed = worker.process_queue_until_idle(max_jobs=1)
+    processed = worker_module.process_queue_until_idle(max_jobs=1)
     assert processed == 1
 
     for _ in range(10):
@@ -226,7 +242,12 @@ def test_ingest_job_review_and_apply_with_symlinked_kb_path(tmp_path: Path, monk
     linked_kb = tmp_path / "kb-link"
     linked_kb.symlink_to(kb_path, target_is_directory=True)
     state_dir = tmp_path / "state"
-    client = _configure_server(monkeypatch, project_root, linked_kb, state_dir)
+    client, _server_module, worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        linked_kb,
+        state_dir,
+    )
 
     submission = client.post(
         "/api/portal/submissions/text",
@@ -242,7 +263,7 @@ def test_ingest_job_review_and_apply_with_symlinked_kb_path(tmp_path: Path, monk
     assert run.status_code == 202
     job_id = run.json()["id"]
 
-    processed = worker.process_queue_until_idle(max_jobs=1)
+    processed = worker_module.process_queue_until_idle(max_jobs=1)
     assert processed == 1
 
     for _ in range(10):
@@ -259,7 +280,12 @@ def test_ingest_job_review_and_apply_with_symlinked_kb_path(tmp_path: Path, monk
 
 def test_admin_save_entry_and_health_issue_queue(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)
-    client = _configure_server(monkeypatch, project_root, kb_path, tmp_path / "state")
+    client, _server_module, _worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
 
     health = client.get("/api/admin/health/issues")
     assert health.status_code == 200
@@ -291,7 +317,7 @@ def test_admin_save_entry_and_health_issue_queue(tmp_path: Path, monkeypatch) ->
 
 def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)
-    client = _configure_server(
+    client, server_module, _worker_module = _configure_server(
         monkeypatch,
         project_root,
         kb_path,
@@ -312,7 +338,7 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
 
     login = client.post("/api/admin/session", json={"token": "top-secret"})
     assert login.status_code == 200
-    assert client.cookies.get(server.ADMIN_SESSION_COOKIE_NAME)
+    assert client.cookies.get(server_module.ADMIN_SESSION_COOKIE_NAME)
 
     overview = client.get("/api/admin/overview")
     assert overview.status_code == 200
@@ -349,7 +375,12 @@ def test_detect_submitter_ip_only_trusts_configured_proxy() -> None:
 def test_job_cancel_retry_and_stale_recovery(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)
     state_dir = tmp_path / "state"
-    client = _configure_server(monkeypatch, project_root, kb_path, state_dir)
+    client, _server_module, _worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+    )
 
     submission = client.post(
         "/api/portal/submissions/text",

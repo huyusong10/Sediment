@@ -127,8 +127,11 @@ Drop:
 5. Run validation:
 
 ```bash
-python -m skills.explore.scripts.kb_query validate-entry "$SEDIMENT_KB_PATH/entries/ENTRY_NAME.md"
-python -m skills.explore.scripts.kb_query audit-kb "$SEDIMENT_KB_PATH"
+python -m skills.explore.scripts.kb_query validate-entry "<KB_PATH>/entries/ENTRY_NAME.md"
+uv run sediment kb health --json
 ```
+
+`<KB_PATH>` means the knowledge base root resolved from the active
+`config/sediment/config.yaml`.
 
 If validation fails, the entry is not done.

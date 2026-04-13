@@ -26,7 +26,6 @@ import binascii
 import hashlib
 import hmac
 import json
-import os
 import re
 import subprocess
 import tempfile
@@ -40,26 +39,95 @@ from mcp import types
 from mcp.server import Server
 
 from mcp_server.agent_runner import get_agent_runner
+from mcp_server.control import (
+    admin_overview_payload,
+    enqueue_ingest_job,
+    enqueue_tidy_job,
+    resolve_tidy_issue,
+    system_status_payload,
+)
 from mcp_server.i18n import tr
 from mcp_server.kb import resolve_kb_document_path
-from mcp_server.llm_cli import build_cli_command
+from mcp_server.llm_cli import build_cli_command, collect_output
 from mcp_server.platform_services import (
     apply_operations,
     build_health_issue_queue,
     detect_submitter_ip,
-    ensure_platform_state,
     get_entry_detail,
     get_health_payload,
     get_portal_home,
     graph_payload,
     list_reviews_with_jobs,
-    parse_trusted_proxy_cidrs,
     save_entry,
     search_kb,
     submit_document,
     submit_text,
 )
 from mcp_server.platform_store import PlatformStore, utc_now
+from mcp_server.runtime import (
+    admin_session_cookie_name as runtime_admin_session_cookie_name,
+)
+from mcp_server.runtime import (
+    admin_session_ttl_seconds as runtime_admin_session_ttl_seconds,
+)
+from mcp_server.runtime import (
+    admin_token as runtime_admin_token,
+)
+from mcp_server.runtime import (
+    build_store,
+)
+from mcp_server.runtime import (
+    host as runtime_host,
+)
+from mcp_server.runtime import (
+    job_max_attempts as runtime_job_max_attempts,
+)
+from mcp_server.runtime import (
+    job_stale_after_seconds as runtime_job_stale_after_seconds,
+)
+from mcp_server.runtime import (
+    kb_path as runtime_kb_path,
+)
+from mcp_server.runtime import (
+    max_text_submission_chars as runtime_max_text_submission_chars,
+)
+from mcp_server.runtime import (
+    max_upload_bytes as runtime_max_upload_bytes,
+)
+from mcp_server.runtime import (
+    platform_paths as runtime_platform_paths,
+)
+from mcp_server.runtime import (
+    port as runtime_port,
+)
+from mcp_server.runtime import (
+    run_jobs_in_process as runtime_run_jobs_in_process,
+)
+from mcp_server.runtime import (
+    secure_cookies as runtime_secure_cookies,
+)
+from mcp_server.runtime import (
+    session_secret as runtime_session_secret,
+)
+from mcp_server.runtime import (
+    sse_endpoint as runtime_sse_endpoint,
+)
+from mcp_server.runtime import (
+    submission_dedupe_window_seconds as runtime_submission_dedupe_window_seconds,
+)
+from mcp_server.runtime import (
+    submission_rate_limit_count as runtime_submission_rate_limit_count,
+)
+from mcp_server.runtime import (
+    submission_rate_limit_window_seconds as runtime_submission_rate_limit_window_seconds,
+)
+from mcp_server.runtime import (
+    trust_proxy_headers as runtime_trust_proxy_headers,
+)
+from mcp_server.runtime import (
+    trusted_proxy_cidrs as runtime_trusted_proxy_cidrs,
+)
+from mcp_server.settings import load_settings
 from mcp_server.web_ui import admin_html, admin_login_html, portal_html
 from skills.explore.scripts.kb_query import inventory, prepare_explore_context, validate_answer
 
@@ -69,68 +137,25 @@ from skills.explore.scripts.kb_query import inventory, prepare_explore_context, 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-_kb_env = os.environ.get("SEDIMENT_KB_PATH")
-if _kb_env:
-    KB_PATH = Path(_kb_env)
-else:
-    KB_PATH = _PROJECT_ROOT / "knowledge-base"
-
-HOST = os.environ.get("SEDIMENT_HOST", "0.0.0.0")
-PORT = int(os.environ.get("SEDIMENT_PORT", "8000"))
-SSE_ENDPOINT = os.environ.get("SEDIMENT_SSE_PATH", "/sediment/")
-ADMIN_TOKEN = os.environ.get("SEDIMENT_ADMIN_TOKEN", "").strip()
-SESSION_SECRET = os.environ.get("SEDIMENT_SESSION_SECRET", "").strip()
-ADMIN_SESSION_COOKIE_NAME = os.environ.get(
-    "SEDIMENT_ADMIN_SESSION_COOKIE_NAME",
-    "sediment_admin_session",
-).strip() or "sediment_admin_session"
-ADMIN_SESSION_TTL_SECONDS = max(
-    300,
-    int(os.environ.get("SEDIMENT_ADMIN_SESSION_TTL_SECONDS", "43200")),
-)
-SECURE_COOKIES = os.environ.get("SEDIMENT_SECURE_COOKIES", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
-TRUST_PROXY_HEADERS = os.environ.get("SEDIMENT_TRUST_PROXY_HEADERS", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
-TRUSTED_PROXY_CIDRS = parse_trusted_proxy_cidrs(
-    os.environ.get("SEDIMENT_TRUSTED_PROXY_CIDRS", "")
-)
-SUBMISSION_RATE_LIMIT_COUNT = max(
-    1,
-    int(os.environ.get("SEDIMENT_SUBMISSION_RATE_LIMIT_COUNT", "1")),
-)
-SUBMISSION_RATE_LIMIT_WINDOW_SECONDS = max(
-    1,
-    int(os.environ.get("SEDIMENT_SUBMISSION_RATE_LIMIT_WINDOW_SECONDS", "60")),
-)
-SUBMISSION_DEDUPE_WINDOW_SECONDS = max(
-    0,
-    int(os.environ.get("SEDIMENT_SUBMISSION_DEDUPE_WINDOW_SECONDS", "86400")),
-)
-MAX_TEXT_SUBMISSION_CHARS = max(
-    256,
-    int(os.environ.get("SEDIMENT_MAX_TEXT_SUBMISSION_CHARS", "20000")),
-)
-MAX_UPLOAD_BYTES = max(
-    1024,
-    int(os.environ.get("SEDIMENT_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))),
-)
-JOB_MAX_ATTEMPTS = max(1, int(os.environ.get("SEDIMENT_JOB_MAX_ATTEMPTS", "3")))
-JOB_STALE_AFTER_SECONDS = max(
-    0,
-    int(os.environ.get("SEDIMENT_JOB_STALE_AFTER_SECONDS", "900")),
-)
-RUN_JOBS_IN_PROCESS = os.environ.get("SEDIMENT_RUN_JOBS_IN_PROCESS", "").strip().lower() in {
-    "1",
-    "true",
-    "yes",
-}
+KB_PATH = runtime_kb_path()
+HOST = runtime_host()
+PORT = runtime_port()
+SSE_ENDPOINT = runtime_sse_endpoint()
+ADMIN_TOKEN = runtime_admin_token()
+SESSION_SECRET = runtime_session_secret()
+ADMIN_SESSION_COOKIE_NAME = runtime_admin_session_cookie_name()
+ADMIN_SESSION_TTL_SECONDS = runtime_admin_session_ttl_seconds()
+SECURE_COOKIES = runtime_secure_cookies()
+TRUST_PROXY_HEADERS = runtime_trust_proxy_headers()
+TRUSTED_PROXY_CIDRS = runtime_trusted_proxy_cidrs()
+SUBMISSION_RATE_LIMIT_COUNT = runtime_submission_rate_limit_count()
+SUBMISSION_RATE_LIMIT_WINDOW_SECONDS = runtime_submission_rate_limit_window_seconds()
+SUBMISSION_DEDUPE_WINDOW_SECONDS = runtime_submission_dedupe_window_seconds()
+MAX_TEXT_SUBMISSION_CHARS = runtime_max_text_submission_chars()
+MAX_UPLOAD_BYTES = runtime_max_upload_bytes()
+JOB_MAX_ATTEMPTS = runtime_job_max_attempts()
+JOB_STALE_AFTER_SECONDS = runtime_job_stale_after_seconds()
+RUN_JOBS_IN_PROCESS = runtime_run_jobs_in_process()
 
 DEFAULT_CONTRACT = {
     "shortlist_limit": 8,
@@ -193,28 +218,11 @@ _EXPLORE_JSON_SCHEMA = json.dumps(
 
 
 def _platform_paths() -> dict[str, Path]:
-    state_dir = Path(os.environ.get("SEDIMENT_STATE_DIR", str(_PROJECT_ROOT / ".sediment_state")))
-    db_path = Path(os.environ.get("SEDIMENT_DB_PATH", str(state_dir / "platform.db")))
-    uploads_dir = Path(os.environ.get("SEDIMENT_UPLOADS_DIR", str(state_dir / "uploads")))
-    workspaces_dir = Path(os.environ.get("SEDIMENT_WORKSPACES_DIR", str(state_dir / "workspaces")))
-    return {
-        "state_dir": state_dir,
-        "db_path": db_path,
-        "uploads_dir": uploads_dir,
-        "workspaces_dir": workspaces_dir,
-    }
+    return runtime_platform_paths()
 
 
 def _platform_store() -> PlatformStore:
-    paths = _platform_paths()
-    store = PlatformStore(paths["db_path"])
-    ensure_platform_state(
-        store=store,
-        state_dir=paths["state_dir"],
-        uploads_dir=paths["uploads_dir"],
-        workspaces_dir=paths["workspaces_dir"],
-    )
-    return store
+    return build_store()
 
 
 def _agent_runner():
@@ -378,6 +386,11 @@ def _tool_definitions() -> list[types.Tool]:
             inputSchema={"type": "object", "properties": {}, "required": []},
         ),
         types.Tool(
+            name="knowledge_platform_status",
+            description=tr("tool.knowledge_platform_status.description"),
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        types.Tool(
             name="knowledge_submission_queue",
             description=tr("tool.knowledge_submission_queue.description"),
             inputSchema={
@@ -396,6 +409,19 @@ def _tool_definitions() -> list[types.Tool]:
                 "type": "object",
                 "properties": {"job_id": {"type": "string"}},
                 "required": ["job_id"],
+            },
+        ),
+        types.Tool(
+            name="knowledge_tidy_request",
+            description=tr("tool.knowledge_tidy_request.description"),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string"},
+                    "issue_type": {"type": "string"},
+                    "actor_name": {"type": "string"},
+                },
+                "required": ["target"],
             },
         ),
         types.Tool(
@@ -444,6 +470,8 @@ async def _dispatch_tool(name: str, arguments: dict):
         )
     if name == "knowledge_health_report":
         return await _knowledge_health_report()
+    if name == "knowledge_platform_status":
+        return await _knowledge_platform_status()
     if name == "knowledge_submission_queue":
         return await _knowledge_submission_queue(
             status=arguments.get("status"),
@@ -451,6 +479,12 @@ async def _dispatch_tool(name: str, arguments: dict):
         )
     if name == "knowledge_job_status":
         return await _knowledge_job_status(arguments.get("job_id", ""))
+    if name == "knowledge_tidy_request":
+        return await _knowledge_tidy_request(
+            target=arguments.get("target", ""),
+            issue_type=arguments.get("issue_type"),
+            actor_name=arguments.get("actor_name", "mcp"),
+        )
     if name == "knowledge_review_decide":
         return await _knowledge_review_decide(
             review_id=arguments.get("review_id", ""),
@@ -541,6 +575,27 @@ async def _knowledge_health_report() -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+async def _knowledge_platform_status() -> str:
+    store = _platform_store()
+    payload = system_status_payload(
+        store=store,
+        kb_path=KB_PATH,
+        paths=_platform_paths(),
+        auth_required=bool(ADMIN_TOKEN),
+        run_jobs_in_process=RUN_JOBS_IN_PROCESS,
+        submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
+        submission_rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
+        submission_dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
+        max_text_submission_chars=MAX_TEXT_SUBMISSION_CHARS,
+        max_upload_bytes=MAX_UPLOAD_BYTES,
+        job_max_attempts=JOB_MAX_ATTEMPTS,
+        job_stale_after_seconds=JOB_STALE_AFTER_SECONDS,
+        trust_proxy_headers=TRUST_PROXY_HEADERS,
+        trusted_proxy_cidrs=[str(item) for item in TRUSTED_PROXY_CIDRS],
+    )
+    return json.dumps(payload, ensure_ascii=False)
+
+
 async def _knowledge_submission_queue(status: str | None = None, limit: int = 50) -> str:
     store = _platform_store()
     payload = {"submissions": store.list_submissions(status=status, limit=limit)}
@@ -553,6 +608,33 @@ async def _knowledge_job_status(job_id: str) -> str:
     if job is None:
         return json.dumps({"error": "job not found"}, ensure_ascii=False)
     return json.dumps(job, ensure_ascii=False)
+
+
+async def _knowledge_tidy_request(
+    *,
+    target: str,
+    issue_type: str | None = None,
+    actor_name: str = "mcp",
+) -> str:
+    target = str(target).strip()
+    if not target:
+        return json.dumps({"error": "target must not be empty"}, ensure_ascii=False)
+    store = _platform_store()
+    issue = resolve_tidy_issue(
+        kb_path=KB_PATH,
+        target=target,
+        issue_type=issue_type,
+    )
+    job = enqueue_tidy_job(
+        store=store,
+        kb_path=KB_PATH,
+        issue=issue,
+        actor_name=actor_name,
+        max_attempts=JOB_MAX_ATTEMPTS,
+    )
+    if RUN_JOBS_IN_PROCESS:
+        _agent_runner().submit(job["id"])
+    return json.dumps({"job": job, "issue": issue}, ensure_ascii=False)
 
 
 async def _knowledge_review_decide(
@@ -760,9 +842,7 @@ def _run_explore_cli(
     payload: dict[str, Any],
     timeout_seconds: int,
 ) -> str:
-    cli_value = os.environ.get("SEDIMENT_CLI", "claude").strip()
-    if not cli_value:
-        raise RuntimeError("SEDIMENT_CLI is empty; configure a CLI for explore runtime.")
+    settings = load_settings()
 
     with tempfile.TemporaryDirectory(prefix="sediment-explore-") as temp_dir:
         temp_root = Path(temp_dir)
@@ -773,36 +853,31 @@ def _run_explore_cli(
         payload_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         skill_file.write_text(skill_body, encoding="utf-8")
 
-        env = os.environ.copy()
-        env.update(
-            {
-                "SEDIMENT_EXPLORE_PROMPT_FILE": str(prompt_file),
-                "SEDIMENT_EXPLORE_PAYLOAD_FILE": str(payload_file),
-                "SEDIMENT_EXPLORE_SKILL_FILE": str(skill_file),
-                "SEDIMENT_EXPLORE_SKILL_LABEL": skill_label,
-            }
-        )
-
-        command, stdin_data = _build_cli_command(
-            cli_value=cli_value,
+        invocation = build_cli_command(
+            settings,
             prompt=prompt,
             prompt_file=prompt_file,
             payload_file=payload_file,
             skill_file=skill_file,
+            cwd=project_root,
+            extra_args=["--json-schema", _EXPLORE_JSON_SCHEMA],
         )
         try:
             result = subprocess.run(
-                command,
-                input=stdin_data,
+                invocation.command,
+                input=invocation.stdin_data,
                 text=True,
                 capture_output=True,
                 cwd=str(project_root),
-                env=env,
                 timeout=timeout_seconds,
                 check=False,
             )
         except FileNotFoundError as exc:
-            raise RuntimeError(f"Explore runtime CLI is unavailable: {exc.filename or cli_value}") from exc
+            backend = settings["agent"]["backend"]
+            raise RuntimeError(
+                f"Explore runtime CLI is unavailable for backend {backend}: "
+                f"{exc.filename or invocation.command[0]}"
+            ) from exc
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
                 f"Explore runtime timed out after {timeout_seconds} seconds."
@@ -813,28 +888,10 @@ def _run_explore_cli(
             stdout = result.stdout.strip()
             detail = stderr or stdout or f"exit code {result.returncode}"
             raise RuntimeError(f"Explore runtime CLI failed: {detail}")
-        output = result.stdout.strip() or result.stderr.strip()
+        output = collect_output(invocation, stdout=result.stdout, stderr=result.stderr)
         if not output:
             raise RuntimeError("Explore runtime CLI returned no output.")
         return output
-
-
-def _build_cli_command(
-    *,
-    cli_value: str,
-    prompt: str,
-    prompt_file: Path,
-    payload_file: Path,
-    skill_file: Path,
-) -> tuple[list[str], str | None]:
-    return build_cli_command(
-        cli_value,
-        prompt,
-        prompt_file=prompt_file,
-        payload_file=payload_file,
-        skill_file=skill_file,
-        extra_args=["--json-schema", _EXPLORE_JSON_SCHEMA],
-    )
 
 
 def _parse_cli_json(raw_output: str) -> dict[str, Any]:
@@ -1119,37 +1176,22 @@ async def _admin_guard(request):
 
 def _system_status_payload(store: PlatformStore) -> dict[str, Any]:
     paths = _platform_paths()
-    jobs = store.list_jobs(limit=200)
-    stale_jobs = store.list_stale_jobs(stale_after_seconds=JOB_STALE_AFTER_SECONDS)
-    return {
-        "auth_required": bool(ADMIN_TOKEN),
-        "worker_mode": "in_process" if RUN_JOBS_IN_PROCESS else "queue",
-        "limits": {
-            "submission_rate_limit_count": SUBMISSION_RATE_LIMIT_COUNT,
-            "submission_rate_limit_window_seconds": SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
-            "submission_dedupe_window_seconds": SUBMISSION_DEDUPE_WINDOW_SECONDS,
-            "max_text_submission_chars": MAX_TEXT_SUBMISSION_CHARS,
-            "max_upload_bytes": MAX_UPLOAD_BYTES,
-            "job_max_attempts": JOB_MAX_ATTEMPTS,
-            "job_stale_after_seconds": JOB_STALE_AFTER_SECONDS,
-        },
-        "proxy": {
-            "trust_proxy_headers": TRUST_PROXY_HEADERS,
-            "trusted_proxy_cidrs": [str(item) for item in TRUSTED_PROXY_CIDRS],
-        },
-        "queue": {
-            "queued_jobs": sum(1 for job in jobs if job["status"] == "queued"),
-            "running_jobs": sum(1 for job in jobs if job["status"] == "running"),
-            "cancel_requested_jobs": sum(1 for job in jobs if job["status"] == "cancel_requested"),
-            "stale_jobs": len(stale_jobs),
-        },
-        "paths": {
-            "kb_path": str(KB_PATH),
-            "db_path": str(paths["db_path"]),
-            "uploads_dir": str(paths["uploads_dir"]),
-            "workspaces_dir": str(paths["workspaces_dir"]),
-        },
-    }
+    return system_status_payload(
+        store=store,
+        kb_path=KB_PATH,
+        paths=paths,
+        auth_required=bool(ADMIN_TOKEN),
+        run_jobs_in_process=RUN_JOBS_IN_PROCESS,
+        submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
+        submission_rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
+        submission_dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
+        max_text_submission_chars=MAX_TEXT_SUBMISSION_CHARS,
+        max_upload_bytes=MAX_UPLOAD_BYTES,
+        job_max_attempts=JOB_MAX_ATTEMPTS,
+        job_stale_after_seconds=JOB_STALE_AFTER_SECONDS,
+        trust_proxy_headers=TRUST_PROXY_HEADERS,
+        trusted_proxy_cidrs=[str(item) for item in TRUSTED_PROXY_CIDRS],
+    )
 
 
 async def _api_admin_session_status(request):
@@ -1207,22 +1249,12 @@ async def _api_admin_overview(request):
     if guard:
         return guard
     store = _platform_store()
-    health = get_health_payload(KB_PATH)
-    jobs = store.list_jobs(limit=200)
-    pending_reviews = len(store.list_reviews(decision="pending", limit=200))
-    running_jobs = sum(1 for item in jobs if item["status"] == "running")
-    queued_jobs = sum(1 for item in jobs if item["status"] == "queued")
     return _json_response(
-        {
-            "submission_counts": store.submission_status_counts(),
-            "running_jobs": running_jobs,
-            "queued_jobs": queued_jobs,
-            "pending_reviews": pending_reviews,
-            "severity_counts": health["severity_counts"],
-            "health_summary": health["summary"],
-            "cancel_requested_jobs": sum(1 for item in jobs if item["status"] == "cancel_requested"),
-            "stale_jobs": len(store.list_stale_jobs(stale_after_seconds=JOB_STALE_AFTER_SECONDS)),
-        }
+        admin_overview_payload(
+            store=store,
+            kb_path=KB_PATH,
+            stale_after_seconds=JOB_STALE_AFTER_SECONDS,
+        )
     )
 
 
@@ -1293,26 +1325,15 @@ async def _api_admin_run_ingest(request):
     store = _platform_store()
     body = await _request_json_or_empty(request)
     submission_id = request.path_params["submission_id"]
-    submission = store.get_submission(submission_id)
-    if submission is None:
+    try:
+        job = enqueue_ingest_job(
+            store=store,
+            submission_id=submission_id,
+            actor_name=str(body.get("actor_name", "admin")),
+            max_attempts=JOB_MAX_ATTEMPTS,
+        )
+    except FileNotFoundError:
         return _json_response({"error": "submission not found"}, status=404)
-    job = store.create_job(
-        job_type="ingest",
-        source_submission_id=submission_id,
-        target_entry_name=submission["title"],
-        status="queued",
-        max_attempts=JOB_MAX_ATTEMPTS,
-        request_payload={"submission_id": submission_id},
-    )
-    store.update_submission(submission_id, status="ingesting")
-    store.add_audit_log(
-        actor_name=str(body.get("actor_name", "admin")),
-        actor_role="committer",
-        action="job.enqueue_ingest",
-        target_type="job",
-        target_id=job["id"],
-        details={"submission_id": submission_id},
-    )
     if RUN_JOBS_IN_PROCESS:
         _agent_runner().submit(job["id"])
     return _json_response(job, status=202)
@@ -1397,24 +1418,12 @@ async def _api_admin_tidy(request):
     store = _platform_store()
     body = await request.json()
     issue = body.get("issue") or {}
-    target = str(issue.get("target", ""))
-    job = store.create_job(
-        job_type="tidy",
-        target_entry_name=target or None,
-        status="queued",
-        max_attempts=JOB_MAX_ATTEMPTS,
-        request_payload={
-            "issue": issue,
-            "health_report": get_health_payload(KB_PATH)["summary"],
-        },
-    )
-    store.add_audit_log(
+    job = enqueue_tidy_job(
+        store=store,
+        kb_path=KB_PATH,
+        issue=issue,
         actor_name=str(body.get("actor_name", "admin")),
-        actor_role="committer",
-        action="job.enqueue_tidy",
-        target_type="job",
-        target_id=job["id"],
-        details={"target": target, "issue": issue},
+        max_attempts=JOB_MAX_ATTEMPTS,
     )
     if RUN_JOBS_IN_PROCESS:
         _agent_runner().submit(job["id"])
@@ -1759,7 +1768,7 @@ def create_starlette_app():
     )
 
 
-def main():
+def main(argv: list[str] | None = None):
     import uvicorn
 
     starlette_app = create_starlette_app()

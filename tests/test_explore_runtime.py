@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import sys
 import textwrap
 from pathlib import Path
 
 from mcp_server import server
+from tests.config_helpers import write_test_config
 
 
 def _write(path: Path, content: str) -> None:
@@ -91,16 +93,39 @@ def _build_project(tmp_path: Path) -> tuple[Path, Path]:
     return project_root, kb_path
 
 
+def _reload_server(
+    project_root: Path,
+    kb_path: Path,
+    *,
+    locale: str = "en",
+    command: str | list[str] | None = None,
+):
+    write_test_config(
+        project_root,
+        kb_path=kb_path,
+        state_dir=project_root / ".sediment_state",
+        locale=locale,
+        agent_backend="claude-code",
+        agent_command=command,
+    )
+    server_module = importlib.reload(server)
+    server_module._PROJECT_ROOT = project_root
+    server_module.KB_PATH = kb_path
+    return server_module
+
+
 def test_knowledge_ask_uses_explore_skill_and_cli(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_project(tmp_path)
     cli_path = Path(__file__).parent / "fixtures" / "mock_explore_cli.py"
 
-    monkeypatch.setenv("SEDIMENT_CLI", f"{sys.executable} {cli_path}")
     monkeypatch.setenv("MOCK_REQUIRED_MARKER", "EXPLORE-RUNTIME-MARKER")
-    monkeypatch.setattr(server, "_PROJECT_ROOT", project_root)
-    monkeypatch.setattr(server, "KB_PATH", kb_path)
+    server_module = _reload_server(
+        project_root,
+        kb_path,
+        command=[sys.executable, str(cli_path)],
+    )
 
-    raw = asyncio.run(server._knowledge_ask("什么是热备份？"))
+    raw = asyncio.run(server_module._knowledge_ask("什么是热备份？"))
     payload = json.loads(raw)
 
     assert payload["sources"] == ["热备份"]
@@ -132,7 +157,8 @@ def test_answer_question_does_not_fall_back_to_materials(tmp_path: Path, monkeyp
         """,
     )
 
-    result = server.answer_question("什么是外部秘密？", kb_path, project_root)
+    server_module = _reload_server(project_root, kb_path)
+    result = server_module.answer_question("什么是外部秘密？", kb_path, project_root)
     assert result["sources"] == []
     assert result["confidence"] == "low"
     assert "no formal entries" in result["answer"].lower()
@@ -144,8 +170,12 @@ def test_answer_question_returns_explicit_error_when_cli_is_unavailable(
 ) -> None:
     project_root, kb_path = _build_project(tmp_path)
 
-    monkeypatch.setenv("SEDIMENT_CLI", "definitely-not-a-real-cli")
-    result = server.answer_question("什么是热备份？", kb_path, project_root)
+    server_module = _reload_server(
+        project_root,
+        kb_path,
+        command=["definitely-not-a-real-cli"],
+    )
+    result = server_module.answer_question("什么是热备份？", kb_path, project_root)
 
     assert result["sources"] == []
     assert result["confidence"] == "low"
@@ -160,7 +190,7 @@ def test_direct_jsonrpc_malformed_body_returns_error_payload() -> None:
         async def connect_sse(self, scope, receive, send):  # pragma: no cover
             raise AssertionError("unexpected SSE connect")
 
-    router = server._make_router(DummySSE())
+    router = importlib.reload(server)._make_router(DummySSE())
     messages = [
         {"type": "http.request", "body": b"{invalid", "more_body": False},
     ]
@@ -184,24 +214,22 @@ def test_direct_jsonrpc_malformed_body_returns_error_payload() -> None:
     assert payload["error"]["code"] == -32603
 
 
-def test_tool_definitions_follow_locale(monkeypatch) -> None:
-    monkeypatch.setenv("SEDIMENT_LOCALE", "en")
-    tools_en = server._tool_definitions()
+def test_tool_definitions_follow_locale(tmp_path: Path) -> None:
+    project_root, kb_path = _build_project(tmp_path)
+    tools_en = _reload_server(project_root, kb_path, locale="en")._tool_definitions()
     assert "Return all knowledge document names" in tools_en[0].description
 
-    monkeypatch.setenv("SEDIMENT_LOCALE", "zh")
-    tools_zh = server._tool_definitions()
+    tools_zh = _reload_server(project_root, kb_path, locale="zh")._tool_definitions()
     assert "返回知识库中所有知识文档的名称列表" in tools_zh[0].description
 
 
 def test_white_box_tools_expose_indexes(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_project(tmp_path)
-    monkeypatch.setattr(server, "_PROJECT_ROOT", project_root)
-    monkeypatch.setattr(server, "KB_PATH", kb_path)
+    server_module = _reload_server(project_root, kb_path)
 
-    names = asyncio.run(server._knowledge_list())
+    names = asyncio.run(server_module._knowledge_list())
     assert "index.root" in names
     assert "index.ops" in names
 
-    content = asyncio.run(server._knowledge_read("index.root"))
+    content = asyncio.run(server_module._knowledge_read("index.root"))
     assert "# 索引入口" in content

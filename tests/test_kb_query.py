@@ -3,6 +3,9 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
+import yaml
+
+from mcp_server.settings import clear_settings_cache
 from skills.explore.scripts.kb_query import (
     audit_kb,
     inventory,
@@ -18,6 +21,7 @@ from skills.tidy.scripts.tidy_utils import (
     find_dangling_links,
     plan_index_repairs,
 )
+from tests.config_helpers import write_test_config
 
 
 def _write(path: Path, content: str) -> None:
@@ -248,6 +252,11 @@ def _build_sample_kb(root: Path) -> Path:
         """,
     )
 
+    write_test_config(
+        root,
+        kb_path=kb_path,
+        state_dir=root / "state",
+    )
     return kb_path
 
 
@@ -294,7 +303,18 @@ def test_multilingual_query_support_for_shortlist_and_focus(tmp_path: Path, monk
     ranked = shortlist("What is hot swap?", inventory_data=data, limit=3)
     assert ranked[0]["name"] == "热备份"
 
-    monkeypatch.setenv("SEDIMENT_QUERY_LANGS", "EN")
+    config_path = write_test_config(
+        tmp_path,
+        kb_path=kb_path,
+        state_dir=tmp_path / "state",
+    )
+    payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    payload["knowledge"] = {"query_languages": "EN"}
+    config_path.write_text(
+        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    clear_settings_cache()
     ranked_with_override = shortlist("What is hot swap?", inventory_data=data, limit=3)
     assert ranked_with_override[0]["name"] == "热备份"
 

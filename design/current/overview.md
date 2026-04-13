@@ -60,6 +60,7 @@ knowledge-base/
 
 - MCP：面向 Agent 和自动化流程
 - REST / HTTP：面向 Web 门户和管理后台
+- CLI：面向本地开发、运维和值班排障，统一入口为 `sediment`
 
 其中现有稳定读接口仍保持：
 
@@ -68,6 +69,26 @@ knowledge-base/
 - `knowledge_ask`
 
 新增写入和治理能力不应直接写进知识层，而应先进入平台层的提案与审核流。
+
+当前 CLI 统一成三组：
+
+- `sediment server ...`
+- `sediment kb ...`
+- `sediment status ...`
+- `sediment doctor`
+
+运行配置统一来自 `config/sediment/config.yaml`。如果当前工作区没有该文件，
+则按平台回退到用户级配置目录：
+
+- macOS：`~/Library/Application Support/Sediment/config.yaml`
+- Windows：`%APPDATA%/Sediment/config.yaml`
+- Linux：`$XDG_CONFIG_HOME/sediment/config.yaml` 或 `~/.config/sediment/config.yaml`
+
+当前内置的 Agent CLI backend 适配层支持：
+
+- `claude-code`
+- `codex`
+- `opencode`
 
 ## 5. 当前设计的主线
 

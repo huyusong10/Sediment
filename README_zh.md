@@ -121,51 +121,79 @@ skills/
 
 ## 启动平台服务
 
+Sediment 现在默认从
+[`config/sediment/config.yaml`](config/sediment/config.yaml) 读取运行配置。
+如果需要，也可以在命令行里通过 `--config /path/to/config.yaml` 覆盖。
+
+如果当前工作区没有这份配置文件，Sediment 会回退到用户级配置目录：
+
+- macOS：`~/Library/Application Support/Sediment/config.yaml`
+- Windows：`%APPDATA%/Sediment/config.yaml`
+- Linux：`$XDG_CONFIG_HOME/sediment/config.yaml` 或 `~/.config/sediment/config.yaml`
+
+例如：
+
 ```bash
-export SEDIMENT_KB_PATH=/path/to/your/knowledge-base
-export SEDIMENT_CLI=claude
-uv run sediment-server
-uv run sediment-worker
+uv run sediment server run
 ```
 
-Server 会同时提供三类入口：
+默认配置文件是仓库内本地文件，并且兼容多平台。路径统一通过
+`paths.workspace_root` 做解析，`agent.command` 同时支持 YAML 字符串和
+字符串数组，能减少 Windows 下的转义问题。
+
+如果要用守护进程方式管理，也统一走同一条入口：
+
+```bash
+uv run sediment server start
+uv run sediment server status
+uv run sediment server stop
+```
+
+`uv run sediment up` 仍然保留为前台本地启动的简写别名。
+
+平台会同时提供三类入口：
 
 - `MCP`：SSE / JSON-RPC
 - `Portal`：`/portal`
 - `Admin`：`/admin`
 
-Worker 是默认的 `ingest` / `tidy` 队列执行路径。
-如果只是本地单进程调试，也可以设置 `SEDIMENT_RUN_JOBS_IN_PROCESS=1`
-只启动 server，但生产部署建议保持 worker 独立运行。
+在内部，排队的 `ingest` / `tidy` 任务仍然由 worker 角色执行。
+正常部署仍然建议保持队列执行独立。
 
-环境变量：
+兼容性的底层入口仍然保留，便于更细粒度调试：
 
-| 变量名 | 默认值 | 说明 |
-|---|---|---|
-| `SEDIMENT_KB_PATH` | 项目 `knowledge-base/` | 知识库根目录 |
-| `SEDIMENT_CLI` | `claude` | `knowledge_ask` 以及实验性工作流脚本使用的 CLI |
-| `SEDIMENT_HOST` | `0.0.0.0` | HTTP 绑定地址 |
-| `SEDIMENT_PORT` | `8000` | HTTP 端口 |
-| `SEDIMENT_SSE_PATH` | `/sediment/` | SSE 端点路径 |
-| `SEDIMENT_ADMIN_TOKEN` | 空 | `/admin` 和管理接口使用的可选 Bearer token |
-| `SEDIMENT_SESSION_SECRET` | `SEDIMENT_ADMIN_TOKEN` | Admin Web session cookie 的签名密钥 |
-| `SEDIMENT_ADMIN_SESSION_COOKIE_NAME` | `sediment_admin_session` | Admin session cookie 名称 |
-| `SEDIMENT_ADMIN_SESSION_TTL_SECONDS` | `43200` | Admin session 有效期，单位秒 |
-| `SEDIMENT_SECURE_COOKIES` | `0` | 是否把 Admin cookie 标记为 `Secure`，HTTPS 下建议开启 |
-| `SEDIMENT_TRUST_PROXY_HEADERS` | `0` | 是否信任 `X-Forwarded-For` / `X-Real-IP` |
-| `SEDIMENT_TRUSTED_PROXY_CIDRS` | 空 | 允许提供真实客户端 IP 的反向代理 CIDR 列表 |
-| `SEDIMENT_SUBMISSION_RATE_LIMIT_COUNT` | `1` | 单个 IP 在窗口内允许的最大提交次数 |
-| `SEDIMENT_SUBMISSION_RATE_LIMIT_WINDOW_SECONDS` | `60` | 提交限流窗口，单位秒 |
-| `SEDIMENT_SUBMISSION_DEDUPE_WINDOW_SECONDS` | `86400` | 完全重复提交的去重窗口，单位秒 |
-| `SEDIMENT_MAX_TEXT_SUBMISSION_CHARS` | `20000` | 纯文本提交大小上限 |
-| `SEDIMENT_MAX_UPLOAD_BYTES` | `10485760` | 上传文档大小上限 |
-| `SEDIMENT_STATE_DIR` | `.sediment_state/` | 平台状态目录，包含 DB、上传文件和 worker 工作区 |
-| `SEDIMENT_DB_PATH` | `.sediment_state/platform.db` | 提交、任务、审核、审计日志的 SQLite 路径 |
-| `SEDIMENT_UPLOADS_DIR` | `.sediment_state/uploads/` | 上传文档存储目录 |
-| `SEDIMENT_WORKSPACES_DIR` | `.sediment_state/workspaces/` | ingest / tidy 隔离工作区 |
-| `SEDIMENT_JOB_MAX_ATTEMPTS` | `3` | worker 自动重试上限 |
-| `SEDIMENT_JOB_STALE_AFTER_SECONDS` | `900` | 运行中任务超过该心跳超时后会被回收 |
-| `SEDIMENT_RUN_JOBS_IN_PROCESS` | `0` | 是否在 server 进程内直接执行任务，而不是交给独立 worker |
+- `uv run sediment-server`
+- `uv run sediment-worker`
+- `uv run sediment-up`
+
+主要配置分组包括：
+
+- `paths`：工作区根目录、知识库、状态目录、数据库、上传目录、worker 工作区
+- `server`：监听地址、端口、SSE 路径、是否进程内跑 job
+- `auth`：admin token、session secret、cookie 安全配置
+- `network`：可信代理和真实 IP 获取规则
+- `submissions`：限流、去重、文本/文件大小上限
+- `jobs`：重试次数和 stale timeout
+- `agent`：所选后端，以及命令、模型、sandbox 等参数
+- `knowledge`：locale、query language override、index 合约默认值
+
+支持的 `agent.backend`：
+
+- `claude-code`
+- `codex`
+- `opencode`
+
+例如：
+
+```yaml
+agent:
+  backend: codex
+  command:
+    - codex
+  model: gpt-5-codex
+  sandbox: workspace-write
+  exec_timeout_seconds: 240
+```
 
 ## Portal 与 Admin
 
@@ -207,8 +235,10 @@ Admin 支持：
 - `knowledge_submit_text`
 - `knowledge_submit_document`
 - `knowledge_health_report`
+- `knowledge_platform_status`
 - `knowledge_submission_queue`
 - `knowledge_job_status`
+- `knowledge_tidy_request`
 - `knowledge_review_decide`
 
 额外的 REST / Admin 入口包括：
@@ -220,12 +250,20 @@ Admin 支持：
 - `POST /api/admin/jobs/{id}/retry`
 - `POST /api/admin/jobs/{id}/cancel`
 
+统一后的 CLI 入口包括：
+
+- `sediment server ...`：生命周期控制、日志和守护进程状态
+- `sediment kb ...`：explore、list、read、health、tidy
+- `sediment status ...`：平台总览、daemon、queue、KB health
+- `sediment doctor`：检查配置、文件系统和 agent backend 是否健康
+
 ## 使用知识库
 
-- **探索**：通过 `knowledge_ask` 提问，或直接使用 `knowledge_list` + `knowledge_read`
-- **巡检**：运行 `uv run python skills/health/scripts/health_check.py knowledge-base`
+- **探索**：通过 `knowledge_ask` 提问，或直接运行 `uv run sediment kb explore "你的问题"`
+- **巡检**：运行 `uv run sediment kb health`，或运行 `uv run python skills/health/scripts/health_check.py knowledge-base`
+- **查看状态**：运行 `uv run sediment status`、`uv run sediment status queue` 或 `uv run sediment server status`
 - **摄入（实验性）**：把 `skills/ingest/SKILL.md` 作为工作流说明，输入原始材料
-- **整理（实验性）**：把 `skills/tidy/SKILL.md` 作为工作流说明，修复断链、坏条目和可提升 placeholder
+- **整理（实验性）**：把 `skills/tidy/SKILL.md` 作为工作流说明，或直接运行 `uv run sediment kb tidy "<条目名>"`
 - **Portal 提交**：把文字或文档送进缓冲区，等待 committer 审核
 - **Admin 审核**：在 Web 管理台中批准 / 拒绝 ingest 与 tidy 结果
 
@@ -261,15 +299,17 @@ uv build
 本地端到端调试建议：
 
 ```bash
-export SEDIMENT_KB_PATH=/absolute/path/to/knowledge-base
-export SEDIMENT_CLI=claude
-export SEDIMENT_RUN_JOBS_IN_PROCESS=0
-uv run sediment-server
-uv run sediment-worker
+uv run sediment server run
 ```
 
-测试里会用 `tests/fixtures/mock_workflow_cli.py` 模拟 Agent Runner，
-但真实部署应把 `SEDIMENT_CLI` 指向实际可用的本地编码 CLI。
+常用检查命令：
+
+```bash
+uv run sediment doctor
+uv run sediment doctor --json
+```
+
+测试里会用 `tests/fixtures/mock_workflow_cli.py` 模拟 Agent Runner。
 
 开发时请保持：
 - 来源只放 frontmatter `sources`，不要写成 `[[wikilink]]`
@@ -281,16 +321,22 @@ uv run sediment-worker
 
 最低部署基线建议：
 
-- 设置 `SEDIMENT_ADMIN_TOKEN`
-- 设置 `SEDIMENT_SESSION_SECRET`
-- 在 HTTPS 下开启 `SEDIMENT_SECURE_COOKIES=1`
-- 把 `sediment-server` 和 `sediment-worker` 分开部署
-- 如果前面有反向代理，开启 `SEDIMENT_TRUST_PROXY_HEADERS=1`，并限制 `SEDIMENT_TRUSTED_PROXY_CIDRS`
+- 设置 `auth.admin_token`
+- 设置 `auth.session_secret`
+- 在 HTTPS 下开启 `auth.secure_cookies: true`
+- 本地开发推荐 `sediment server run`
+- 守护进程控制统一走 `sediment server start|stop|status|logs`
+- 生产环境仍建议保持 `server` 和 `worker` 两个角色分离，只是入口统一成 `sediment`
+- 如果前面有反向代理，设置 `network.trust_proxy_headers: true`，并限制 `network.trusted_proxy_cidrs`
 - 监控 `/healthz` 和 Admin 后台里的 system status 面板
 
 当前 worker 会持续写入 job heartbeat，超过配置超时后会自动回收陈旧
 `running` 任务，同时支持显式 cancel / retry，并把 session、入队、审核、
 写回等动作写入结构化审计日志。
+
+`sediment server run` 和 `sediment up` 都只是当前分层架构上的轻量启动器：
+它们会同时拉起两个角色，为日志加上 `[server]` / `[worker]` 前缀，
+等待 `/healthz` 就绪，并在你按下 `Ctrl+C` 时一起优雅退出。
 
 ## 许可证
 

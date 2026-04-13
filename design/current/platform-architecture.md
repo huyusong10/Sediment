@@ -22,6 +22,7 @@
 
 - Knowledge Base Workspace：白盒 Markdown 知识库和 Git 工作区
 - API Service：统一承载 MCP 和 REST 接口
+- Config Layer：统一读取 `config/sediment/config.yaml` 与用户级平台配置
 - Workflow Store：保存提交、审核、任务、审计和锁信息
 - Agent Runner：在知识库本地执行 ingest / tidy / explore 的托管 Agent
 - Search / Graph Projection：为全文搜索、图谱浏览和后台筛选提供查询投影
@@ -31,10 +32,12 @@
 flowchart LR
     U["User Portal"] --> API["API Service"]
     A["Admin Console"] --> API
+    API --> CFG["Config Layer"]
     API --> DB["Workflow Store"]
     API --> IDX["Search / Graph Projection"]
     API --> KB["Knowledge Base Workspace"]
     API --> RUN["Agent Runner"]
+    RUN --> CFG
     RUN --> KB
     RUN --> DB
     KB --> IDX
@@ -81,7 +84,24 @@ flowchart LR
 - 生产环境使用 `PostgreSQL`
 - 本地开发可使用兼容 schema 的 `SQLite`
 
-### 3.4 Agent Runner
+### 3.4 Config Layer
+
+职责：
+
+- 在项目内优先读取 `config/sediment/config.yaml`
+- 在仓库外部署时按平台回退到用户级配置目录
+- 统一解析相对路径，避免 Windows / Unix 下命令行引号差异
+- 为 CLI、Web、MCP、worker 提供同一份运行配置
+
+配置层还负责声明选定的 Agent CLI backend。当前支持：
+
+- `claude-code`
+- `codex`
+- `opencode`
+
+并允许 `agent.command` 以字符串或 YAML 列表形式显式指定命令前缀。
+
+### 3.5 Agent Runner
 
 职责：
 
@@ -89,7 +109,8 @@ flowchart LR
 - 执行 `ingest`、`tidy`、必要时也可执行受控 `explore`
 - 产出草案、patch、理由、引用上下文和失败日志
 
-当前实现建议采用独立后台进程，例如 `sediment-worker`，持续轮询任务队列并在本地工作区执行 Agent。
+当前实现建议保留独立 worker 角色，在统一 CLI 入口下由 `sediment server ...`
+负责平台守护进程控制，由内部 worker 角色持续轮询任务队列并在本地工作区执行 Agent。
 
 关键约束：
 
@@ -98,7 +119,10 @@ flowchart LR
 - 高风险写任务必须经过 `committer` 审核后才能落地
 - worker 应持续写入 job heartbeat，并能回收心跳超时的陈旧 `running` 任务
 
-### 3.5 Search / Graph Projection
+当前实现中，Agent Runner 通过统一 CLI 适配层调度不同 backend，并由
+`sediment doctor` 在上线前检查配置、可执行文件、帮助命令和最小探针调用。
+
+### 3.6 Search / Graph Projection
 
 职责：
 
@@ -113,7 +137,7 @@ flowchart LR
 - 索引链接
 - `status`、`type`、入链数量、健康状态
 
-### 3.6 Web Apps
+### 3.7 Web Apps
 
 职责：
 
@@ -180,8 +204,12 @@ Agent Runner 不应直接在主工作区上修改文件。
 
 默认部署建议：
 
-- `sediment-server`：负责 MCP、REST、Portal、Admin 和任务入队
-- `sediment-worker`：负责消费队列并执行本地 Agent
+- 用户入口统一为 `sediment`
+- `sediment server run|start|stop|restart|status|logs`：控制平台守护进程与生命周期
+- `sediment kb ...`：调用知识库 explore / health / tidy 等能力
+- `sediment status ...`：查看平台总览、daemon、queue 和 KB health
+- `sediment doctor`：检查当前配置、知识库路径、状态目录与选定 Agent backend 是否可用
+- 兼容脚本 `sediment-server`、`sediment-worker`、`sediment-up` 仅保留为低层调试别名
 
 开发环境可临时打开 server 进程内执行开关，但生产环境应保持两者分离。
 

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import copy
-import os
 from typing import Any
+
+from mcp_server.settings import load_settings
 
 DEFAULT_LOCALE = "en"
 SUPPORTED_LOCALES = {"en", "zh"}
@@ -37,11 +38,18 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "tool.knowledge_health_report.description": (
             "Return the current health summary and structured issue queue for the knowledge base."
         ),
+        "tool.knowledge_platform_status.description": (
+            "Return the platform status payload shared by the CLI status command "
+            "and admin dashboard."
+        ),
         "tool.knowledge_submission_queue.description": (
             "List recent buffered submissions and their workflow status."
         ),
         "tool.knowledge_job_status.description": (
             "Inspect the status and result payload for an ingest or tidy job."
+        ),
+        "tool.knowledge_tidy_request.description": (
+            "Queue a manual tidy job for a KB target and return the created job record."
         ),
         "tool.knowledge_review_decide.description": (
             "Approve or reject a pending review for an ingest/tidy job."
@@ -78,11 +86,17 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "tool.knowledge_health_report.description": (
             "返回当前知识库的 health 摘要和结构化问题队列。"
         ),
+        "tool.knowledge_platform_status.description": (
+            "返回与 CLI `sediment status` 和 Admin 面板共用的平台状态载荷。"
+        ),
         "tool.knowledge_submission_queue.description": (
             "列出最近的缓冲区提交及其工作流状态。"
         ),
         "tool.knowledge_job_status.description": (
             "查看 ingest 或 tidy 任务的状态和结果载荷。"
+        ),
+        "tool.knowledge_tidy_request.description": (
+            "为指定知识目标创建一个手工 tidy 任务，并返回新建 job。"
         ),
         "tool.knowledge_review_decide.description": (
             "批准或拒绝某个 ingest/tidy 待审结果。"
@@ -225,7 +239,7 @@ _QUERY_LANGUAGE_RULES: dict[str, dict[str, Any]] = {
 
 
 def get_locale() -> str:
-    preferred = os.environ.get("SEDIMENT_LOCALE", DEFAULT_LOCALE).strip().lower()
+    preferred = str(load_settings().get("locale", DEFAULT_LOCALE)).strip().lower()
     if preferred in SUPPORTED_LOCALES:
         return preferred
     return DEFAULT_LOCALE

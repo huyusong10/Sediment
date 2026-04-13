@@ -34,7 +34,7 @@ Sediment v4 is built around a few non-negotiable ideas:
 - **Moderate structure beats fragile freedom**: entries have enough shape for reliable tidy/health checks without becoming heavyweight forms
 - **Human review stays easy**: the same files work for agents, scripts, and editors such as Obsidian
 
-See [design/tacit_knowledge_system_v4.md](design/tacit_knowledge_system_v4.md) for the current design. `v3` is retained only as historical context.
+See [design/tacit_knowledge_system_v4_5.md](design/tacit_knowledge_system_v4_5.md) for the current design. `v4` and `v3` are retained as historical context.
 
 ## v4 Entry Model
 

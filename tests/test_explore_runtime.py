@@ -148,3 +148,13 @@ def test_direct_jsonrpc_malformed_body_returns_error_payload() -> None:
 
     payload = json.loads(sent[-1]["body"].decode("utf-8"))
     assert payload["error"]["code"] == -32603
+
+
+def test_tool_definitions_follow_locale(monkeypatch) -> None:
+    monkeypatch.setenv("SEDIMENT_LOCALE", "en")
+    tools_en = server._tool_definitions()
+    assert "Return all knowledge entry names" in tools_en[0].description
+
+    monkeypatch.setenv("SEDIMENT_LOCALE", "zh")
+    tools_zh = server._tool_definitions()
+    assert "返回知识库中所有条目的名称列表" in tools_zh[0].description

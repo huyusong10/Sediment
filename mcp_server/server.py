@@ -25,6 +25,7 @@ import yaml
 from mcp import types
 from mcp.server import Server
 
+from mcp_server.i18n import tr
 from mcp_server.llm_cli import build_cli_command
 from skills.explore.scripts.kb_query import inventory, prepare_explore_context, validate_answer
 
@@ -73,11 +74,7 @@ def _tool_definitions() -> list[types.Tool]:
     return [
         types.Tool(
             name='knowledge_list',
-            description=(
-                '返回知识库中所有条目的名称列表（不含 .md 后缀）。'
-                '包含 entries/ 和 placeholders/ 下的所有 .md 文件。'
-                '供调用方 Agent 推理相关文件名，是自主探索路径的入口。'
-            ),
+            description=tr('tool.knowledge_list.description'),
             inputSchema={
                 'type': 'object',
                 'properties': {},
@@ -86,17 +83,13 @@ def _tool_definitions() -> list[types.Tool]:
         ),
         types.Tool(
             name='knowledge_read',
-            description=(
-                '读取指定知识条目的完整 Markdown 内容。'
-                'filename 不含 .md 后缀。自动在 entries/ 和 placeholders/ 中查找。'
-                '如果文件不存在，返回错误信息而非抛出异常。'
-            ),
+            description=tr('tool.knowledge_read.description'),
             inputSchema={
                 'type': 'object',
                 'properties': {
                     'filename': {
                         'type': 'string',
-                        'description': '条目名称，不含 .md 后缀',
+                        'description': tr('tool.knowledge_read.filename'),
                     }
                 },
                 'required': ['filename'],
@@ -104,18 +97,13 @@ def _tool_definitions() -> list[types.Tool]:
         ),
         types.Tool(
             name='knowledge_ask',
-            description=(
-                '针对知识库提出自然语言问题，由内部 explore runtime 返回综合答案。'
-                '返回格式至少包含 answer 和 sources，并附带 confidence、'
-                'exploration_summary、gaps、contradictions。'
-                '适合模糊语义问题，无法提前确定关键词时使用。'
-            ),
+            description=tr('tool.knowledge_ask.description'),
             inputSchema={
                 'type': 'object',
                 'properties': {
                     'question': {
                         'type': 'string',
-                        'description': '自然语言问题',
+                        'description': tr('tool.knowledge_ask.question'),
                     }
                 },
                 'required': ['question'],

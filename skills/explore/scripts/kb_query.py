@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import deque
 from pathlib import Path
 from typing import Any
 
+from mcp_server.i18n import query_language_rules
 from mcp_server.kb import (
     ParsedEntry,
     RetrievalCandidate,
@@ -23,50 +25,7 @@ from mcp_server.kb import (
     validate_entry as core_validate_entry,
 )
 
-STOP_WORDS = {
-    "什么",
-    "哪些",
-    "多少",
-    "几种",
-    "为什么",
-    "如何",
-    "怎么",
-    "怎样",
-    "可以",
-    "应该",
-    "需要",
-    "里面",
-    "中",
-    "里",
-    "从",
-    "看",
-    "和",
-    "与",
-    "及",
-    "是",
-    "的",
-    "了",
-    "在",
-    "由",
-    "把",
-    "将",
-    "对",
-    "有",
-    "一个",
-    "这个",
-    "那个",
-    "这些",
-    "那些",
-    "定义",
-    "作用",
-    "流程",
-    "步骤",
-    "逻辑",
-    "问题",
-    "系统",
-    "知识",
-    "文档",
-}
+LANGUAGE_RULES = query_language_rules()
 
 
 def inventory(kb_path: str | Path) -> dict[str, Any]:
@@ -78,9 +37,11 @@ def shortlist(
     kb_path: str | Path | None = None,
     inventory_data: dict[str, Any] | None = None,
     limit: int = 8,
+    preferred_entries: list[str] | tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     data = inventory_data or inventory(kb_path)
     entries = _entry_objects(data)
+    preferred = set(preferred_entries or [])
     question_lower = question.lower()
     question_mode = _question_mode(question)
     terms = _extract_terms(question)
@@ -123,7 +84,7 @@ def shortlist(
                 evidence_score += 10
                 matched_fields.add("body")
 
-        if evidence_score <= 0:
+        if evidence_score <= 0 and entry.name not in preferred:
             continue
 
         score = evidence_score + min(entry.inbound_count, 8)
@@ -140,6 +101,11 @@ def shortlist(
             score += 22
         if question_mode == "risk" and entry.entry_type == "lesson":
             score += 22
+
+        if entry.name in preferred:
+            score += 45
+            matched_fields.add("index")
+            reason_bits.append("index-routed candidate")
 
         if score <= 0:
             continue
@@ -373,7 +339,36 @@ def prepare_explore_context(
     snippet_char_limit: int = 320,
 ) -> dict[str, Any]:
     data = inventory_data or inventory(kb_path)
-    seeds = shortlist(question, inventory_data=data, limit=shortlist_limit)
+    routed_indexes = route_indexes(question, inventory_data=data)
+    preferred_entries = _preferred_entries_from_indexes(routed_indexes, data)
+    seeds = shortlist(
+        question,
+        inventory_data=data,
+        limit=shortlist_limit,
+        preferred_entries=preferred_entries,
+    )
+    if not seeds and preferred_entries:
+        fallback_seeds = []
+        docs = data.get("docs", {})
+        for name in preferred_entries[:shortlist_limit]:
+            doc = docs.get(name)
+            if doc is None:
+                continue
+            fallback_seeds.append(
+                {
+                    "name": name,
+                    "kind": doc["kind"],
+                    "entry_type": doc["entry_type"],
+                    "status": doc["status"],
+                    "score": 1,
+                    "matched_terms": [],
+                    "matched_fields": ["index"],
+                    "selection_reason": "index-only routing fallback",
+                    "summary": doc["summary"],
+                    "is_canonical": doc["is_canonical"],
+                }
+            )
+        seeds = fallback_seeds
     seed_names = [item["name"] for item in seeds]
     expanded = neighbors(
         seed_names,
@@ -395,6 +390,7 @@ def prepare_explore_context(
             "formal_entry_count": len(data["entries"]),
             "placeholder_count": len(data["placeholders"]),
             "alias_count": len(data["aliases"]),
+            "index_count": len(data.get("indexes", [])),
             "concept_entry_count": sum(
                 1 for name in data["entries"] if data["docs"][name]["entry_type"] == "concept"
             ),
@@ -408,9 +404,90 @@ def prepare_explore_context(
             "terms": _extract_terms(question),
         },
         "initial_shortlist": seeds,
+        "index_routing": {
+            "strategy": "index-first-with-open-search",
+            "root_index_present": "index.root" in set(data.get("indexes", [])),
+            "selected_indexes": routed_indexes,
+            "preferred_entries": preferred_entries,
+        },
         "expanded_candidates": expanded,
         "candidate_snippets": snippet_map,
     }
+
+
+def route_indexes(
+    question: str,
+    kb_path: str | Path | None = None,
+    inventory_data: dict[str, Any] | None = None,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    data = inventory_data or inventory(kb_path)
+    index_docs = data.get("index_docs", {})
+    if not index_docs:
+        return []
+
+    terms = _extract_terms(question)
+    lowered_question = question.lower()
+    results = []
+    for name, item in index_docs.items():
+        score = 0
+        reasons = []
+        haystacks = [
+            name.lower(),
+            str(item.get("title", "")).lower(),
+            str(item.get("summary", "")).lower(),
+        ]
+        if name == "index.root":
+            score += 10
+            reasons.append("root bootstrap")
+        for term in terms:
+            term_lower = term.lower()
+            if any(term_lower in bucket for bucket in haystacks):
+                score += 22
+                reasons.append(f"term match: {term}")
+            linked_hits = sum(
+                1 for linked in item.get("links", []) if term_lower in linked.lower()
+            )
+            if linked_hits:
+                score += 8 * linked_hits
+                reasons.append(f"link hit: {term} x{linked_hits}")
+        if score <= 0 and any(term in lowered_question for term in (name.lower(),)):
+            score += 12
+            reasons.append("name mention")
+        if score <= 0:
+            continue
+        results.append(
+            {
+                "name": name,
+                "score": score,
+                "selection_reason": "; ".join(dict.fromkeys(reasons)) or "heuristic match",
+                "links": item.get("links", []),
+                "segment": item.get("segment", name),
+            }
+        )
+    results.sort(key=lambda value: (-value["score"], value["name"]))
+    return results[:limit]
+
+
+def _preferred_entries_from_indexes(
+    routed_indexes: list[dict[str, Any]],
+    data: dict[str, Any],
+) -> list[str]:
+    known_entries = set(data.get("docs", {}))
+    index_docs = data.get("index_docs", {})
+    preferred = []
+    for item in routed_indexes:
+        for target in item.get("links", []):
+            if target in known_entries and target not in preferred:
+                preferred.append(target)
+                continue
+            linked_index = index_docs.get(target)
+            if not linked_index:
+                continue
+            for nested in linked_index.get("links", []):
+                if nested in known_entries and nested not in preferred:
+                    preferred.append(nested)
+    return preferred
 
 
 def _entry_objects(data: dict[str, Any]) -> dict[str, ParsedEntry]:
@@ -418,11 +495,14 @@ def _entry_objects(data: dict[str, Any]) -> dict[str, ParsedEntry]:
 
 
 def _extract_terms(question: str) -> list[str]:
+    languages = _active_languages(question)
+    stop_words = _merged_stop_words(languages)
+    split_pattern = _merged_split_pattern(languages)
     results = []
     for token in re.findall(r"[A-Za-z_][A-Za-z0-9_-]*|[\u4e00-\u9fff]{2,24}", question):
-        for part in re.split(r"[和与及、/]", token.strip()):
+        for part in re.split(split_pattern, token.strip()):
             part = part.strip()
-            if len(part) < 2 or part in STOP_WORDS:
+            if len(part) < 2 or part.casefold() in stop_words:
                 continue
             if part not in results:
                 results.append(part)
@@ -512,21 +592,11 @@ def _selection_reason(reason_bits: list[str], entry: ParsedEntry, question_mode:
 
 
 def _question_focus(question: str) -> str:
+    languages = _active_languages(question)
     lowered = question.lower()
-    if any(marker in question for marker in ("什么是", "定义", "含义")):
-        return "definition"
-    if any(marker in question for marker in ("适用于什么场景", "适用场景", "范围", "边界", "前提")):
-        return "scope"
-    if any(marker in question for marker in ("为什么", "原因", "为何")):
-        return "why"
-    if any(marker in question for marker in ("什么时候", "何时")) or "when" in lowered:
-        return "when"
-    if any(marker in question for marker in ("风险", "坑", "误区", "避免")):
-        return "risk"
-    if any(marker in question for marker in ("区别", "差异", "对比")) or "compare" in lowered:
-        return "comparison"
-    if "how" in lowered:
-        return "guidance"
+    for focus in ("definition", "scope", "why", "when", "risk", "comparison", "guidance"):
+        if _match_focus_marker(question, lowered, focus, languages):
+            return focus
     return "open"
 
 
@@ -541,6 +611,55 @@ def _question_mode(question: str) -> str:
     if focus == "comparison":
         return "comparison"
     return "open"
+
+
+def _active_languages(question: str) -> tuple[str, ...]:
+    override = os.environ.get("SEDIMENT_QUERY_LANGS", "").strip()
+    if override:
+        requested = tuple(
+            lang.strip().lower()
+            for lang in override.split(",")
+            if lang.strip().lower() in LANGUAGE_RULES
+        )
+        if requested:
+            return requested
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", question))
+    has_latin = bool(re.search(r"[A-Za-z]", question))
+    if has_cjk and has_latin:
+        return ("zh", "en")
+    if has_cjk:
+        return ("zh",)
+    return ("en",) if has_latin else ("zh", "en")
+
+
+def _merged_stop_words(languages: tuple[str, ...]) -> set[str]:
+    words: set[str] = set()
+    for lang in languages:
+        for item in LANGUAGE_RULES[lang]["stop_words"]:
+            words.add(str(item).casefold())
+    return words
+
+
+def _merged_split_pattern(languages: tuple[str, ...]) -> str:
+    patterns = [LANGUAGE_RULES[lang]["token_splitter"] for lang in languages]
+    return "|".join(f"(?:{pattern})" for pattern in patterns)
+
+
+def _match_focus_marker(
+    question: str,
+    lowered_question: str,
+    focus: str,
+    languages: tuple[str, ...],
+) -> bool:
+    for lang in languages:
+        markers = LANGUAGE_RULES[lang]["focus_markers"].get(focus, ())
+        for marker in markers:
+            if lang == "en":
+                if marker in lowered_question:
+                    return True
+            elif marker in question:
+                return True
+    return False
 
 
 def _truncate(text: str, limit: int) -> str:

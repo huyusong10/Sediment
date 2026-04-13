@@ -33,7 +33,7 @@ Sediment v4 坚持几条核心原则：
 - **中结构优先于过度自由**：条目要有足够结构，保证整理和巡检的下限
 - **人工审核友好**：同一份文件同时服务于 Agent、脚本和 Obsidian 等编辑工具
 
-当前主设计文档见 [design/tacit_knowledge_system_v4.md](design/tacit_knowledge_system_v4.md)。`v3` 仅作为历史参考保留。
+当前主设计文档见 [design/tacit_knowledge_system_v4_5.md](design/tacit_knowledge_system_v4_5.md)。`v4` 与 `v3` 作为历史参考保留。
 
 ## v4 条目模型
 

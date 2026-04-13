@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from mcp_server.i18n import kb_localized_aliases, kb_sentence_markers
+
 FORMAL_ENTRY_TYPES = {"concept", "lesson"}
 VALID_STATUSES = {"fact", "inferred", "disputed"}
 
@@ -24,14 +26,10 @@ PROVENANCE_LINE_PREFIXES = (
 SECTION_ALIASES = {
     "source": "Source",
     "sources": "Source",
-    "来源": "Source",
     "related": "Related",
-    "相关": "Related",
     "scope": "Scope",
     "context": "Scope",
-    "上下文": "Scope",
     "trigger": "Trigger",
-    "触发": "Trigger",
     "when to apply": "Trigger",
     "why": "Why",
     "why this matters": "Why",
@@ -39,27 +37,9 @@ SECTION_ALIASES = {
     "evidence/reasoning": "Why",
     "risks": "Risks",
     "common pitfalls": "Risks",
-    "风险": "Risks",
 }
-SENTENCE_STYLE_MARKERS = (
-    "必须",
-    "应该",
-    "需要",
-    "优先",
-    "避免",
-    "防止",
-    "不要",
-    "不能",
-    "导致",
-    "如果",
-    "当",
-    "先",
-    "再",
-    "前",
-    "后",
-    "时",
-    "须",
-)
+SECTION_ALIASES.update(kb_localized_aliases())
+SENTENCE_STYLE_MARKERS = kb_sentence_markers()
 
 
 @dataclass(slots=True)
@@ -174,6 +154,32 @@ class SelectedPassage:
         }
 
 
+@dataclass(slots=True)
+class ParsedIndex:
+    name: str
+    path: Path
+    title: str
+    summary: str
+    links: tuple[str, ...]
+    entry_count: int
+    estimated_tokens: int
+    is_root: bool
+    segment: str
+
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "path": str(self.path),
+            "title": self.title,
+            "summary": self.summary,
+            "links": list(self.links),
+            "entry_count": self.entry_count,
+            "estimated_tokens": self.estimated_tokens,
+            "is_root": self.is_root,
+            "segment": self.segment,
+        }
+
+
 def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     match = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
     if not match:
@@ -219,6 +225,7 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
     root = Path(kb_path)
     entry_objects: dict[str, ParsedEntry] = {}
     alias_map: dict[str, list[str]] = defaultdict(list)
+    index_objects: dict[str, ParsedIndex] = {}
 
     for kind, subdir in (("formal", "entries"), ("placeholder", "placeholders")):
         current = root / subdir
@@ -254,6 +261,9 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
         for name, entry in entry_objects.items()
         if entry.kind == "formal" and entry.is_canonical
     )
+    for path in _index_paths(root):
+        parsed_index = parse_index(path)
+        index_objects[parsed_index.name] = parsed_index
 
     return {
         "kb_path": str(root),
@@ -262,6 +272,9 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
         "aliases": {alias: sorted(set(names)) for alias, names in alias_map.items()},
         "canonical_entries": canonical_entries,
         "entry_objects": entry_objects,
+        "indexes": sorted(index_objects.keys()),
+        "index_objects": index_objects,
+        "index_docs": {name: item.to_record() for name, item in index_objects.items()},
         "docs": docs,
     }
 
@@ -402,6 +415,7 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
     data = inventory(root)
     entry_objects: dict[str, ParsedEntry] = data["entry_objects"]
     docs = data["docs"]
+    index_objects: dict[str, ParsedIndex] = data.get("index_objects", {})
 
     entry_validations = [
         validate_entry(path=entry.path, kind=entry.kind, name=entry.name)
@@ -477,6 +491,27 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
         for entry in entry_objects.values()
         if entry.kind == "formal" and entry.path is not None
     ]
+    formal_names = set(data["entries"])
+    placeholder_names = set(data["placeholders"])
+    known_indexes = set(index_objects)
+    index_link_coverage: set[str] = set()
+    overloaded_indexes = []
+    unknown_index_links = []
+    for item in index_objects.values():
+        if item.entry_count > 120 or item.estimated_tokens > 8000:
+            overloaded_indexes.append(
+                {
+                    "name": item.name,
+                    "entry_count": item.entry_count,
+                    "estimated_tokens": item.estimated_tokens,
+                }
+            )
+        for target in item.links:
+            if target in formal_names:
+                index_link_coverage.add(target)
+            elif target not in placeholder_names and target not in known_indexes:
+                unknown_index_links.append({"index": item.name, "link": target})
+    uncovered_formal = sorted(formal_names - index_link_coverage)
 
     return {
         "kb_path": str(root),
@@ -528,6 +563,14 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
             if item["hard_failures"]
         ][:10],
         "entry_validation": entry_validations,
+        "index_count": len(index_objects),
+        "root_index_present": "index.root" in index_objects,
+        "overloaded_index_count": len(overloaded_indexes),
+        "overloaded_indexes": sorted(overloaded_indexes, key=lambda item: item["name"]),
+        "uncovered_formal_entry_count": len(uncovered_formal),
+        "uncovered_formal_entries": uncovered_formal[:100],
+        "unknown_index_link_count": len(unknown_index_links),
+        "unknown_index_links": unknown_index_links[:100],
     }
 
 
@@ -667,6 +710,52 @@ def _split_body_structure(body: str, *, kind: str = "formal") -> dict[str, Any]:
         "knowledge_lines": knowledge_lines,
         "provenance_lines": provenance_lines,
     }
+
+
+def _index_paths(root: Path) -> list[Path]:
+    candidates = []
+    root_index = root / "index.root.md"
+    if root_index.is_file():
+        candidates.append(root_index)
+    indexes_dir = root / "indexes"
+    if indexes_dir.is_dir():
+        candidates.extend(sorted(indexes_dir.glob("index*.md")))
+    return candidates
+
+
+def parse_index(path: str | Path) -> ParsedIndex:
+    source_path = Path(path)
+    text = source_path.read_text(encoding="utf-8")
+    frontmatter, body = split_frontmatter(text)
+    _, preamble = split_sections(body)
+    title_match = TITLE_PATTERN.search(body)
+    title = title_match.group(1).strip() if title_match else source_path.stem
+    summary = _extract_summary(preamble, kind="formal")
+    links = tuple(extract_wikilinks(body))
+    raw_entry_count = frontmatter.get("entry_count")
+    raw_estimated_tokens = frontmatter.get("estimated_tokens")
+    segment = str(frontmatter.get("segment", source_path.stem)).strip() or source_path.stem
+    entry_count = int(raw_entry_count) if isinstance(raw_entry_count, int) else len(set(links))
+    estimated_tokens = (
+        int(raw_estimated_tokens)
+        if isinstance(raw_estimated_tokens, int)
+        else _estimate_tokens(text)
+    )
+    return ParsedIndex(
+        name=source_path.stem,
+        path=source_path,
+        title=title,
+        summary=summary,
+        links=links,
+        entry_count=entry_count,
+        estimated_tokens=estimated_tokens,
+        is_root=source_path.stem == "index.root",
+        segment=segment,
+    )
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
 
 
 def _infer_entry_type(

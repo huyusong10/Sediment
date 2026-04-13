@@ -14,10 +14,10 @@ dependencies = [
 ]
 
 [project.scripts]
-sediment = "mcp_server.cli:main"
-sediment-server = "mcp_server.cli:legacy_server_main"
-sediment-worker = "mcp_server.cli:legacy_worker_main"
-sediment-up = "mcp_server.cli:legacy_up_main"
+sediment = "sediment.cli:main"
+sediment-server = "sediment.cli:legacy_server_main"
+sediment-worker = "sediment.cli:legacy_worker_main"
+sediment-up = "sediment.cli:legacy_up_main"
 
 [build-system]
 requires = ["hatchling"]
@@ -25,25 +25,48 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "playwright>=1.52.0",
     "ruff>=0.4.0",
     "pytest>=8.0.0",
 ]
 
 [tool.hatch.build]
 include = [
-    "mcp_server/**/*.py",
-    "resources/*.svg",
-    "skills/**/*.py",
-    "skills/**/SKILL.md",
-    "skills/**/agents/*.yaml",
+    "src/sediment/**/*.py",
+    "src/sediment/**/*.md",
+    "src/sediment/**/*.yaml",
+    "src/sediment/**/*.svg",
+    "README.md",
+    "README_zh.md",
+    "LICENSE",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["mcp_server", "skills"]
+packages = ["src/sediment"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src",
+    "tests",
+    "scripts",
+    "design",
+    "benchmarks/TEST_PLAN.md",
+    "benchmarks/scripts/*.py",
+    "README.md",
+    "README_zh.md",
+    "LICENSE",
+    "pyproject.toml",
+    "uv.lock",
+]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["benchmarks"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "BLE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,1 +1,0 @@
-"""Sediment MCP server package."""

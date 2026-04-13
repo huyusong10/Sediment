@@ -8,13 +8,13 @@ from pathlib import Path
 
 from starlette.testclient import TestClient
 
-from mcp_server import server, worker
-from mcp_server.platform_services import (
+from sediment import server, worker
+from sediment.platform_services import (
     apply_operations,
     detect_submitter_ip,
     parse_trusted_proxy_cidrs,
 )
-from mcp_server.platform_store import PlatformStore
+from sediment.platform_store import PlatformStore
 from tests.config_helpers import write_test_config
 
 

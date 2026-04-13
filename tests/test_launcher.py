@@ -5,7 +5,7 @@ import sys
 import threading
 from pathlib import Path
 
-from mcp_server import launcher
+from sediment import launcher
 from tests.config_helpers import write_test_config
 
 
@@ -30,10 +30,10 @@ def test_build_process_specs_uses_current_python() -> None:
     specs = launcher.build_process_specs(worker_poll_interval=1.5)
 
     assert specs[0].name == "server"
-    assert specs[0].command[:3] == [sys.executable, "-m", "mcp_server.server"]
+    assert specs[0].command[:3] == [sys.executable, "-m", "sediment.server"]
     assert "--config" in specs[0].command
     assert specs[1].name == "worker"
-    assert specs[1].command[:3] == [sys.executable, "-m", "mcp_server.worker"]
+    assert specs[1].command[:3] == [sys.executable, "-m", "sediment.worker"]
     assert specs[1].command[-2:] == ["--poll-interval", "1.5"]
 
 

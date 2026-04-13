@@ -7,10 +7,10 @@ import socket
 import sys
 from pathlib import Path
 
-from mcp_server import cli
-from mcp_server.instances import register_instance
-from mcp_server.platform_store import PlatformStore
-from mcp_server.settings import current_config_path
+from sediment import cli
+from sediment.instances import register_instance
+from sediment.platform_store import PlatformStore
+from sediment.settings import current_config_path
 from tests.config_helpers import write_test_config
 
 
@@ -49,6 +49,15 @@ def test_status_command_json_reports_platform_state(monkeypatch, tmp_path: Path,
     assert payload["paths"]["kb_path"] == str(kb_path.resolve())
     assert payload["daemon"]["running"] is False
     assert payload["queue"]["queued_jobs"] == 0
+
+
+def test_main_without_args_prints_overview_help(capsys) -> None:
+    rc = cli.main([])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "Sediment help" in output
+    assert "Core workflow:" in output
 
 
 def test_status_queue_subcommand_json_reports_queue_state(
@@ -100,7 +109,7 @@ def test_kb_tidy_process_once_creates_review(monkeypatch, tmp_path: Path, capsys
 
 def test_mcp_status_and_tidy_tools_share_runtime(monkeypatch, tmp_path: Path) -> None:
     kb_path = _configure_cli_config(tmp_path)
-    import mcp_server.server as server_module
+    import sediment.server as server_module
 
     server_module = importlib.reload(server_module)
 
@@ -317,3 +326,59 @@ def test_logs_and_help_commands(tmp_path: Path, capsys) -> None:
     help_output = capsys.readouterr().out
     assert "sediment review" in help_output
     assert "--instance ops-prod review approve" in help_output
+
+
+def test_submit_text_command_and_status_urls(tmp_path: Path, capsys) -> None:
+    _configure_cli_config(tmp_path, port=8124)
+
+    rc = cli.main(
+        [
+            "submit",
+            "text",
+            "--title",
+            "CLI 提案",
+            "--content",
+            "这是一条来自 CLI 的概念提案。",
+            "--type",
+            "concept",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["title"] == "CLI 提案"
+    assert payload["status"] == "pending"
+
+    rc = cli.main(["status"])
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "portal:" in output
+    assert "admin:" in output
+    assert "mcp:" in output
+
+    rc = cli.main(["help", "submit"])
+    assert rc == 0
+    help_output = capsys.readouterr().out
+    assert "sediment submit" in help_output
+    assert "submit file" in help_output
+
+
+def test_submit_file_command_uses_shared_submission_backend(tmp_path: Path, capsys) -> None:
+    _configure_cli_config(tmp_path, port=8125)
+    note = tmp_path / "submission.md"
+    note.write_text("# 故障笔记\n\n这是一个文档提交。\n", encoding="utf-8")
+
+    rc = cli.main(
+        [
+            "submit",
+            "file",
+            str(note),
+            "--name",
+            "alice",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["submission_type"] == "document"
+    assert payload["submitter_name"] == "alice"

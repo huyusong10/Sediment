@@ -4,6 +4,9 @@ __pycache__/
 *.pyo
 *.egg-info/
 dist/
+build/
+.coverage
+htmlcov/
 
 # uv / virtual env
 .venv/
@@ -19,10 +22,17 @@ Thumbs.db
 # Logs
 .log/
 
-# Environment
+# Local runtime instances
 .env
 .sediment_state/
+knowledge-base/
+config/sediment/config.yaml
 
-# Test case results (keep the scripts, ignore results)
-testcase/
-# Ignore all testcase artifacts and scripts
+# Caches
+.pytest_cache/
+.ruff_cache/
+
+# Benchmarks and local evaluation data
+benchmarks/judge/
+benchmarks/material/
+benchmarks/results*/

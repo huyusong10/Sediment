@@ -5,8 +5,8 @@ from typing import Any
 
 import yaml
 
-from mcp_server.instances import set_active_registry_path
-from mcp_server.settings import set_active_config_path
+from sediment.instances import set_active_registry_path
+from sediment.settings import set_active_config_path
 
 
 def write_test_config(

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import yaml
 
-from mcp_server.settings import clear_settings_cache
-from skills.explore.scripts.kb_query import (
+from sediment.settings import clear_settings_cache
+from sediment.skills.explore.scripts.kb_query import (
     audit_kb,
     inventory,
     neighbors,
@@ -16,7 +16,7 @@ from skills.explore.scripts.kb_query import (
     validate_answer,
     validate_entry,
 )
-from skills.tidy.scripts.tidy_utils import (
+from sediment.skills.tidy.scripts.tidy_utils import (
     collect_ref_contexts,
     find_dangling_links,
     plan_index_repairs,

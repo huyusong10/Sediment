@@ -7,7 +7,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from mcp_server import cli, server
+from sediment import cli, server
 from tests.config_helpers import write_test_config
 
 

@@ -71,7 +71,7 @@ flowchart LR
 实现建议：
 
 - 继续复用当前 `Starlette` 基座，而不是切换到全新后端框架
-- 在现有 `mcp_server/server.py` 外拆出路由和服务模块
+- 在现有 `sediment/server.py` 外拆出路由和服务模块
 
 ### 3.3 Workflow Store
 
@@ -248,7 +248,7 @@ Agent Runner 不应直接在主工作区上修改文件。
 推荐在现有仓库内逐步形成如下结构：
 
 ```text
-mcp_server/
+sediment/
   api/
     portal.py
     admin.py

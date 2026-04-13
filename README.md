@@ -30,6 +30,12 @@ Sediment aims for the middle ground:
 - Human review first: submissions and edits flow through review instead of silently mutating the knowledge base.
 - Multi-surface runtime: the same system powers CLI, MCP, and web interfaces.
 
+Sediment is built on a simple bet:
+
+> If AI is going to participate in institutional memory, that memory must remain legible to humans.
+
+That means the knowledge base cannot just be searchable. It has to stay inspectable, diffable, reviewable, and governable over time.
+
 ## What It Includes
 
 - A Python package with a standard `src/` layout
@@ -43,11 +49,32 @@ Sediment aims for the middle ground:
 
 ## Install
 
+### Automatic Mode
+
+For macOS and Linux, the fastest path is a one-command installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/huyusong10/Sediment/master/install.sh | bash
+```
+
+This installs the `sediment` CLI with `uv`, then leaves you with a normal command on your PATH:
+
+```bash
+sediment --help
+```
+
+### Manual Mode
+
+If you prefer to inspect the source and install it yourself:
+
 ```bash
 git clone https://github.com/huyusong10/Sediment.git
 cd Sediment
-uv run --project . sediment --help
+uv tool install --from . sediment
+sediment --help
 ```
+
+This is also the recommended path on Windows.
 
 For local development:
 
@@ -62,7 +89,7 @@ Initialize a Sediment instance in your workspace:
 ```bash
 mkdir my-sediment-workspace
 cd my-sediment-workspace
-uv run --project /path/to/Sediment sediment init \
+sediment init \
   --instance-name ops-prod \
   --knowledge-name "Ops Knowledge Base"
 ```
@@ -70,13 +97,13 @@ uv run --project /path/to/Sediment sediment init \
 Check the instance:
 
 ```bash
-uv run --project /path/to/Sediment sediment doctor
+sediment doctor
 ```
 
 Run the platform:
 
 ```bash
-uv run --project /path/to/Sediment sediment server run
+sediment server run
 ```
 
 Then open:
@@ -84,6 +111,17 @@ Then open:
 - `http://127.0.0.1:8000/portal`
 - `http://127.0.0.1:8000/admin`
 - `http://127.0.0.1:8000/healthz`
+
+## What Makes It Different
+
+Sediment is not trying to be another black-box retrieval layer wrapped in a pleasant UI.
+
+It treats knowledge as infrastructure:
+
+- Canonical knowledge lives in plain files rather than hidden state.
+- Agent work is operationalized, but never allowed to silently become truth.
+- Web, CLI, and MCP are not separate products; they are different surfaces over the same backend.
+- Enterprise workflow is part of the design, not an afterthought bolted onto a toy demo.
 
 ## Core Commands
 
@@ -106,6 +144,12 @@ Sediment stores runtime configuration per instance in:
 
 That keeps instances local to each workspace while still allowing global instance management through the CLI.
 
+If you prefer not to install the CLI yet, you can still run it directly from the repo:
+
+```bash
+uv run --project /path/to/Sediment sediment --help
+```
+
 ## Project Layout
 
 ```text
@@ -124,6 +168,13 @@ Sediment is opinionated about a few things:
 - Structure should be strong enough for validation.
 - Agent output should be reviewable before it becomes canonical.
 - Enterprise workflows should not require editing the knowledge base host by hand.
+
+More broadly, Sediment is optimized for durable clarity, not short-term magic.
+
+- It prefers explicit structure over hidden heuristics.
+- It prefers review queues over silent mutation.
+- It prefers local, inspectable instances over centralized mystery systems.
+- It prefers knowledge that can survive staff turnover, tool churn, and model changes.
 
 ## Documentation
 

@@ -15,6 +15,8 @@ REPO_SLUG="${SEDIMENT_REPO:-huyusong10/Sediment}"
 REF="${SEDIMENT_REF:-master}"
 FORCE_INSTALL=1
 KEEP_SOURCE=0
+INSTALL_QUARTZ=1
+QUARTZ_ONLY=0
 DOWNLOAD_ROOT="${TMPDIR:-/tmp}"
 
 usage() {
@@ -22,13 +24,15 @@ usage() {
 Sediment installer
 
 Usage:
-  bash install.sh [--repo owner/name] [--ref git-ref] [--no-force] [--keep-source]
+  bash install.sh [--repo owner/name] [--ref git-ref] [--no-force] [--keep-source] [--no-quartz] [--quartz-only]
 
 Options:
   --repo         GitHub repository slug to install from (default: huyusong10/Sediment)
   --ref          Git ref, branch, or tag to install from (default: master)
   --no-force     Fail instead of replacing and reinstalling an existing Sediment CLI installation
   --keep-source  Keep the downloaded source tree in /tmp for debugging
+  --no-quartz    Skip the shared Quartz runtime installation step
+  --quartz-only  Install or repair only the shared Quartz runtime, not the Sediment CLI
   -h, --help     Show this help
 EOF
 }
@@ -55,6 +59,15 @@ while [[ $# -gt 0 ]]; do
       KEEP_SOURCE=1
       shift
       ;;
+    --no-quartz)
+      INSTALL_QUARTZ=0
+      shift
+      ;;
+    --quartz-only)
+      INSTALL_QUARTZ=1
+      QUARTZ_ONLY=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -76,6 +89,9 @@ need_cmd() {
 }
 
 ensure_uv() {
+  if [[ $QUARTZ_ONLY -eq 1 ]]; then
+    return
+  fi
   if command -v uv >/dev/null 2>&1; then
     ok "uv: $(uv --version)"
     return
@@ -94,6 +110,80 @@ ensure_uv() {
     exit 1
   fi
   ok "uv: $(uv --version)"
+}
+
+quartz_state_root() {
+  local home
+  home="${HOME:?HOME is not set}"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    printf '%s\n' "$home/Library/Application Support/Sediment"
+    return
+  fi
+  if [[ -n "${XDG_STATE_HOME:-}" ]]; then
+    printf '%s\n' "${XDG_STATE_HOME}/sediment"
+    return
+  fi
+  printf '%s\n' "$home/.local/state/sediment"
+}
+
+print_quartz_manual_commands() {
+  local quartz_repo_dir="$1"
+  echo "  curl -fsSL https://raw.githubusercontent.com/${REPO_SLUG}/${REF}/install.sh | bash -s -- --quartz-only"
+  echo "  git clone https://github.com/jackyzha0/quartz.git \"$quartz_repo_dir\""
+  echo "  cd \"$quartz_repo_dir\""
+  echo "  npm i"
+}
+
+install_quartz_runtime() {
+  local quartz_root quartz_repo_dir node_major
+  quartz_root="$(quartz_state_root)/quartz-runtime"
+  quartz_repo_dir="${quartz_root}/quartz"
+  mkdir -p "$quartz_root"
+
+  if ! command -v git >/dev/null 2>&1; then
+    warn "Quartz runtime was not installed because git is missing."
+    warn "Try one of these commands after installing git:"
+    print_quartz_manual_commands "$quartz_repo_dir"
+    return 1
+  fi
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    warn "Quartz runtime was not installed because Node.js and npm are required."
+    warn "Quartz 4 officially requires Node v22+ and npm v10.9.2+."
+    warn "Try one of these commands after installing Node.js:"
+    print_quartz_manual_commands "$quartz_repo_dir"
+    return 1
+  fi
+
+  node_major="$(node -p 'process.versions.node.split(`.`)[0]' 2>/dev/null || echo 0)"
+  if [[ "${node_major:-0}" -lt 22 ]]; then
+    warn "Quartz runtime was not installed because your Node.js version is too old: $(node --version 2>/dev/null || echo unknown)"
+    warn "Quartz 4 officially requires Node v22+ and npm v10.9.2+."
+    warn "Try one of these commands after upgrading Node.js:"
+    print_quartz_manual_commands "$quartz_repo_dir"
+    return 1
+  fi
+
+  step "Install Quartz runtime"
+  info "Quartz runtime path: $quartz_repo_dir"
+  if [[ -d "$quartz_repo_dir/.git" ]]; then
+    info "Updating existing Quartz runtime checkout."
+    git -C "$quartz_repo_dir" pull --ff-only
+  else
+    info "Cloning Quartz runtime from the official repository."
+    rm -rf "$quartz_repo_dir"
+    git clone --depth 1 https://github.com/jackyzha0/quartz.git "$quartz_repo_dir"
+  fi
+
+  info "Installing Quartz npm dependencies."
+  if npm --prefix "$quartz_repo_dir" i; then
+    ok "Quartz runtime is ready at: $quartz_repo_dir"
+    return 0
+  fi
+
+  warn "Quartz runtime installation failed."
+  warn "Try one of these commands manually:"
+  print_quartz_manual_commands "$quartz_repo_dir"
+  return 1
 }
 
 resolve_local_source() {
@@ -122,58 +212,82 @@ echo "  Install the Sediment CLI so you can create and manage local instances."
 
 step "Check dependencies"
 need_cmd bash
-need_cmd python3
-ok "python3: $(python3 --version 2>/dev/null)"
-ensure_uv
+if [[ $QUARTZ_ONLY -eq 0 ]]; then
+  need_cmd python3
+  ok "python3: $(python3 --version 2>/dev/null)"
+  ensure_uv
+fi
 
-step "Resolve source"
 SOURCE_DIR=""
 TEMP_SOURCE_ROOT=""
-if SOURCE_DIR="$(resolve_local_source 2>/dev/null)"; then
-  ok "Using local source tree: $SOURCE_DIR"
-else
-  SOURCE_DIR="$(download_source)"
-  TEMP_SOURCE_ROOT="$(dirname "$SOURCE_DIR")"
-  ok "Downloaded source tree: $SOURCE_DIR"
-fi
+if [[ $QUARTZ_ONLY -eq 0 ]]; then
+  step "Resolve source"
+  if SOURCE_DIR="$(resolve_local_source 2>/dev/null)"; then
+    ok "Using local source tree: $SOURCE_DIR"
+  else
+    SOURCE_DIR="$(download_source)"
+    TEMP_SOURCE_ROOT="$(dirname "$SOURCE_DIR")"
+    ok "Downloaded source tree: $SOURCE_DIR"
+  fi
 
-step "Install Sediment CLI"
-INSTALL_ARGS=(tool install --from "$SOURCE_DIR" sediment --compile-bytecode)
-if [[ $FORCE_INSTALL -eq 1 ]]; then
-  INSTALL_ARGS+=(--force --reinstall)
-fi
-if uv "${INSTALL_ARGS[@]}"; then
+  step "Install Sediment CLI"
+  INSTALL_ARGS=(tool install --from "$SOURCE_DIR" sediment --compile-bytecode)
   if [[ $FORCE_INSTALL -eq 1 ]]; then
-    ok "Sediment CLI installed or fully refreshed."
-  else
-    ok "Sediment CLI installed."
+    INSTALL_ARGS+=(--force --reinstall)
   fi
-else
-  if [[ $FORCE_INSTALL -eq 0 ]]; then
-    error "Sediment installation failed without overwrite. Rerun without --no-force to replace and reinstall the existing CLI."
-    exit 1
+  if uv "${INSTALL_ARGS[@]}"; then
+    if [[ $FORCE_INSTALL -eq 1 ]]; then
+      ok "Sediment CLI installed or fully refreshed."
+    else
+      ok "Sediment CLI installed."
+    fi
   else
-    error "Sediment installation failed."
-    exit 1
+    if [[ $FORCE_INSTALL -eq 0 ]]; then
+      error "Sediment installation failed without overwrite. Rerun without --no-force to replace and reinstall the existing CLI."
+      exit 1
+    else
+      error "Sediment installation failed."
+      exit 1
+    fi
   fi
+
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  hash -r
 fi
 
-export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-hash -r
+QUARTZ_INSTALL_STATUS="skipped"
+if [[ $INSTALL_QUARTZ -eq 1 ]]; then
+  if install_quartz_runtime; then
+    QUARTZ_INSTALL_STATUS="ok"
+  else
+    QUARTZ_INSTALL_STATUS="failed"
+    if [[ $QUARTZ_ONLY -eq 1 ]]; then
+      exit 1
+    fi
+  fi
+fi
 
 step "Finish"
-if command -v sediment >/dev/null 2>&1; then
+if [[ $QUARTZ_ONLY -eq 0 ]] && command -v sediment >/dev/null 2>&1; then
   ok "sediment: $(command -v sediment)"
-else
+elif [[ $QUARTZ_ONLY -eq 0 ]]; then
   warn "Sediment was installed, but the shell cannot find it yet."
   warn "You may need to reopen your shell or add ~/.local/bin to PATH."
 fi
 
 echo ""
 echo "Next:"
-echo "- Run: sediment --help"
-echo "- Create a workspace: mkdir my-sediment-workspace && cd my-sediment-workspace"
-echo "- Initialize an instance: sediment init --instance-name ops-prod --knowledge-name \"Ops Knowledge Base\""
+if [[ $QUARTZ_ONLY -eq 0 ]]; then
+  echo "- Run: sediment --help"
+  echo "- Create a workspace: mkdir my-sediment-workspace && cd my-sediment-workspace"
+  echo "- Initialize an instance: sediment init --instance-name ops-prod --knowledge-name \"Ops Knowledge Base\""
+fi
+if [[ $INSTALL_QUARTZ -eq 1 && "$QUARTZ_INSTALL_STATUS" == "ok" ]]; then
+  echo "- Quartz runtime is ready in: $(quartz_state_root)/quartz-runtime/quartz"
+fi
+if [[ $INSTALL_QUARTZ -eq 1 && "$QUARTZ_INSTALL_STATUS" == "failed" ]]; then
+  echo "- Quartz runtime install failed. Retry with: bash install.sh --quartz-only"
+fi
 
 if [[ -n "$TEMP_SOURCE_ROOT" && $KEEP_SOURCE -eq 0 ]]; then
   rm -rf "$TEMP_SOURCE_ROOT"

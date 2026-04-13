@@ -43,6 +43,11 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     submissions = client.get("/api/admin/submissions").json()["submissions"]
     assert any(item["title"] == "网页提案" for item in submissions)
 
+    quartz_page = client.get("/portal/graph-view")
+    assert quartz_page.status_code == 200
+    assert "--quartz-only" in quartz_page.text
+    assert "npm i" in quartz_page.text
+
 
 def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)

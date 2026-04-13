@@ -146,6 +146,8 @@ def _configure_server(
     monkeypatch.setattr(server_module, "TRUSTED_PROXY_CIDRS", ())
     monkeypatch.setattr(server_module, "JOB_STALE_AFTER_SECONDS", 1)
     monkeypatch.setattr(server_module, "JOB_MAX_ATTEMPTS", 2)
+    monkeypatch.setattr(server_module, "_quartz_runtime_available", lambda: False)
+    monkeypatch.setattr(server_module, "_quartz_site_available", lambda: False)
     app = server_module.create_starlette_app()
     return TestClient(app), server_module, worker_module
 

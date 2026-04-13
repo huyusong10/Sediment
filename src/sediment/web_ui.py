@@ -867,8 +867,20 @@ def portal_graph_html(
     knowledge_name: str,
     instance_name: str,
     quartz_available: bool,
+    quartz_runtime_available: bool,
     quartz_path: str,
+    quartz_runtime_path: str,
 ) -> str:
+    remote_install = (
+        "curl -fsSL https://raw.githubusercontent.com/huyusong10/Sediment/master/install.sh "
+        "| bash -s -- --quartz-only"
+    )
+    local_install = "bash install.sh --quartz-only"
+    manual_install = (
+        f"git clone https://github.com/jackyzha0/quartz.git \"{quartz_runtime_path}\"\n"
+        f"cd \"{quartz_runtime_path}\"\n"
+        "npm i"
+    )
     content = (
         """
         <div class="panel" style="margin-top:20px;">
@@ -880,7 +892,8 @@ def portal_graph_html(
         </div>
         """
         if quartz_available
-        else f"""
+        else (
+            """
         <div class="panel" style="margin-top:20px;">
           <div class="row spread">
             <h2>Quartz 4 图谱</h2>
@@ -888,11 +901,22 @@ def portal_graph_html(
           </div>
           <div class="markdown">
             <p>当前实例还没有可嵌入的 Quartz 站点，所以这里暂时不显示图谱。</p>
-            <p>为了不把 Node/npm 变成 Sediment 的基础安装前提，Quartz 页面被设计成可选能力。只要把构建好的静态站点放到 <code>{quartz_path}</code>，Sediment 就会自动在这里嵌入它。</p>
-            <p>官方文档里，Quartz 4 的全文搜索和图谱都是内建能力，但需要独立的构建链和 ContentIndex 支持，所以更适合作为增强页，而不是核心运行时依赖。</p>
+            <p>"""
+            + (
+                f"Quartz runtime 还没有安装成功。请优先重跑安装脚本：<code>{remote_install}</code>，"
+                f"如果你就在 Sediment 仓库目录里，也可以直接运行 <code>{local_install}</code>。"
+                if not quartz_runtime_available
+                else f"Quartz runtime 已经存在于 <code>{quartz_runtime_path}</code>，"
+                "但当前实例还没有准备好静态图谱站点。"
+            )
+            + f"""</p>
+            <p>如果你想手工安装 Quartz runtime，可以按官方方式执行：</p>
+            <pre class="mono">{manual_install}</pre>
+            <p>Quartz 4 官方文档要求至少 Node v22 和 npm v10.9.2。runtime 安装完成后，把当前实例可供嵌入的静态站点放到 <code>{quartz_path}</code>，Sediment 就会自动在这里嵌入它。</p>
           </div>
         </div>
         """
+        )
     )
     body = f"""
     <div class="page">

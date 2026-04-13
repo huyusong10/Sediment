@@ -54,6 +54,8 @@ def _live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
     monkeypatch.setattr(server_module, "JOB_STALE_AFTER_SECONDS", 1)
     monkeypatch.setattr(server_module, "JOB_MAX_ATTEMPTS", 2)
     monkeypatch.setattr(server_module, "SUBMISSION_RATE_LIMIT_COUNT", 3)
+    monkeypatch.setattr(server_module, "_quartz_runtime_available", lambda: False)
+    monkeypatch.setattr(server_module, "_quartz_site_available", lambda: False)
 
     app = server_module.create_starlette_app()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
@@ -208,3 +210,5 @@ def test_portal_quartz_page_shows_optional_state(tmp_path: Path, monkeypatch) ->
             page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
             expect(page).to_have_title(re.compile("Quartz Graph"))
             expect(page.locator("body")).to_contain_text("Quartz 4 图谱")
+            expect(page.locator("body")).to_contain_text("--quartz-only")
+            expect(page.locator("body")).to_contain_text("npm i")

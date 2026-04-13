@@ -51,6 +51,7 @@ from sediment.control import (
     system_status_payload,
 )
 from sediment.i18n import tr
+from sediment.instances import user_state_root
 from sediment.kb import resolve_kb_document_path
 from sediment.llm_cli import build_cli_command, collect_output
 from sediment.package_data import read_skill_text
@@ -175,6 +176,7 @@ JOB_STALE_AFTER_SECONDS = runtime_job_stale_after_seconds()
 RUN_JOBS_IN_PROCESS = runtime_run_jobs_in_process()
 _PROJECT_ROOT = INSTANCE_ROOT
 QUARTZ_SITE_DIR = runtime_platform_paths()["state_dir"] / "quartz" / "site"
+QUARTZ_RUNTIME_DIR = user_state_root() / "quartz-runtime" / "quartz"
 
 DEFAULT_CONTRACT = {
     "shortlist_limit": 8,
@@ -1065,7 +1067,9 @@ async def _portal_graph_page(request):
             knowledge_name=KNOWLEDGE_NAME,
             instance_name=INSTANCE_NAME,
             quartz_available=_quartz_site_available(),
+            quartz_runtime_available=_quartz_runtime_available(),
             quartz_path=str(QUARTZ_SITE_DIR),
+            quartz_runtime_path=str(QUARTZ_RUNTIME_DIR),
         )
     )
 
@@ -1117,6 +1121,12 @@ async def _api_portal_graph(request):
 
 def _quartz_site_available() -> bool:
     return (QUARTZ_SITE_DIR / "index.html").exists()
+
+
+def _quartz_runtime_available() -> bool:
+    return (QUARTZ_RUNTIME_DIR / "package.json").exists() and (
+        QUARTZ_RUNTIME_DIR / "node_modules"
+    ).exists()
 
 
 async def _api_portal_submit_text(request):

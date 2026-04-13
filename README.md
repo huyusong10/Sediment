@@ -65,6 +65,18 @@ sediment --help
 
 The installer replaces and reinstalls an existing `sediment` CLI by default, so rerunning it works as a reliable upgrade path too.
 
+By default, the installer also tries to provision a shared Quartz runtime under your user Sediment state directory. Sediment does not install Quartz as a global npm package; it keeps a local Quartz checkout for optional graph-page support. If the Quartz step fails, the installer will keep going, warn you, and print both of these recovery paths:
+
+```bash
+bash install.sh --quartz-only
+```
+
+```bash
+git clone https://github.com/jackyzha0/quartz.git "<your-user-sediment-state>/quartz-runtime/quartz"
+cd "<your-user-sediment-state>/quartz-runtime/quartz"
+npm i
+```
+
 ### Manual Mode
 
 If you prefer to inspect the source and install it yourself:
@@ -187,6 +199,7 @@ uv run --project /path/to/Sediment sediment --help
 - Text submissions are analyzed against the current KB before they enter the review buffer, so committers can see suggested title, type, duplicate risk, and related entries immediately.
 - Document submissions support a single file, a folder, multiple files, or a `.zip` archive; Sediment will unpack supported documents and buffer the extracted text for review.
 - Quartz 4 is treated as an optional graph page, not a core runtime dependency. If a built Quartz site is present, Sediment embeds it at `/portal/graph-view`; otherwise the core install still works without Node/npm.
+- The installer now tries to provision the shared Quartz runtime automatically. If that fails, `/portal/graph-view` will show recovery commands for rerunning `install.sh --quartz-only` or installing Quartz manually.
 
 ## Project Layout
 

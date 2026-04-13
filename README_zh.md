@@ -65,6 +65,18 @@ sediment --help
 
 安装脚本默认会覆盖并重装已有的 `sediment` CLI，所以你也可以把它当作可靠的升级命令反复执行。
 
+安装脚本现在默认还会尝试准备一个“共享 Quartz runtime”，用于支持可选的图谱页。Sediment 不会把 Quartz 装成全局 npm 包，而是把它放进用户级 Sediment 状态目录里。如果 Quartz 这一步失败，安装脚本不会直接把 Sediment 整体装坏，而是会给出这两条补救路径：
+
+```bash
+bash install.sh --quartz-only
+```
+
+```bash
+git clone https://github.com/jackyzha0/quartz.git "<你的 Sediment 用户状态目录>/quartz-runtime/quartz"
+cd "<你的 Sediment 用户状态目录>/quartz-runtime/quartz"
+npm i
+```
+
 ### 手工模式
 
 如果你更希望先看源码、再自己控制安装过程：
@@ -184,6 +196,7 @@ uv run --project /path/to/Sediment sediment --help
 - 文本提交在进入缓冲区之前，会先结合当前 KB 做一次 Agent 建议分析，让 committer 直接看到建议标题、建议类型、重复风险和相关条目。
 - 文档提交支持单文件、文件夹、多文件和 `.zip` 压缩包；Sediment 会自动解压支持的文档，并把提取出的文本送进缓冲区。
 - Quartz 4 被当作可选增强页，而不是基础运行时依赖。只要你已经构建好 Quartz 静态站点，Sediment 就会在 `/portal/graph-view` 自动嵌入；如果没有，核心安装也依然不需要 Node/npm。
+- 安装脚本现在会默认尝试准备 Quartz runtime；如果失败，`/portal/graph-view` 页面会直接提示你重新运行 `install.sh --quartz-only`，或者按官方方式手工安装 Quartz。
 
 ## 项目结构
 

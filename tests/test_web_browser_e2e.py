@@ -163,6 +163,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.get_by_test_id("admin-login-button").click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("管理台已就绪")
 
+            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
             submission_card = page.locator("#submission-list .card").filter(
                 has_text="浏览器管理台提案"
             ).first
@@ -173,6 +174,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
 
             assert live["worker_module"].process_queue_until_idle(max_jobs=1) == 1
 
+            page.goto(f"{live['base_url']}/admin/reviews", wait_until="domcontentloaded")
             page.get_by_test_id("admin-refresh-button").click()
             review_card = page.locator("#review-list .card").first
             expect(review_card).to_be_visible()
@@ -182,6 +184,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             review_card.locator('button[data-action="approve-review"]').click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("已批准")
 
+            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
             page.get_by_test_id("admin-editor-name").fill("薄弱条目")
             page.get_by_test_id("admin-load-entry-button").click()
             editor = page.get_by_test_id("admin-editor-content")

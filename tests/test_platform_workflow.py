@@ -352,6 +352,53 @@ def test_admin_save_entry_and_health_issue_queue(tmp_path: Path, monkeypatch) ->
     assert refreshed["validation"]["valid"] is True
 
 
+def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = _build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, server_module, _worker_module = _configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+    )
+
+    runtime_dir = server_module.QUARTZ_RUNTIME_DIR
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    (runtime_dir / "package.json").write_text("{}", encoding="utf-8")
+    (runtime_dir / "node_modules").mkdir(exist_ok=True)
+
+    def _fake_quartz_build(**kwargs):
+        site_dir = Path(kwargs["site_dir"])
+        site_dir.mkdir(parents=True, exist_ok=True)
+        (site_dir / "index.html").write_text(
+            "<html><body>Built Quartz</body></html>",
+            encoding="utf-8",
+        )
+        return server_module.quartz_status(
+            runtime_dir=kwargs["runtime_dir"],
+            site_dir=kwargs["site_dir"],
+        )
+
+    monkeypatch.setattr(server_module, "build_quartz_site", _fake_quartz_build)
+
+    status_before = client.get("/api/admin/quartz/status")
+    assert status_before.status_code == 200
+    assert status_before.json()["runtime_available"] is True
+    assert status_before.json()["site_available"] is False
+
+    build = client.post("/api/admin/quartz/build", json={"actor_name": "tester"})
+    assert build.status_code == 202
+    assert build.json()["site_available"] is True
+
+    quartz_page = client.get("/quartz/")
+    assert quartz_page.status_code == 200
+    assert "Built Quartz" in quartz_page.text
+
+    graph_page = client.get("/portal/graph-view")
+    assert graph_page.status_code == 200
+    assert 'data-testid="portal-quartz-frame"' in graph_page.text
+
+
 def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = _build_platform_project(tmp_path)
     client, server_module, _worker_module = _configure_server(

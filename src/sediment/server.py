@@ -67,6 +67,12 @@ from sediment.platform_services import (
     search_kb,
 )
 from sediment.platform_store import PlatformStore, utc_now
+from sediment.quartz_runtime import (
+    build_quartz_site,
+    quartz_runtime_available,
+    quartz_site_available,
+    quartz_status,
+)
 from sediment.runtime import (
     admin_session_cookie_name as runtime_admin_session_cookie_name,
 )
@@ -177,6 +183,7 @@ RUN_JOBS_IN_PROCESS = runtime_run_jobs_in_process()
 _PROJECT_ROOT = INSTANCE_ROOT
 QUARTZ_SITE_DIR = runtime_platform_paths()["state_dir"] / "quartz" / "site"
 QUARTZ_RUNTIME_DIR = user_state_root() / "quartz-runtime" / "quartz"
+DEFAULT_LOCALE = load_settings()["locale"]
 
 DEFAULT_CONTRACT = {
     "shortlist_limit": 8,
@@ -255,6 +262,25 @@ def _agent_runner():
         workspaces_dir=paths["workspaces_dir"],
         store=store,
     )
+
+
+def _request_locale(request) -> str:
+    raw = str(request.query_params.get("lang", "")).strip().lower()
+    if raw.startswith("zh"):
+        return "zh"
+    if raw.startswith("en"):
+        return "en"
+    header = str(request.headers.get("accept-language", "")).strip().lower()
+    if header.startswith("zh"):
+        return "zh"
+    if header.startswith("en"):
+        return "en"
+    return DEFAULT_LOCALE
+
+
+def _path_with_locale(path: str, locale: str) -> str:
+    joiner = "&" if "?" in path else "?"
+    return f"{path}{joiner}lang={locale}"
 
 
 def _session_secret_bytes() -> bytes | None:
@@ -1057,30 +1083,101 @@ def _decode_uploaded_files(raw_files: list[dict[str, Any]]) -> list[dict[str, An
 
 async def _portal_page(request):
     return _html_response(
-        portal_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME)
+        portal_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=_request_locale(request),
+        )
     )
 
 
 async def _portal_graph_page(request):
+    locale = _request_locale(request)
     return _html_response(
         portal_graph_html(
             knowledge_name=KNOWLEDGE_NAME,
             instance_name=INSTANCE_NAME,
-            quartz_available=_quartz_site_available(),
-            quartz_runtime_available=_quartz_runtime_available(),
-            quartz_path=str(QUARTZ_SITE_DIR),
-            quartz_runtime_path=str(QUARTZ_RUNTIME_DIR),
+            locale=locale,
+            quartz=quartz_status(
+                runtime_dir=QUARTZ_RUNTIME_DIR,
+                site_dir=QUARTZ_SITE_DIR,
+            ),
+            admin_kb_path=_path_with_locale("/admin/kb", locale),
         )
     )
 
 
 async def _admin_page(request):
+    return await _admin_overview_page(request)
+
+
+async def _admin_overview_page(request):
+    locale = _request_locale(request)
     if not _is_admin_authorized(request):
         return _html_response(
-            admin_login_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME),
+            admin_login_html(
+                knowledge_name=KNOWLEDGE_NAME,
+                instance_name=INSTANCE_NAME,
+                locale=locale,
+                next_path=_path_with_locale("/admin", locale),
+            ),
             status=200,
         )
-    return _html_response(admin_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME))
+    return _html_response(
+        admin_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            section="overview",
+            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
+        )
+    )
+
+
+async def _admin_kb_page(request):
+    locale = _request_locale(request)
+    if not _is_admin_authorized(request):
+        return _html_response(
+            admin_login_html(
+                knowledge_name=KNOWLEDGE_NAME,
+                instance_name=INSTANCE_NAME,
+                locale=locale,
+                next_path=_path_with_locale("/admin/kb", locale),
+            ),
+            status=200,
+        )
+    return _html_response(
+        admin_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            section="kb",
+            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
+        )
+    )
+
+
+async def _admin_reviews_page(request):
+    locale = _request_locale(request)
+    if not _is_admin_authorized(request):
+        return _html_response(
+            admin_login_html(
+                knowledge_name=KNOWLEDGE_NAME,
+                instance_name=INSTANCE_NAME,
+                locale=locale,
+                next_path=_path_with_locale("/admin/reviews", locale),
+            ),
+            status=200,
+        )
+    return _html_response(
+        admin_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            section="reviews",
+            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
+        )
+    )
 
 
 async def _root_page(request):
@@ -1120,13 +1217,11 @@ async def _api_portal_graph(request):
 
 
 def _quartz_site_available() -> bool:
-    return (QUARTZ_SITE_DIR / "index.html").exists()
+    return quartz_site_available(QUARTZ_SITE_DIR)
 
 
 def _quartz_runtime_available() -> bool:
-    return (QUARTZ_RUNTIME_DIR / "package.json").exists() and (
-        QUARTZ_RUNTIME_DIR / "node_modules"
-    ).exists()
+    return quartz_runtime_available(QUARTZ_RUNTIME_DIR)
 
 
 async def _api_portal_submit_text(request):
@@ -1586,6 +1681,50 @@ async def _api_admin_entry_save(request):
     return _json_response(payload)
 
 
+async def _api_admin_explore(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    body = await _request_json_or_empty(request)
+    question = str(body.get("question", "")).strip()
+    if not question:
+        return _json_response({"error": "question must not be empty"}, status=400)
+    return _json_response(answer_question(question, KB_PATH, _PROJECT_ROOT))
+
+
+async def _api_admin_quartz_status(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    return _json_response(quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR))
+
+
+async def _api_admin_quartz_build(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    body = await _request_json_or_empty(request)
+    try:
+        payload = build_quartz_site(
+            kb_path=KB_PATH,
+            runtime_dir=QUARTZ_RUNTIME_DIR,
+            site_dir=QUARTZ_SITE_DIR,
+            knowledge_name=KNOWLEDGE_NAME,
+            locale=_request_locale(request),
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    _platform_store().add_audit_log(
+        actor_name=str(body.get("actor_name", "admin")),
+        actor_role="committer",
+        action="quartz.build",
+        target_type="quartz_site",
+        target_id=str(QUARTZ_SITE_DIR),
+        details={"runtime_path": str(QUARTZ_RUNTIME_DIR)},
+    )
+    return _json_response(payload, status=202)
+
+
 # ---------------------------------------------------------------------------
 # MCP HTTP / SSE Router
 # ---------------------------------------------------------------------------
@@ -1798,7 +1937,9 @@ def create_starlette_app():
         Route("/healthz", _healthz),
         Route("/portal", _portal_page),
         Route("/portal/graph-view", _portal_graph_page),
-        Route("/admin", _admin_page),
+        Route("/admin", _admin_overview_page),
+        Route("/admin/kb", _admin_kb_page),
+        Route("/admin/reviews", _admin_reviews_page),
         Route("/api/admin/session", _api_admin_session_status, methods=["GET"]),
         Route("/api/admin/session", _api_admin_session_create, methods=["POST"]),
         Route("/api/admin/session", _api_admin_session_delete, methods=["DELETE"]),
@@ -1828,10 +1969,18 @@ def create_starlette_app():
         Route("/api/admin/reviews/{review_id:str}/reject", _api_admin_review_reject, methods=["POST"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
+        Route("/api/admin/explore", _api_admin_explore, methods=["POST"]),
+        Route("/api/admin/quartz/status", _api_admin_quartz_status, methods=["GET"]),
+        Route("/api/admin/quartz/build", _api_admin_quartz_build, methods=["POST"]),
         Mount(SSE_ENDPOINT, app=_make_router(sse), routes=False),
     ]
-    if _quartz_site_available():
-        routes.append(Mount("/quartz", app=StaticFiles(directory=str(QUARTZ_SITE_DIR), html=True)))
+    QUARTZ_SITE_DIR.mkdir(parents=True, exist_ok=True)
+    routes.append(
+        Mount(
+            "/quartz",
+            app=StaticFiles(directory=str(QUARTZ_SITE_DIR), html=True, check_dir=False),
+        )
+    )
     return Starlette(
         middleware=[Middleware(SecurityHeadersMiddleware)],
         routes=routes,

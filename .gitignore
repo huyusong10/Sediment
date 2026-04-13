@@ -21,6 +21,7 @@ Thumbs.db
 
 # Environment
 .env
+.sediment_state/
 
 # Test case results (keep the scripts, ignore results)
 testcase/

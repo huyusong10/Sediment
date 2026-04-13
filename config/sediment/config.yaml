@@ -1,6 +1,9 @@
 version: 1
 locale: en
 
+instance:
+  name: sediment-example
+
 paths:
   workspace_root: ../..
   knowledge_base: knowledge-base
@@ -51,6 +54,7 @@ agent:
   exec_timeout_seconds: 240
 
 knowledge:
+  name: Sediment Knowledge Base
   query_languages: ""
   index:
     max_entries: 120

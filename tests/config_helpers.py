@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from mcp_server.instances import set_active_registry_path
 from mcp_server.settings import set_active_config_path
 
 
@@ -20,12 +21,18 @@ def write_test_config(
     locale: str = "en",
     max_attempts: int = 2,
     stale_after_seconds: int = 1,
+    instance_label: str = "test-instance",
+    knowledge_label: str = "Test Knowledge Base",
+    registry_path: Path | None = None,
 ) -> Path:
     config_path = root / "config" / "sediment" / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "version": 1,
         "locale": locale,
+        "instance": {
+            "name": instance_label,
+        },
         "paths": {
             "workspace_root": str(root),
             "knowledge_base": str(kb_path),
@@ -47,10 +54,14 @@ def write_test_config(
             "doctor_timeout_seconds": 10,
             "exec_timeout_seconds": 20,
         },
+        "knowledge": {
+            "name": knowledge_label,
+        },
     }
     config_path.write_text(
         yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+    set_active_registry_path(registry_path or root / ".registry" / "instances.yaml")
     set_active_config_path(config_path)
     return config_path

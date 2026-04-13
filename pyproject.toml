@@ -32,6 +32,7 @@ dev = [
 [tool.hatch.build]
 include = [
     "mcp_server/**/*.py",
+    "resources/*.svg",
     "skills/**/*.py",
     "skills/**/SKILL.md",
     "skills/**/agents/*.yaml",

@@ -126,22 +126,25 @@ Sediment now loads its runtime configuration from
 [`config/sediment/config.yaml`](config/sediment/config.yaml) by default. You can
 override it per command with `--config /path/to/config.yaml`.
 
-If that project-local file is absent, Sediment falls back to a user-level config:
-
-- macOS: `~/Library/Application Support/Sediment/config.yaml`
-- Windows: `%APPDATA%/Sediment/config.yaml`
-- Linux: `$XDG_CONFIG_HOME/sediment/config.yaml` or `~/.config/sediment/config.yaml`
-
-Example:
+Every Sediment instance is local to one workspace directory. The recommended
+way to start is:
 
 ```bash
-cp config/sediment/config.yaml /your/workspace/config/sediment/config.yaml
-uv run sediment server run
+cd /your/workspace
+uv run sediment init --instance-name ops-prod --knowledge-name "Ops Knowledge Base"
 ```
 
-The default config is repository-local and cross-platform. Path fields are
-resolved through `paths.workspace_root`, and `agent.command` supports either a
-single string or an explicit YAML list to avoid quoting issues on Windows.
+This creates:
+
+- `./config/sediment/config.yaml`
+- `./knowledge-base/`
+- `./.sediment_state/`
+
+Sediment keeps runtime config local to each instance, but also stores a small
+global instance registry so you can manage multiple instances by name from
+anywhere. Path fields are resolved through `paths.workspace_root`, and
+`agent.command` supports either a single string or an explicit YAML list to
+avoid quoting issues on Windows.
 
 For daemon-style control, use the same entrypoint:
 
@@ -170,6 +173,7 @@ Compatibility shims are still available for lower-level debugging:
 
 Key config sections:
 
+- `instance`: globally unique instance name used by `sediment --instance NAME ...`
 - `paths`: workspace root, knowledge base, state DB, uploads, worker workspaces
 - `server`: bind host/port, SSE path, in-process job mode
 - `auth`: admin token, session secret, secure cookie settings
@@ -177,7 +181,7 @@ Key config sections:
 - `submissions`: rate limits, dedupe window, upload/text size limits
 - `jobs`: retry ceiling and stale-job timeout
 - `agent`: selected backend plus backend-specific command/model options
-- `knowledge`: locale, query-language override, and index contract defaults
+- `knowledge`: displayed knowledge-base title, locale, query-language override, and index contract defaults
 
 Supported `agent.backend` values:
 
@@ -254,10 +258,15 @@ REST/admin surfaces now also expose:
 
 The unified CLI surface is:
 
+- `sediment init` to create a local instance and register it
+- `sediment instance ...` to list/show/remove known instances
 - `sediment server ...` for lifecycle control, logs, and daemon status
 - `sediment kb ...` for explore, list, read, health, and tidy actions
+- `sediment review ...` for terminal-side review triage and approval
+- `sediment logs ...` for daemon log inspection
 - `sediment status ...` for platform, daemon, queue, and KB-health summaries
 - `sediment doctor` for config, filesystem, and agent-backend health checks
+- `sediment help` for task-oriented command help
 
 ## Use The KB
 
@@ -302,6 +311,7 @@ uv build
 For local end-to-end development:
 
 ```bash
+uv run sediment init --instance-name local-dev --knowledge-name "Local Dev KB"
 uv run sediment server run
 ```
 
@@ -310,6 +320,8 @@ Useful checks:
 ```bash
 uv run sediment doctor
 uv run sediment doctor --json
+uv run sediment help
+uv run sediment instance list
 ```
 
 Tests use `tests/fixtures/mock_workflow_cli.py` to simulate the Agent runner.
@@ -327,8 +339,10 @@ Minimum deployment baseline:
 - set `auth.admin_token`
 - set `auth.session_secret`
 - enable `auth.secure_cookies: true` behind HTTPS
+- set a unique `instance.name`
+- set a clear `knowledge.name` for the portal/admin UI
 - use `sediment server run` for local/dev convenience
-- use `sediment server start|stop|status|logs` for daemon control
+- use `sediment server start|stop|status|logs` or `sediment logs ...` for daemon control
 - keep `server` and `worker` as separate roles in production, even if you launch them through one `sediment` entrypoint
 - if you are behind a reverse proxy, set `network.trust_proxy_headers: true` and restrict `network.trusted_proxy_cidrs`
 - monitor `/healthz` and the admin system-status panel

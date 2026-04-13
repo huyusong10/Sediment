@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from mcp_server.platform_services import (
+    apply_operations,
     build_health_issue_queue,
     get_health_payload,
     list_reviews_with_jobs,
 )
-from mcp_server.platform_store import PlatformStore
+from mcp_server.platform_store import PlatformStore, utc_now
 
 
 def enqueue_ingest_job(
@@ -98,6 +99,10 @@ def system_status_payload(
     store: PlatformStore,
     kb_path: str | Path,
     paths: dict[str, Path],
+    instance_name: str,
+    knowledge_name: str,
+    instance_root: str | Path,
+    config_path: str | Path,
     auth_required: bool,
     run_jobs_in_process: bool,
     submission_rate_limit_count: int,
@@ -113,6 +118,12 @@ def system_status_payload(
     jobs = store.list_jobs(limit=200)
     stale_jobs = store.list_stale_jobs(stale_after_seconds=job_stale_after_seconds)
     return {
+        "instance": {
+            "name": instance_name,
+            "knowledge_name": knowledge_name,
+            "root": str(Path(instance_root).resolve()),
+            "config_path": str(Path(config_path).resolve()),
+        },
         "auth_required": auth_required,
         "worker_mode": "in_process" if run_jobs_in_process else "queue",
         "limits": {
@@ -178,6 +189,10 @@ def platform_status_payload(
     kb_path: str | Path,
     paths: dict[str, Path],
     daemon: dict[str, Any],
+    instance_name: str,
+    knowledge_name: str,
+    instance_root: str | Path,
+    config_path: str | Path,
     auth_required: bool,
     run_jobs_in_process: bool,
     submission_rate_limit_count: int,
@@ -194,6 +209,10 @@ def platform_status_payload(
         store=store,
         kb_path=kb_path,
         paths=paths,
+        instance_name=instance_name,
+        knowledge_name=knowledge_name,
+        instance_root=instance_root,
+        config_path=config_path,
         auth_required=auth_required,
         run_jobs_in_process=run_jobs_in_process,
         submission_rate_limit_count=submission_rate_limit_count,
@@ -214,3 +233,81 @@ def platform_status_payload(
     )
     payload["recent_reviews"] = list_reviews_with_jobs(store=store, decision="pending")[:5]
     return payload
+
+
+def apply_review_decision(
+    *,
+    store: PlatformStore,
+    kb_path: str | Path,
+    review_id: str,
+    decision: str,
+    reviewer_name: str,
+    comment: str,
+) -> dict[str, Any]:
+    review = store.get_review(review_id)
+    if review is None:
+        raise FileNotFoundError("review not found")
+    job = store.get_job(review["job_id"])
+    if job is None:
+        raise FileNotFoundError("review job not found")
+    if review["decision"] != "pending":
+        raise RuntimeError("review has already been resolved")
+    if job["status"] != "awaiting_review":
+        raise RuntimeError(f"job is not awaiting review (current status: {job['status']})")
+
+    if decision in {"approve", "approve_formal", "approve_placeholder"}:
+        operations = (job.get("result_payload") or {}).get("operations", [])
+        result = apply_operations(
+            kb_path,
+            operations,
+            actor_name=reviewer_name,
+            actor_role="committer",
+            store=store,
+        )
+        store.update_review(
+            review_id,
+            decision=decision,
+            reviewer_name=reviewer_name,
+            comment=comment,
+        )
+        store.update_job(job["id"], status="succeeded", finished_at=utc_now())
+        if review.get("submission_id"):
+            store.update_submission(review["submission_id"], status="accepted")
+        store.add_audit_log(
+            actor_name=reviewer_name,
+            actor_role="committer",
+            action="review.approve",
+            target_type="review",
+            target_id=review_id,
+            details={"job_id": job["id"], "decision": decision, "comment": comment},
+        )
+        return {
+            "review": store.get_review(review_id),
+            "job": store.get_job(job["id"]),
+            "apply_result": result,
+        }
+
+    if decision in {"reject", "request_changes", "cancel"}:
+        store.update_review(
+            review_id,
+            decision=decision,
+            reviewer_name=reviewer_name,
+            comment=comment,
+        )
+        store.update_job(job["id"], status="cancelled", finished_at=utc_now())
+        if review.get("submission_id"):
+            store.update_submission(
+                review["submission_id"],
+                status="rejected" if decision == "reject" else "triaged",
+            )
+        store.add_audit_log(
+            actor_name=reviewer_name,
+            actor_role="committer",
+            action="review.reject" if decision == "reject" else "review.request_changes",
+            target_type="review",
+            target_id=review_id,
+            details={"job_id": job["id"], "decision": decision, "comment": comment},
+        )
+        return {"review": store.get_review(review_id), "job": store.get_job(job["id"])}
+
+    raise ValueError(f"unsupported review decision: {decision}")

@@ -22,7 +22,8 @@
 
 - Knowledge Base Workspace：白盒 Markdown 知识库和 Git 工作区
 - API Service：统一承载 MCP 和 REST 接口
-- Config Layer：统一读取 `config/sediment/config.yaml` 与用户级平台配置
+- Config Layer：统一读取实例本地 `config/sediment/config.yaml`
+- Instance Registry：只保存实例名到实例根目录 / config 路径的全局映射
 - Workflow Store：保存提交、审核、任务、审计和锁信息
 - Agent Runner：在知识库本地执行 ingest / tidy / explore 的托管 Agent
 - Search / Graph Projection：为全文搜索、图谱浏览和后台筛选提供查询投影
@@ -33,6 +34,7 @@ flowchart LR
     U["User Portal"] --> API["API Service"]
     A["Admin Console"] --> API
     API --> CFG["Config Layer"]
+    API --> REG["Instance Registry"]
     API --> DB["Workflow Store"]
     API --> IDX["Search / Graph Projection"]
     API --> KB["Knowledge Base Workspace"]
@@ -88,8 +90,7 @@ flowchart LR
 
 职责：
 
-- 在项目内优先读取 `config/sediment/config.yaml`
-- 在仓库外部署时按平台回退到用户级配置目录
+- 固定读取实例目录下的 `config/sediment/config.yaml`
 - 统一解析相对路径，避免 Windows / Unix 下命令行引号差异
 - 为 CLI、Web、MCP、worker 提供同一份运行配置
 
@@ -101,7 +102,20 @@ flowchart LR
 
 并允许 `agent.command` 以字符串或 YAML 列表形式显式指定命令前缀。
 
-### 3.5 Agent Runner
+### 3.5 Instance Registry
+
+职责：
+
+- 保存 `instance.name -> instance root / config path`
+- 支持 `sediment --instance NAME ...` 的全局实例解析
+- 支持实例列表、实例状态查看和失效实例清理
+
+约束：
+
+- 注册表不保存真正的运行配置
+- 真正的配置仍然只保存在实例本地 `config/sediment/config.yaml`
+
+### 3.6 Agent Runner
 
 职责：
 
@@ -122,7 +136,7 @@ flowchart LR
 当前实现中，Agent Runner 通过统一 CLI 适配层调度不同 backend，并由
 `sediment doctor` 在上线前检查配置、可执行文件、帮助命令和最小探针调用。
 
-### 3.6 Search / Graph Projection
+### 3.7 Search / Graph Projection
 
 职责：
 
@@ -137,7 +151,7 @@ flowchart LR
 - 索引链接
 - `status`、`type`、入链数量、健康状态
 
-### 3.7 Web Apps
+### 3.8 Web Apps
 
 职责：
 
@@ -205,8 +219,12 @@ Agent Runner 不应直接在主工作区上修改文件。
 默认部署建议：
 
 - 用户入口统一为 `sediment`
+- `sediment init`：在当前目录创建实例并注册到全局实例表
+- `sediment instance ...`：列出 / 查看 / 移除实例注册
 - `sediment server run|start|stop|restart|status|logs`：控制平台守护进程与生命周期
 - `sediment kb ...`：调用知识库 explore / health / tidy 等能力
+- `sediment review ...`：在终端里处理待审 patch
+- `sediment logs ...`：从实例侧查看 server / worker 日志
 - `sediment status ...`：查看平台总览、daemon、queue 和 KB health
 - `sediment doctor`：检查当前配置、知识库路径、状态目录与选定 Agent backend 是否可用
 - 兼容脚本 `sediment-server`、`sediment-worker`、`sediment-up` 仅保留为低层调试别名

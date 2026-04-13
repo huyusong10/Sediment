@@ -328,6 +328,8 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
     page = client.get("/admin")
     assert page.status_code == 200
     assert "Sediment Admin Sign-in" in page.text
+    assert 'rel="icon"' in page.text
+    assert 'class="brand-mark"' in page.text
     assert page.headers["cache-control"] == "no-store"
 
     unauthorized = client.get("/api/admin/overview")
@@ -346,6 +348,7 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
 
     authed_page = client.get("/admin")
     assert "Sediment Control Room" in authed_page.text
+    assert 'class="brand-mark"' in authed_page.text
 
 
 def test_detect_submitter_ip_only_trusts_configured_proxy() -> None:

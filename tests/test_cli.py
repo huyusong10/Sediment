@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 
 from mcp_server import cli
+from mcp_server.instances import register_instance
 from mcp_server.platform_store import PlatformStore
+from mcp_server.settings import current_config_path
 from tests.config_helpers import write_test_config
 
 
@@ -167,3 +169,151 @@ def test_doctor_command_reports_healthy_backend(tmp_path: Path, capsys) -> None:
     assert payload["status"] == "ok"
     probe = next(item for item in payload["checks"] if item["name"] == "agent.probe")
     assert probe["ok"] is True
+
+
+def test_init_registers_multiple_instances(monkeypatch, tmp_path: Path, capsys) -> None:
+    registry = tmp_path / "registry" / "instances.yaml"
+    monkeypatch.setattr(
+        cli,
+        "build_doctor_payload",
+        lambda: {
+            "status": "ok",
+            "config_path": "dummy",
+            "instance_name": "dummy",
+            "knowledge_name": "dummy",
+            "backend": "codex",
+            "checks": [],
+        },
+    )
+
+    first = tmp_path / "first"
+    first.mkdir()
+    monkeypatch.chdir(first)
+    rc = cli.main(
+        [
+            "--registry",
+            str(registry),
+            "init",
+            "--instance-name",
+            "ops-a",
+            "--knowledge-name",
+            "Ops A",
+            "--backend",
+            "codex",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    first_payload = json.loads(capsys.readouterr().out)
+    assert Path(first_payload["config_path"]).exists()
+
+    second = tmp_path / "second"
+    second.mkdir()
+    monkeypatch.chdir(second)
+    rc = cli.main(
+        [
+            "--registry",
+            str(registry),
+            "init",
+            "--instance-name",
+            "ops-b",
+            "--knowledge-name",
+            "Ops B",
+            "--backend",
+            "codex",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    rc = cli.main(["--registry", str(registry), "instance", "list", "--json"])
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["instance_name"] for item in payload["instances"]] == ["ops-a", "ops-b"]
+
+
+def test_review_commands_and_instance_switching(tmp_path: Path, monkeypatch, capsys) -> None:
+    _configure_cli_config(tmp_path)
+    config = current_config_path()
+    register_instance(
+        instance_name="test-instance",
+        config_path=config,
+        knowledge_name="Test Knowledge Base",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    rc = cli.main(
+        [
+            "--instance",
+            "test-instance",
+            "kb",
+            "tidy",
+            "薄弱条目",
+            "--process-once",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    review_job = payload["job"]
+    store = PlatformStore(Path(tmp_path / "state" / "platform.db"))
+    store.init()
+    review = store.list_reviews(decision="pending")[0]
+
+    rc = cli.main(["--instance", "test-instance", "review", "list", "--json"])
+    assert rc == 0
+    list_payload = json.loads(capsys.readouterr().out)
+    assert list_payload["reviews"][0]["id"] == review["id"]
+
+    rc = cli.main(["--instance", "test-instance", "review", "show", review["id"]])
+    assert rc == 0
+    shown = capsys.readouterr().out
+    assert review["id"] in shown
+    assert "diff:" in shown
+
+    rc = cli.main(
+        [
+            "--instance",
+            "test-instance",
+            "review",
+            "approve",
+            review["id"],
+            "--reviewer-name",
+            "alice",
+        ]
+    )
+    assert rc == 0
+    capsys.readouterr()
+
+    assert store.get_job(review_job["id"])["status"] == "succeeded"
+    assert store.get_review(review["id"])["decision"] == "approve"
+
+
+def test_logs_and_help_commands(tmp_path: Path, capsys) -> None:
+    _configure_cli_config(tmp_path)
+    log_path = cli.daemon_paths()["log"]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(
+        "\n".join(
+            [
+                "[server] server ready",
+                "[worker] worker boot",
+                "[worker] worker idle",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["logs", "show", "--component", "worker", "--lines", "2"])
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "[worker] worker boot" in output
+    assert "[server]" not in output
+
+    rc = cli.main(["help", "review"])
+    assert rc == 0
+    help_output = capsys.readouterr().out
+    assert "sediment review" in help_output
+    assert "--instance ops-prod review approve" in help_output

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import os
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -11,8 +10,11 @@ import yaml
 DEFAULT_CONFIG = {
     "version": 1,
     "locale": "en",
+    "instance": {
+        "name": "",
+    },
     "paths": {
-        "workspace_root": ".",
+        "workspace_root": "../..",
         "knowledge_base": "knowledge-base",
         "state_dir": ".sediment_state",
         "db_path": None,
@@ -64,6 +66,7 @@ DEFAULT_CONFIG = {
         "exec_timeout_seconds": 240,
     },
     "knowledge": {
+        "name": "Sediment Knowledge Base",
         "query_languages": "",
         "index": {
             "max_entries": 120,
@@ -77,6 +80,7 @@ DEFAULT_CONFIG = {
 _ACTIVE_CONFIG_PATH: Path | None = None
 _SETTINGS_CACHE: dict[str, Any] | None = None
 _SETTINGS_CACHE_KEY: tuple[str, float | None, str | None] | None = None
+CONFIG_RELATIVE_PATH = Path("config") / "sediment" / "config.yaml"
 
 
 def project_root() -> Path:
@@ -84,21 +88,7 @@ def project_root() -> Path:
 
 
 def default_project_config_path() -> Path:
-    return project_root() / "config" / "sediment" / "config.yaml"
-
-
-def default_user_config_path() -> Path:
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Sediment" / "config.yaml"
-    if os.name == "nt":
-        appdata = os.environ.get("APPDATA", "").strip()
-        if appdata:
-            return Path(appdata) / "Sediment" / "config.yaml"
-        return Path.home() / "AppData" / "Roaming" / "Sediment" / "config.yaml"
-    xdg = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    if xdg:
-        return Path(xdg) / "sediment" / "config.yaml"
-    return Path.home() / ".config" / "sediment" / "config.yaml"
+    return project_root() / CONFIG_RELATIVE_PATH
 
 
 def set_active_config_path(path: str | Path | None) -> None:
@@ -118,37 +108,49 @@ def current_config_path() -> Path:
     if explicit is not None:
         return explicit.expanduser().resolve()
 
-    project_path = default_project_config_path()
-    if project_path.exists():
-        return project_path.resolve()
-
-    return default_user_config_path().expanduser().resolve()
+    local = discover_local_config_path()
+    if local is not None:
+        return local
+    return (Path.cwd() / CONFIG_RELATIVE_PATH).resolve()
 
 
 def load_settings() -> dict[str, Any]:
+    return load_settings_for_path(
+        current_config_path(),
+        argv=sys.argv[1:],
+    )
+
+
+def load_settings_for_path(
+    config_path: str | Path,
+    *,
+    argv: Sequence[str] | None = None,
+) -> dict[str, Any]:
     global _SETTINGS_CACHE, _SETTINGS_CACHE_KEY
-    config_path = current_config_path()
+    resolved_config_path = Path(config_path).expanduser().resolve()
+    argv = argv if argv is not None else []
     cache_key = (
-        str(config_path),
-        config_path.stat().st_mtime if config_path.exists() else None,
-        _argv_run_jobs_override(sys.argv[1:]),
+        str(resolved_config_path),
+        resolved_config_path.stat().st_mtime if resolved_config_path.exists() else None,
+        _argv_run_jobs_override(argv),
     )
     if _SETTINGS_CACHE is not None and _SETTINGS_CACHE_KEY == cache_key:
         return copy.deepcopy(_SETTINGS_CACHE)
 
     merged = copy.deepcopy(DEFAULT_CONFIG)
     file_payload: dict[str, Any] = {}
-    config_exists = config_path.exists()
+    config_exists = resolved_config_path.exists()
     if config_exists:
-        loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        loaded = yaml.safe_load(resolved_config_path.read_text(encoding="utf-8")) or {}
         if not isinstance(loaded, dict):
-            raise RuntimeError(f"Sediment config must be a mapping: {config_path}")
+            raise RuntimeError(f"Sediment config must be a mapping: {resolved_config_path}")
         file_payload = loaded
         _deep_merge(merged, loaded)
 
+    instance_root = instance_root_from_config(resolved_config_path)
     workspace_root = _resolve_path(
-        merged["paths"].get("workspace_root", "."),
-        base=config_path.parent,
+        merged["paths"].get("workspace_root", "../.."),
+        base=resolved_config_path.parent,
     )
     knowledge_base = _resolve_path(
         merged["paths"].get("knowledge_base", "knowledge-base"),
@@ -175,6 +177,9 @@ def load_settings() -> dict[str, Any]:
     )
 
     merged["locale"] = _normalize_locale(merged.get("locale", "en"))
+    merged["instance"]["name"] = str(merged["instance"].get("name", "")).strip()
+    if not merged["instance"]["name"]:
+        merged["instance"]["name"] = instance_root.name or "sediment-instance"
     merged["agent"]["backend"] = normalize_agent_backend(merged["agent"].get("backend", ""))
     merged["agent"]["extra_args"] = _string_list(merged["agent"].get("extra_args", []))
     merged["agent"]["command"] = _normalize_command_value(merged["agent"].get("command"))
@@ -190,7 +195,7 @@ def load_settings() -> dict[str, Any]:
         merged["server"].get("run_jobs_in_process"),
         False,
     )
-    override_run_jobs = _argv_run_jobs_override(sys.argv[1:])
+    override_run_jobs = _argv_run_jobs_override(argv)
     if override_run_jobs is not None:
         merged["server"]["run_jobs_in_process"] = override_run_jobs == "true"
     merged["network"]["trusted_proxy_cidrs"] = _string_list(
@@ -221,6 +226,9 @@ def load_settings() -> dict[str, Any]:
         0,
         _to_int(merged["jobs"].get("stale_after_seconds"), 900),
     )
+    merged["knowledge"]["name"] = str(merged["knowledge"].get("name", "")).strip()
+    if not merged["knowledge"]["name"]:
+        merged["knowledge"]["name"] = merged["instance"]["name"]
     merged["knowledge"]["query_languages"] = str(
         merged["knowledge"].get("query_languages", "")
     ).strip()
@@ -239,8 +247,13 @@ def load_settings() -> dict[str, Any]:
         merged["knowledge"]["index"].get("segment_glob", "index*.md")
     ).strip() or "index*.md"
 
-    merged["config_path"] = config_path
+    override_run_jobs = _argv_run_jobs_override(argv)
+    if override_run_jobs is not None:
+        merged["server"]["run_jobs_in_process"] = override_run_jobs == "true"
+
+    merged["config_path"] = resolved_config_path
     merged["config_exists"] = config_exists
+    merged["instance_root"] = instance_root
     merged["workspace_root"] = workspace_root
     merged["paths"]["knowledge_base"] = knowledge_base
     merged["paths"]["state_dir"] = state_dir
@@ -266,6 +279,26 @@ def normalize_agent_backend(value: str) -> str:
         "open-code": "opencode",
     }
     return aliases.get(raw, raw or "claude-code")
+
+
+def discover_local_config_path(start: str | Path | None = None) -> Path | None:
+    base = Path(start or Path.cwd()).expanduser().resolve()
+    if base.is_file():
+        base = base.parent
+    for candidate_root in (base, *base.parents):
+        candidate = candidate_root / CONFIG_RELATIVE_PATH
+        if candidate.exists():
+            return candidate.resolve()
+    return None
+
+
+def instance_root_from_config(config_path: str | Path) -> Path:
+    path = Path(config_path).expanduser().resolve()
+    if path.name == "config.yaml" and path.parent.name == "sediment":
+        config_dir = path.parent.parent
+        if config_dir.name == "config":
+            return config_dir.parent.resolve()
+    return path.parent.resolve()
 
 
 def _argv_config_path(argv: Sequence[str]) -> Path | None:

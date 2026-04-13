@@ -21,6 +21,22 @@ def kb_path() -> Path:
     return Path(load_settings()["paths"]["knowledge_base"])
 
 
+def instance_root() -> Path:
+    return Path(load_settings()["instance_root"])
+
+
+def instance_name() -> str:
+    return str(load_settings()["instance"]["name"])
+
+
+def knowledge_name() -> str:
+    return str(load_settings()["knowledge"]["name"])
+
+
+def config_path() -> Path:
+    return Path(load_settings()["config_path"])
+
+
 def host() -> str:
     return str(load_settings()["server"]["host"])
 

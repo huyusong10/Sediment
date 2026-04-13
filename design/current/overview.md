@@ -72,23 +72,31 @@ knowledge-base/
 
 当前 CLI 统一成三组：
 
+- `sediment init`
+- `sediment instance ...`
 - `sediment server ...`
 - `sediment kb ...`
+- `sediment review ...`
+- `sediment logs ...`
 - `sediment status ...`
 - `sediment doctor`
 
-运行配置统一来自 `config/sediment/config.yaml`。如果当前工作区没有该文件，
-则按平台回退到用户级配置目录：
-
-- macOS：`~/Library/Application Support/Sediment/config.yaml`
-- Windows：`%APPDATA%/Sediment/config.yaml`
-- Linux：`$XDG_CONFIG_HOME/sediment/config.yaml` 或 `~/.config/sediment/config.yaml`
+运行配置固定来自实例本地的 `config/sediment/config.yaml`。CLI 默认会从当前
+目录向上寻找最近的实例配置；如果显式指定 `--instance NAME`，则通过全局
+实例注册表定位到对应实例。
 
 当前内置的 Agent CLI backend 适配层支持：
 
 - `claude-code`
 - `codex`
 - `opencode`
+
+同时，Sediment 还维护一份很小的全局实例注册表，只保存：
+
+- `instance.name -> instance root`
+- `instance.name -> config path`
+
+它不保存运行配置本身，因此 Sediment 仍然是“本地配置，多实例管理”模型。
 
 ## 5. 当前设计的主线
 

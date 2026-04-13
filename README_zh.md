@@ -125,20 +125,22 @@ Sediment 现在默认从
 [`config/sediment/config.yaml`](config/sediment/config.yaml) 读取运行配置。
 如果需要，也可以在命令行里通过 `--config /path/to/config.yaml` 覆盖。
 
-如果当前工作区没有这份配置文件，Sediment 会回退到用户级配置目录：
-
-- macOS：`~/Library/Application Support/Sediment/config.yaml`
-- Windows：`%APPDATA%/Sediment/config.yaml`
-- Linux：`$XDG_CONFIG_HOME/sediment/config.yaml` 或 `~/.config/sediment/config.yaml`
-
-例如：
+推荐的启动方式是直接在目标目录初始化一个实例：
 
 ```bash
-uv run sediment server run
+cd /your/workspace
+uv run sediment init --instance-name ops-prod --knowledge-name "生产运维知识库"
 ```
 
-默认配置文件是仓库内本地文件，并且兼容多平台。路径统一通过
-`paths.workspace_root` 做解析，`agent.command` 同时支持 YAML 字符串和
+这会创建：
+
+- `./config/sediment/config.yaml`
+- `./knowledge-base/`
+- `./.sediment_state/`
+
+Sediment 把运行配置固定在每个实例本地目录里，但会额外维护一个很小的全局
+实例注册表，这样你仍然可以在任意位置通过实例名统一管理多个实例。路径统一
+通过 `paths.workspace_root` 做解析，`agent.command` 同时支持 YAML 字符串和
 字符串数组，能减少 Windows 下的转义问题。
 
 如果要用守护进程方式管理，也统一走同一条入口：
@@ -168,6 +170,7 @@ uv run sediment server stop
 
 主要配置分组包括：
 
+- `instance`：实例名，供 `sediment --instance NAME ...` 全局定位
 - `paths`：工作区根目录、知识库、状态目录、数据库、上传目录、worker 工作区
 - `server`：监听地址、端口、SSE 路径、是否进程内跑 job
 - `auth`：admin token、session secret、cookie 安全配置
@@ -175,7 +178,7 @@ uv run sediment server stop
 - `submissions`：限流、去重、文本/文件大小上限
 - `jobs`：重试次数和 stale timeout
 - `agent`：所选后端，以及命令、模型、sandbox 等参数
-- `knowledge`：locale、query language override、index 合约默认值
+- `knowledge`：Web 界面展示用的知识库名字、locale、query language override、index 合约默认值
 
 支持的 `agent.backend`：
 
@@ -252,10 +255,15 @@ Admin 支持：
 
 统一后的 CLI 入口包括：
 
+- `sediment init`：初始化当前目录实例并写入本地配置
+- `sediment instance ...`：列出 / 查看 / 移除已注册实例
 - `sediment server ...`：生命周期控制、日志和守护进程状态
 - `sediment kb ...`：explore、list、read、health、tidy
+- `sediment review ...`：在终端里查看和批准 / 拒绝 review
+- `sediment logs ...`：查看 daemon 日志
 - `sediment status ...`：平台总览、daemon、queue、KB health
 - `sediment doctor`：检查配置、文件系统和 agent backend 是否健康
+- `sediment help`：查看按任务组织的帮助信息
 
 ## 使用知识库
 
@@ -299,6 +307,7 @@ uv build
 本地端到端调试建议：
 
 ```bash
+uv run sediment init --instance-name local-dev --knowledge-name "本地开发知识库"
 uv run sediment server run
 ```
 
@@ -307,6 +316,8 @@ uv run sediment server run
 ```bash
 uv run sediment doctor
 uv run sediment doctor --json
+uv run sediment help
+uv run sediment instance list
 ```
 
 测试里会用 `tests/fixtures/mock_workflow_cli.py` 模拟 Agent Runner。
@@ -324,8 +335,10 @@ uv run sediment doctor --json
 - 设置 `auth.admin_token`
 - 设置 `auth.session_secret`
 - 在 HTTPS 下开启 `auth.secure_cookies: true`
+- 设置唯一的 `instance.name`
+- 设置清晰的 `knowledge.name`，用于 Portal / Admin 展示
 - 本地开发推荐 `sediment server run`
-- 守护进程控制统一走 `sediment server start|stop|status|logs`
+- 守护进程控制统一走 `sediment server start|stop|status|logs` 或 `sediment logs ...`
 - 生产环境仍建议保持 `server` 和 `worker` 两个角色分离，只是入口统一成 `sediment`
 - 如果前面有反向代理，设置 `network.trust_proxy_headers: true`，并限制 `network.trusted_proxy_cidrs`
 - 监控 `/healthz` 和 Admin 后台里的 system status 面板

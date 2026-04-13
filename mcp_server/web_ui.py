@@ -1,6 +1,28 @@
 # ruff: noqa: E501
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
+from urllib.parse import quote
+
+
+@lru_cache(maxsize=1)
+def _logo_mark_svg() -> str:
+    return (
+        (Path(__file__).resolve().parent.parent / "resources" / "logo-mark.svg")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
+
+
+@lru_cache(maxsize=1)
+def _logo_mark_data_uri() -> str:
+    return f"data:image/svg+xml;utf8,{quote(_logo_mark_svg())}"
+
+
+def _logo_inline(class_name: str = "brand-mark") -> str:
+    return _logo_mark_svg().replace("<svg ", f'<svg class="{class_name}" aria-hidden="true" ')
+
 
 def shared_shell(title: str, body: str, script: str) -> str:
     return f"""<!DOCTYPE html>
@@ -9,6 +31,8 @@ def shared_shell(title: str, body: str, script: str) -> str:
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{title}</title>
+  <link rel="icon" type="image/svg+xml" href="{_logo_mark_data_uri()}" />
+  <meta name="theme-color" content="#2B1F16" />
   <style>
     :root {{
       --bg: #f4efe4;
@@ -72,6 +96,39 @@ def shared_shell(title: str, body: str, script: str) -> str:
       max-width: 72ch;
       font-size: 16px;
       line-height: 1.6;
+    }}
+    .hero-top {{
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      flex-wrap: wrap;
+    }}
+    .brand {{
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }}
+    .brand-mark {{
+      width: 62px;
+      height: 62px;
+      flex: none;
+      filter: drop-shadow(0 12px 20px rgba(43, 31, 22, 0.18));
+    }}
+    .brand-copy {{
+      display: grid;
+      gap: 4px;
+    }}
+    .brand-copy span {{
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }}
+    .brand-copy strong {{
+      font-size: 18px;
+      line-height: 1.1;
     }}
     .nav {{
       display: flex;
@@ -415,15 +472,25 @@ def shared_shell(title: str, body: str, script: str) -> str:
 </html>"""
 
 
-def portal_html() -> str:
-    body = """
+def portal_html(*, knowledge_name: str, instance_name: str) -> str:
+    body = f"""
     <div class="page">
       <section class="hero">
-        <div class="nav">
-          <a class="button primary" href="/portal">知识门户</a>
-          <a class="button" href="/admin">管理台</a>
+        <div class="hero-top">
+          <div class="brand">
+            {_logo_inline()}
+            <div class="brand-copy">
+              <span>Sediment</span>
+              <strong>{knowledge_name}</strong>
+            </div>
+          </div>
+          <div class="nav">
+            <a class="button primary" href="/portal">知识门户</a>
+            <a class="button" href="/admin">管理台</a>
+          </div>
         </div>
-        <h1>Sediment Knowledge Portal</h1>
+        <h1>{knowledge_name}</h1>
+        <p class="subtle">Sediment Knowledge Portal · 实例：{instance_name}</p>
         <p>查看正式知识层、做全文搜索、浏览概念图谱，并把新的概念、文档和意见稳定送入提交缓冲区。</p>
       </section>
 
@@ -644,18 +711,28 @@ def portal_html() -> str:
     loadHome().catch(showError);
     loadGraph().catch(showError);
     """
-    return shared_shell("Sediment Portal", body, script)
+    return shared_shell(f"{knowledge_name} Portal", body, script)
 
 
-def admin_login_html() -> str:
-    body = """
+def admin_login_html(*, knowledge_name: str, instance_name: str) -> str:
+    body = f"""
     <div class="page">
       <section class="hero">
-        <div class="nav">
-          <a class="button" href="/portal">知识门户</a>
-          <a class="button primary" href="/admin">管理台登录</a>
+        <div class="hero-top">
+          <div class="brand">
+            {_logo_inline()}
+            <div class="brand-copy">
+              <span>Sediment</span>
+              <strong>{knowledge_name}</strong>
+            </div>
+          </div>
+          <div class="nav">
+            <a class="button" href="/portal">知识门户</a>
+            <a class="button primary" href="/admin">管理台登录</a>
+          </div>
         </div>
-        <h1>Sediment Admin Sign-in</h1>
+        <h1>{knowledge_name}</h1>
+        <p class="subtle">Sediment Admin Sign-in · 实例：{instance_name}</p>
         <p>管理台只开放给 committer 和平台维护者。登录成功后会建立一个同站受控 session，之后的审核与编辑请求会自动带上权限。</p>
       </section>
 
@@ -701,18 +778,28 @@ def admin_login_html() -> str:
 
     checkSession().catch(showError);
     """
-    return shared_shell("Sediment Admin Login", body, script)
+    return shared_shell(f"{knowledge_name} Admin Login", body, script)
 
 
-def admin_html() -> str:
-    body = """
+def admin_html(*, knowledge_name: str, instance_name: str) -> str:
+    body = f"""
     <div class="page">
       <section class="hero">
-        <div class="nav">
-          <a class="button" href="/portal">知识门户</a>
-          <a class="button primary" href="/admin">管理台</a>
+        <div class="hero-top">
+          <div class="brand">
+            {_logo_inline()}
+            <div class="brand-copy">
+              <span>Sediment</span>
+              <strong>{knowledge_name}</strong>
+            </div>
+          </div>
+          <div class="nav">
+            <a class="button" href="/portal">知识门户</a>
+            <a class="button primary" href="/admin">管理台</a>
+          </div>
         </div>
-        <h1>Sediment Control Room</h1>
+        <h1>{knowledge_name}</h1>
+        <p class="subtle">Sediment Control Room · 实例：{instance_name}</p>
         <div class="row">
           <p>审核提交、发起 ingest/tidy、在线修改 Markdown，并把 health、审计和任务恢复变成常驻后台能力。</p>
         </div>
@@ -1101,4 +1188,4 @@ def admin_html() -> str:
     refreshAdmin().catch(showAdminError);
     setInterval(() => refreshAdmin().catch(showAdminError), 20000);
     """
-    return shared_shell("Sediment Admin", body, script)
+    return shared_shell(f"{knowledge_name} Admin", body, script)

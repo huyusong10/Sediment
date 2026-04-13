@@ -41,6 +41,7 @@ from mcp.server import Server
 from mcp_server.agent_runner import get_agent_runner
 from mcp_server.control import (
     admin_overview_payload,
+    apply_review_decision,
     enqueue_ingest_job,
     enqueue_tidy_job,
     resolve_tidy_issue,
@@ -50,7 +51,6 @@ from mcp_server.i18n import tr
 from mcp_server.kb import resolve_kb_document_path
 from mcp_server.llm_cli import build_cli_command, collect_output
 from mcp_server.platform_services import (
-    apply_operations,
     build_health_issue_queue,
     detect_submitter_ip,
     get_entry_detail,
@@ -77,7 +77,16 @@ from mcp_server.runtime import (
     build_store,
 )
 from mcp_server.runtime import (
+    config_path as runtime_config_path,
+)
+from mcp_server.runtime import (
     host as runtime_host,
+)
+from mcp_server.runtime import (
+    instance_name as runtime_instance_name,
+)
+from mcp_server.runtime import (
+    instance_root as runtime_instance_root,
 )
 from mcp_server.runtime import (
     job_max_attempts as runtime_job_max_attempts,
@@ -87,6 +96,9 @@ from mcp_server.runtime import (
 )
 from mcp_server.runtime import (
     kb_path as runtime_kb_path,
+)
+from mcp_server.runtime import (
+    knowledge_name as runtime_knowledge_name,
 )
 from mcp_server.runtime import (
     max_text_submission_chars as runtime_max_text_submission_chars,
@@ -138,6 +150,10 @@ from skills.explore.scripts.kb_query import inventory, prepare_explore_context, 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 KB_PATH = runtime_kb_path()
+INSTANCE_NAME = runtime_instance_name()
+INSTANCE_ROOT = runtime_instance_root()
+KNOWLEDGE_NAME = runtime_knowledge_name()
+CONFIG_PATH = runtime_config_path()
 HOST = runtime_host()
 PORT = runtime_port()
 SSE_ENDPOINT = runtime_sse_endpoint()
@@ -581,6 +597,10 @@ async def _knowledge_platform_status() -> str:
         store=store,
         kb_path=KB_PATH,
         paths=_platform_paths(),
+        instance_name=INSTANCE_NAME,
+        knowledge_name=KNOWLEDGE_NAME,
+        instance_root=INSTANCE_ROOT,
+        config_path=CONFIG_PATH,
         auth_required=bool(ADMIN_TOKEN),
         run_jobs_in_process=RUN_JOBS_IN_PROCESS,
         submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
@@ -644,7 +664,9 @@ async def _knowledge_review_decide(
     reviewer_name: str,
     comment: str = "",
 ) -> str:
-    result = _apply_review_decision(
+    result = apply_review_decision(
+        store=_platform_store(),
+        kb_path=KB_PATH,
         review_id=review_id,
         decision=decision,
         reviewer_name=reviewer_name,
@@ -935,83 +957,6 @@ def _error_payload(message: str) -> dict[str, Any]:
     }
 
 
-def _apply_review_decision(
-    *,
-    review_id: str,
-    decision: str,
-    reviewer_name: str,
-    comment: str,
-) -> dict[str, Any]:
-    store = _platform_store()
-    review = store.get_review(review_id)
-    if review is None:
-        raise FileNotFoundError("review not found")
-    job = store.get_job(review["job_id"])
-    if job is None:
-        raise FileNotFoundError("review job not found")
-    if review["decision"] != "pending":
-        raise RuntimeError("review has already been resolved")
-    if job["status"] != "awaiting_review":
-        raise RuntimeError(f"job is not awaiting review (current status: {job['status']})")
-
-    if decision in {"approve", "approve_formal", "approve_placeholder"}:
-        operations = (job.get("result_payload") or {}).get("operations", [])
-        result = apply_operations(
-            KB_PATH,
-            operations,
-            actor_name=reviewer_name,
-            actor_role="committer",
-            store=store,
-        )
-        store.update_review(
-            review_id,
-            decision=decision,
-            reviewer_name=reviewer_name,
-            comment=comment,
-        )
-        store.update_job(job["id"], status="succeeded", finished_at=utc_now())
-        if review.get("submission_id"):
-            store.update_submission(review["submission_id"], status="accepted")
-        store.add_audit_log(
-            actor_name=reviewer_name,
-            actor_role="committer",
-            action="review.approve",
-            target_type="review",
-            target_id=review_id,
-            details={"job_id": job["id"], "decision": decision, "comment": comment},
-        )
-        return {
-            "review": store.get_review(review_id),
-            "job": store.get_job(job["id"]),
-            "apply_result": result,
-        }
-
-    if decision in {"reject", "request_changes", "cancel"}:
-        store.update_review(
-            review_id,
-            decision=decision,
-            reviewer_name=reviewer_name,
-            comment=comment,
-        )
-        store.update_job(job["id"], status="cancelled", finished_at=utc_now())
-        if review.get("submission_id"):
-            store.update_submission(
-                review["submission_id"],
-                status="rejected" if decision == "reject" else "triaged",
-            )
-        store.add_audit_log(
-            actor_name=reviewer_name,
-            actor_role="committer",
-            action="review.reject" if decision == "reject" else "review.request_changes",
-            target_type="review",
-            target_id=review_id,
-            details={"job_id": job["id"], "decision": decision, "comment": comment},
-        )
-        return {"review": store.get_review(review_id), "job": store.get_job(job["id"])}
-
-    raise ValueError(f"unsupported review decision: {decision}")
-
-
 # ---------------------------------------------------------------------------
 # HTTP / REST / Web
 # ---------------------------------------------------------------------------
@@ -1050,13 +995,18 @@ async def _request_json_or_empty(request) -> dict[str, Any]:
 
 
 async def _portal_page(request):
-    return _html_response(portal_html())
+    return _html_response(
+        portal_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME)
+    )
 
 
 async def _admin_page(request):
     if not _is_admin_authorized(request):
-        return _html_response(admin_login_html(), status=200)
-    return _html_response(admin_html())
+        return _html_response(
+            admin_login_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME),
+            status=200,
+        )
+    return _html_response(admin_html(knowledge_name=KNOWLEDGE_NAME, instance_name=INSTANCE_NAME))
 
 
 async def _root_page(request):
@@ -1180,6 +1130,10 @@ def _system_status_payload(store: PlatformStore) -> dict[str, Any]:
         store=store,
         kb_path=KB_PATH,
         paths=paths,
+        instance_name=INSTANCE_NAME,
+        knowledge_name=KNOWLEDGE_NAME,
+        instance_root=INSTANCE_ROOT,
+        config_path=CONFIG_PATH,
         auth_required=bool(ADMIN_TOKEN),
         run_jobs_in_process=RUN_JOBS_IN_PROCESS,
         submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
@@ -1457,7 +1411,9 @@ async def _api_admin_review_approve(request):
         return guard
     body = await request.json()
     try:
-        payload = _apply_review_decision(
+        payload = apply_review_decision(
+            store=_platform_store(),
+            kb_path=KB_PATH,
             review_id=request.path_params["review_id"],
             decision=str(body.get("decision", "approve")),
             reviewer_name=str(body.get("reviewer_name", "admin")),
@@ -1474,7 +1430,9 @@ async def _api_admin_review_reject(request):
         return guard
     body = await request.json()
     try:
-        payload = _apply_review_decision(
+        payload = apply_review_decision(
+            store=_platform_store(),
+            kb_path=KB_PATH,
             review_id=request.path_params["review_id"],
             decision="reject",
             reviewer_name=str(body.get("reviewer_name", "admin")),

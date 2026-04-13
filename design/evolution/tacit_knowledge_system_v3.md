@@ -1,7 +1,8 @@
 # 隐性知识提取系统设计文档
 
-> 版本：v4.0 | 状态：设计阶段
-> 说明：该文档已被 `design/tacit_knowledge_system_v4.md` 取代，现仅保留作历史参考。
+> 状态：历史快照
+> 当前入口：见 [design/README.md](../README.md)
+> 后续演进：该版本后来演进为 [v4](tacit_knowledge_system_v4.md)，现仅保留作历史参考。
 
 ---
 

@@ -9,10 +9,13 @@ dependencies = [
     "pyyaml>=6.0.2",
     "python-docx>=1.2.0",
     "python-pptx>=1.0.2",
+    "starlette>=0.37.2",
+    "uvicorn>=0.30.0",
 ]
 
 [project.scripts]
 sediment-server = "mcp_server.server:main"
+sediment-worker = "mcp_server.worker:main"
 
 [build-system]
 requires = ["hatchling"]

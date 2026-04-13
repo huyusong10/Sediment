@@ -26,6 +26,26 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "gaps, and contradictions."
         ),
         "tool.knowledge_ask.question": "Natural-language question",
+        "tool.knowledge_submit_text.description": (
+            "Submit a text concept, lesson, or feedback item into the review buffer. "
+            "This does not write directly into the canonical knowledge base."
+        ),
+        "tool.knowledge_submit_document.description": (
+            "Submit an uploaded document into the review buffer using base64 content. "
+            "The service extracts text and stores the submission for committer review."
+        ),
+        "tool.knowledge_health_report.description": (
+            "Return the current health summary and structured issue queue for the knowledge base."
+        ),
+        "tool.knowledge_submission_queue.description": (
+            "List recent buffered submissions and their workflow status."
+        ),
+        "tool.knowledge_job_status.description": (
+            "Inspect the status and result payload for an ingest or tidy job."
+        ),
+        "tool.knowledge_review_decide.description": (
+            "Approve or reject a pending review for an ingest/tidy job."
+        ),
     },
     "zh": {
         "tool.knowledge_list.description": (
@@ -47,6 +67,26 @@ _MESSAGES: dict[str, dict[str, str]] = {
             "适合模糊语义问题，无法提前确定关键词时使用。"
         ),
         "tool.knowledge_ask.question": "自然语言问题",
+        "tool.knowledge_submit_text.description": (
+            "把纯文字概念、经验或意见提交到审核缓冲区。"
+            "该操作不会直接写入正式知识库。"
+        ),
+        "tool.knowledge_submit_document.description": (
+            "通过 base64 文档内容把上传文件提交到审核缓冲区。"
+            "服务端会抽取文本并等待 committer 审核。"
+        ),
+        "tool.knowledge_health_report.description": (
+            "返回当前知识库的 health 摘要和结构化问题队列。"
+        ),
+        "tool.knowledge_submission_queue.description": (
+            "列出最近的缓冲区提交及其工作流状态。"
+        ),
+        "tool.knowledge_job_status.description": (
+            "查看 ingest 或 tidy 任务的状态和结果载荷。"
+        ),
+        "tool.knowledge_review_decide.description": (
+            "批准或拒绝某个 ingest/tidy 待审结果。"
+        ),
     },
 }
 

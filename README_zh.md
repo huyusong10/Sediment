@@ -24,8 +24,9 @@
 ---
 
 Sediment 是一个面向 AI Agent 的白盒隐性知识系统。它当前重点提供
-稳定的 Markdown 知识库运行时：可读、可校验、可巡检、可检索。
-ingest 和 tidy 目前作为实验性工作流 skill 提供，而不是已经完全产品化的运行时自动化能力。
+稳定的 Markdown 知识库运行时：可读、可校验、可巡检、可检索，
+并增加了企业平台层：提交缓冲区、审核流、health 面板，以及通过本地
+Agent Runner 托管执行的 ingest / tidy。
 
 Sediment v4 坚持几条核心原则：
 - **白盒优先**：知识库就是文件，不是隐藏数据库
@@ -33,7 +34,7 @@ Sediment v4 坚持几条核心原则：
 - **中结构优先于过度自由**：条目要有足够结构，保证整理和巡检的下限
 - **人工审核友好**：同一份文件同时服务于 Agent、脚本和 Obsidian 等编辑工具
 
-当前主设计文档见 [design/tacit_knowledge_system_v4_5.md](design/tacit_knowledge_system_v4_5.md)。`v4` 与 `v3` 作为历史参考保留。
+设计文档入口见 [design/README.md](design/README.md)。核心精神独立放在 [design/core-principles.md](design/core-principles.md)，当前设计按主题拆分在 [design/current/](design/current/overview.md)，`v3` / `v4` / `v4.5` 历史版本保留在 [design/evolution/](design/evolution/README.md)。
 
 ## v4 条目模型
 
@@ -118,13 +119,24 @@ skills/
   health/
 ```
 
-## 启动 MCP Server
+## 启动平台服务
 
 ```bash
 export SEDIMENT_KB_PATH=/path/to/your/knowledge-base
 export SEDIMENT_CLI=claude
 uv run sediment-server
+uv run sediment-worker
 ```
+
+Server 会同时提供三类入口：
+
+- `MCP`：SSE / JSON-RPC
+- `Portal`：`/portal`
+- `Admin`：`/admin`
+
+Worker 是默认的 `ingest` / `tidy` 队列执行路径。
+如果只是本地单进程调试，也可以设置 `SEDIMENT_RUN_JOBS_IN_PROCESS=1`
+只启动 server，但生产部署建议保持 worker 独立运行。
 
 环境变量：
 
@@ -135,6 +147,78 @@ uv run sediment-server
 | `SEDIMENT_HOST` | `0.0.0.0` | HTTP 绑定地址 |
 | `SEDIMENT_PORT` | `8000` | HTTP 端口 |
 | `SEDIMENT_SSE_PATH` | `/sediment/` | SSE 端点路径 |
+| `SEDIMENT_ADMIN_TOKEN` | 空 | `/admin` 和管理接口使用的可选 Bearer token |
+| `SEDIMENT_SESSION_SECRET` | `SEDIMENT_ADMIN_TOKEN` | Admin Web session cookie 的签名密钥 |
+| `SEDIMENT_ADMIN_SESSION_COOKIE_NAME` | `sediment_admin_session` | Admin session cookie 名称 |
+| `SEDIMENT_ADMIN_SESSION_TTL_SECONDS` | `43200` | Admin session 有效期，单位秒 |
+| `SEDIMENT_SECURE_COOKIES` | `0` | 是否把 Admin cookie 标记为 `Secure`，HTTPS 下建议开启 |
+| `SEDIMENT_TRUST_PROXY_HEADERS` | `0` | 是否信任 `X-Forwarded-For` / `X-Real-IP` |
+| `SEDIMENT_TRUSTED_PROXY_CIDRS` | 空 | 允许提供真实客户端 IP 的反向代理 CIDR 列表 |
+| `SEDIMENT_SUBMISSION_RATE_LIMIT_COUNT` | `1` | 单个 IP 在窗口内允许的最大提交次数 |
+| `SEDIMENT_SUBMISSION_RATE_LIMIT_WINDOW_SECONDS` | `60` | 提交限流窗口，单位秒 |
+| `SEDIMENT_SUBMISSION_DEDUPE_WINDOW_SECONDS` | `86400` | 完全重复提交的去重窗口，单位秒 |
+| `SEDIMENT_MAX_TEXT_SUBMISSION_CHARS` | `20000` | 纯文本提交大小上限 |
+| `SEDIMENT_MAX_UPLOAD_BYTES` | `10485760` | 上传文档大小上限 |
+| `SEDIMENT_STATE_DIR` | `.sediment_state/` | 平台状态目录，包含 DB、上传文件和 worker 工作区 |
+| `SEDIMENT_DB_PATH` | `.sediment_state/platform.db` | 提交、任务、审核、审计日志的 SQLite 路径 |
+| `SEDIMENT_UPLOADS_DIR` | `.sediment_state/uploads/` | 上传文档存储目录 |
+| `SEDIMENT_WORKSPACES_DIR` | `.sediment_state/workspaces/` | ingest / tidy 隔离工作区 |
+| `SEDIMENT_JOB_MAX_ATTEMPTS` | `3` | worker 自动重试上限 |
+| `SEDIMENT_JOB_STALE_AFTER_SECONDS` | `900` | 运行中任务超过该心跳超时后会被回收 |
+| `SEDIMENT_RUN_JOBS_IN_PROCESS` | `0` | 是否在 server 进程内直接执行任务，而不是交给独立 worker |
+
+## Portal 与 Admin
+
+启动 server 后可访问：
+
+- Portal: [http://localhost:8000/portal](http://localhost:8000/portal)
+- Admin: [http://localhost:8000/admin](http://localhost:8000/admin)
+- Health: [http://localhost:8000/healthz](http://localhost:8000/healthz)
+
+Portal 支持：
+
+- 全文搜索
+- 图谱浏览
+- 查看条目与索引全文
+- 提交纯文本概念、经验、意见和文档到缓冲区
+
+Admin 支持：
+
+- 通过同站签名 session cookie 登录后台
+- 常驻 health issue 队列
+- 查看系统状态、队列模式和运行时限制
+- 提交缓冲区 triage
+- ingest / tidy 排队、运行与待审结果查看
+- 任务取消、重试与陈旧任务恢复可见性
+- patch 批准 / 拒绝
+- 带校验的在线 Markdown 编辑
+- 最近审计日志
+
+## 对外接口
+
+稳定读工具仍然保持：
+
+- `knowledge_list`
+- `knowledge_read`
+- `knowledge_ask`
+
+新增平台工具包括：
+
+- `knowledge_submit_text`
+- `knowledge_submit_document`
+- `knowledge_health_report`
+- `knowledge_submission_queue`
+- `knowledge_job_status`
+- `knowledge_review_decide`
+
+额外的 REST / Admin 入口包括：
+
+- `GET /healthz`
+- `GET|POST|DELETE /api/admin/session`
+- `GET /api/admin/system/status`
+- `GET /api/admin/audit`
+- `POST /api/admin/jobs/{id}/retry`
+- `POST /api/admin/jobs/{id}/cancel`
 
 ## 使用知识库
 
@@ -142,6 +226,8 @@ uv run sediment-server
 - **巡检**：运行 `uv run python skills/health/scripts/health_check.py knowledge-base`
 - **摄入（实验性）**：把 `skills/ingest/SKILL.md` 作为工作流说明，输入原始材料
 - **整理（实验性）**：把 `skills/tidy/SKILL.md` 作为工作流说明，修复断链、坏条目和可提升 placeholder
+- **Portal 提交**：把文字或文档送进缓冲区，等待 committer 审核
+- **Admin 审核**：在 Web 管理台中批准 / 拒绝 ingest 与 tidy 结果
 
 `testcase/` 下的 benchmark 脚本用于内部评估，不属于 Sediment 公共运行时接口的一部分。
 
@@ -172,10 +258,39 @@ uv run pytest
 uv build
 ```
 
+本地端到端调试建议：
+
+```bash
+export SEDIMENT_KB_PATH=/absolute/path/to/knowledge-base
+export SEDIMENT_CLI=claude
+export SEDIMENT_RUN_JOBS_IN_PROCESS=0
+uv run sediment-server
+uv run sediment-worker
+```
+
+测试里会用 `tests/fixtures/mock_workflow_cli.py` 模拟 Agent Runner，
+但真实部署应把 `SEDIMENT_CLI` 指向实际可用的本地编码 CLI。
+
 开发时请保持：
 - 来源只放 frontmatter `sources`，不要写成 `[[wikilink]]`
 - provenance 不得生成知识图谱边
 - MCP 工具名和 `knowledge_ask` 返回 schema 不变
+- 除受控后台编辑外，写路径应尽量走缓冲区与审核流
+
+## 生产硬化建议
+
+最低部署基线建议：
+
+- 设置 `SEDIMENT_ADMIN_TOKEN`
+- 设置 `SEDIMENT_SESSION_SECRET`
+- 在 HTTPS 下开启 `SEDIMENT_SECURE_COOKIES=1`
+- 把 `sediment-server` 和 `sediment-worker` 分开部署
+- 如果前面有反向代理，开启 `SEDIMENT_TRUST_PROXY_HEADERS=1`，并限制 `SEDIMENT_TRUSTED_PROXY_CIDRS`
+- 监控 `/healthz` 和 Admin 后台里的 system status 面板
+
+当前 worker 会持续写入 job heartbeat，超过配置超时后会自动回收陈旧
+`running` 任务，同时支持显式 cancel / retry，并把 session、入队、审核、
+写回等动作写入结构化审计日志。
 
 ## 许可证
 

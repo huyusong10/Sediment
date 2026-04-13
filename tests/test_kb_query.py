@@ -13,7 +13,11 @@ from skills.explore.scripts.kb_query import (
     validate_answer,
     validate_entry,
 )
-from skills.tidy.scripts.tidy_utils import collect_ref_contexts, find_dangling_links
+from skills.tidy.scripts.tidy_utils import (
+    collect_ref_contexts,
+    find_dangling_links,
+    plan_index_repairs,
+)
 
 
 def _write(path: Path, content: str) -> None:
@@ -411,6 +415,7 @@ def test_audit_kb_reports_v4_quality_and_concept_gaps(tmp_path: Path) -> None:
     assert report["index_count"] >= 3
     assert report["root_index_present"] is True
     assert report["unknown_index_link_count"] == 0
+    assert report["invalid_index_count"] == 0
 
 
 def test_audit_kb_reports_invalid_placeholder_and_provenance_noise(tmp_path: Path) -> None:
@@ -541,4 +546,77 @@ def test_prepare_explore_context_prefers_index_routed_entries(tmp_path: Path) ->
     context = prepare_explore_context("泄洪前做什么检查？", inventory_data=data)
 
     assert context["index_routing"]["selected_indexes"]
+    assert context["index_routing"]["selected_indexes"][0]["name"] == "index.root"
     assert any("index" in item["matched_fields"] for item in context["initial_shortlist"])
+
+
+def test_audit_kb_reports_invalid_index_contracts(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    _write(
+        kb_path / "indexes" / "index.bad.md",
+        """
+        ---
+        kind: note
+        segment: wrong
+        last_tidied_at: 2026/04/13
+        entry_count: 1
+        estimated_tokens: 64
+        ---
+        # 错误索引
+
+        这个索引契约是坏的。
+
+        - [[热备份]]
+        """,
+    )
+
+    report = audit_kb(kb_path)
+
+    assert report["invalid_index_count"] >= 1
+    assert "index.bad" in report["invalid_indexes"]
+
+
+def test_plan_index_repairs_surfaces_index_governance_actions(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    _write(
+        kb_path / "indexes" / "index.bad.md",
+        """
+        ---
+        kind: note
+        segment: wrong
+        ---
+        # 错误索引
+
+        错误入口。
+
+        - [[不存在的条目]]
+        """,
+    )
+    _write(
+        kb_path / "entries" / "未覆盖条目.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - extra.md
+        ---
+        # 未覆盖条目
+
+        这是一个没有被索引覆盖的概念。
+
+        ## Scope
+        用于验证索引覆盖修复队列。
+
+        ## Related
+        - [[热备份]] - 只是一个连接
+        """,
+    )
+
+    actions = plan_index_repairs(kb_path)
+    action_names = {item["action"] for item in actions}
+
+    assert "repair_index_contract" in action_names
+    assert "repair_index_link" in action_names
+    assert "cover_entry_from_index" in action_names

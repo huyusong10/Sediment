@@ -85,9 +85,13 @@ def print_report(report: dict) -> None:
     print("------------")
     print(f"Indexes:             {report['index_count']}")
     print(f"Root index present:  {report['root_index_present']}")
+    print(f"Invalid indexes:     {report['invalid_index_count']}")
     print(f"Overloaded indexes:  {report['overloaded_index_count']}")
     print(f"Unknown index links: {report['unknown_index_link_count']}")
     print(f"Uncovered entries:   {report['uncovered_formal_entry_count']}")
+    if report["invalid_indexes"]:
+        for name in report["invalid_indexes"][:5]:
+            print(f"  - invalid: {name}")
     if report["overloaded_indexes"]:
         for item in report["overloaded_indexes"][:5]:
             print(
@@ -140,6 +144,8 @@ def build_recommendations(report: dict) -> list[str]:
         recommendations.append(
             "Run tidy index refactor: split or merge oversized index segments."
         )
+    if report["invalid_index_count"]:
+        recommendations.append("Repair invalid index contracts before relying on index routing.")
     if report["unknown_index_link_count"]:
         recommendations.append("Repair broken index links to keep index routing reliable.")
     if report["uncovered_formal_entry_count"]:

@@ -26,6 +26,7 @@ from mcp import types
 from mcp.server import Server
 
 from mcp_server.i18n import tr
+from mcp_server.kb import resolve_kb_document_path
 from mcp_server.llm_cli import build_cli_command
 from skills.explore.scripts.kb_query import inventory, prepare_explore_context, validate_answer
 
@@ -51,8 +52,54 @@ DEFAULT_CONTRACT = {
     'max_context_entries': 12,
     'max_snippets_per_entry': 2,
     'snippet_char_limit': 320,
-    'cli_timeout_seconds': 90,
+    'cli_timeout_seconds': 150,
 }
+
+_EXPLORE_JSON_SCHEMA = json.dumps(
+    {
+        'type': 'object',
+        'additionalProperties': False,
+        'properties': {
+            'answer': {'type': 'string'},
+            'sources': {'type': 'array', 'items': {'type': 'string'}},
+            'confidence': {'type': 'string', 'enum': ['high', 'medium', 'low']},
+            'exploration_summary': {
+                'type': 'object',
+                'additionalProperties': False,
+                'properties': {
+                    'entries_scanned': {'type': 'integer'},
+                    'entries_read': {'type': 'integer'},
+                    'links_followed': {'type': 'integer'},
+                    'mode': {'type': 'string'},
+                },
+                'required': ['entries_scanned', 'entries_read', 'links_followed', 'mode'],
+            },
+            'gaps': {'type': 'array', 'items': {'type': 'string'}},
+            'contradictions': {
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'properties': {
+                        'entries': {'type': 'array', 'items': {'type': 'string'}},
+                        'conflict': {'type': 'string'},
+                        'analysis': {'type': 'string'},
+                    },
+                    'required': ['entries', 'conflict', 'analysis'],
+                },
+            },
+        },
+        'required': [
+            'answer',
+            'sources',
+            'confidence',
+            'exploration_summary',
+            'gaps',
+            'contradictions',
+        ],
+    },
+    ensure_ascii=False,
+)
 
 # ---------------------------------------------------------------------------
 # Server instance
@@ -140,20 +187,10 @@ async def _dispatch_tool(name: str, arguments: dict):
 
 async def _knowledge_list() -> list[str]:
     """
-    扫描 KB_PATH/entries/ 和 KB_PATH/placeholders/ 下所有 .md 文件。
-    返回文件名列表，去掉 .md 后缀，不含路径前缀。
-    两个目录的结果合并，去重，按字母排序。
+    返回 KB 中所有知识文档名称，包含 entries / placeholders / indexes。
     """
-    root = KB_PATH
-    names: set[str] = set()
-
-    for subdir in ('entries', 'placeholders'):
-        d = root / subdir
-        if d.is_dir():
-            for md_file in d.glob('*.md'):
-                if md_file.stem != '.gitkeep':
-                    names.add(md_file.stem)
-
+    data = inventory(KB_PATH)
+    names = set(data["entries"]) | set(data["placeholders"]) | set(data.get("indexes", []))
     return sorted(names)
 
 
@@ -164,9 +201,7 @@ async def _knowledge_list() -> list[str]:
 
 async def _knowledge_read(filename: str) -> str:
     """
-    先在 KB_PATH/entries/{filename}.md 查找。
-    不存在则在 KB_PATH/placeholders/{filename}.md 查找。
-    两处都不存在则返回 ERROR 字符串。
+    先查 formal / placeholder entries，再查 root index 与 indexes/。
     防路径穿越：filename 中含 / 或 .. 时返回错误。
     """
     # Security: reject path traversal attempts
@@ -176,15 +211,9 @@ async def _knowledge_read(filename: str) -> str:
     if not filename:
         return "ERROR: filename must not be empty."
 
-    root = KB_PATH
-    candidates = [
-        root / 'entries' / f'{filename}.md',
-        root / 'placeholders' / f'{filename}.md',
-    ]
-
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_file():
-            return candidate.read_text(encoding='utf-8')
+    candidate = resolve_kb_document_path(KB_PATH, filename)
+    if candidate is not None:
+        return candidate.read_text(encoding='utf-8')
 
     return f"ERROR: Entry '{filename}' not found in knowledge base."
 
@@ -331,9 +360,11 @@ def _build_explore_prompt(
 
     preamble = [
         'You are the internal Sediment explore runtime.',
-        'Use only the prepared KB context in this prompt. Do not read raw materials. '
-        'Do not invent sources. Placeholder entries are weak evidence and must not be the '
-        'only basis of an answer.',
+        'Treat the prepared KB context as the default starting path derived from root-first '
+        'index routing. If your runtime supports white-box KB search, you may inspect '
+        'additional KB indexes or entry files to verify or deepen the answer. Do not read '
+        'raw materials outside the KB. Do not invent sources. Placeholder entries are weak '
+        'evidence and must not be the only basis of an answer.',
         'Return JSON only. No prose before or after the JSON object.',
     ]
     if retry_reason:
@@ -482,6 +513,7 @@ def _build_cli_command(
         prompt_file=prompt_file,
         payload_file=payload_file,
         skill_file=skill_file,
+        extra_args=['--json-schema', _EXPLORE_JSON_SCHEMA],
     )
 
 

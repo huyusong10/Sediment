@@ -405,8 +405,10 @@ def prepare_explore_context(
         },
         "initial_shortlist": seeds,
         "index_routing": {
-            "strategy": "index-first-with-open-search",
-            "root_index_present": "index.root" in set(data.get("indexes", [])),
+            "strategy": "root-first-with-open-search",
+            "root_index_present": any(
+                item.get("is_root") for item in data.get("index_docs", {}).values()
+            ),
             "selected_indexes": routed_indexes,
             "preferred_entries": preferred_entries,
         },
@@ -426,47 +428,45 @@ def route_indexes(
     if not index_docs:
         return []
 
+    root_name = _root_index_name(index_docs)
+    if root_name is None:
+        return _score_all_indexes(question, index_docs, limit=limit)
+
     terms = _extract_terms(question)
-    lowered_question = question.lower()
-    results = []
-    for name, item in index_docs.items():
-        score = 0
-        reasons = []
-        haystacks = [
-            name.lower(),
-            str(item.get("title", "")).lower(),
-            str(item.get("summary", "")).lower(),
-        ]
-        if name == "index.root":
-            score += 10
-            reasons.append("root bootstrap")
-        for term in terms:
-            term_lower = term.lower()
-            if any(term_lower in bucket for bucket in haystacks):
-                score += 22
-                reasons.append(f"term match: {term}")
-            linked_hits = sum(
-                1 for linked in item.get("links", []) if term_lower in linked.lower()
-            )
-            if linked_hits:
-                score += 8 * linked_hits
-                reasons.append(f"link hit: {term} x{linked_hits}")
-        if score <= 0 and any(term in lowered_question for term in (name.lower(),)):
-            score += 12
-            reasons.append("name mention")
-        if score <= 0:
-            continue
-        results.append(
+    routed = [
+        {
+            "name": root_name,
+            "score": 10,
+            "selection_reason": "root-first bootstrap",
+            "links": index_docs[root_name].get("links", []),
+            "segment": index_docs[root_name].get("segment", root_name),
+        }
+    ]
+
+    queued_index_names = [
+        target
+        for target in index_docs[root_name].get("links", [])
+        if target in index_docs and target != root_name
+    ]
+    scored_segments = _score_index_candidates(
+        queued_index_names,
+        index_docs,
+        terms,
+        question.lower(),
+    )
+    if not scored_segments and queued_index_names:
+        scored_segments = [
             {
                 "name": name,
-                "score": score,
-                "selection_reason": "; ".join(dict.fromkeys(reasons)) or "heuristic match",
-                "links": item.get("links", []),
-                "segment": item.get("segment", name),
+                "score": 1,
+                "selection_reason": "root segment fallback",
+                "links": index_docs[name].get("links", []),
+                "segment": index_docs[name].get("segment", name),
             }
-        )
-    results.sort(key=lambda value: (-value["score"], value["name"]))
-    return results[:limit]
+            for name in queued_index_names
+        ]
+    routed.extend(scored_segments[: max(limit - 1, 0)])
+    return routed[:limit]
 
 
 def _preferred_entries_from_indexes(
@@ -488,6 +488,68 @@ def _preferred_entries_from_indexes(
                 if nested in known_entries and nested not in preferred:
                     preferred.append(nested)
     return preferred
+
+
+def _root_index_name(index_docs: dict[str, dict[str, Any]]) -> str | None:
+    for name, item in index_docs.items():
+        if item.get("is_root"):
+            return name
+    return None
+
+
+def _score_all_indexes(
+    question: str,
+    index_docs: dict[str, dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    terms = _extract_terms(question)
+    return _score_index_candidates(index_docs.keys(), index_docs, terms, question.lower())[:limit]
+
+
+def _score_index_candidates(
+    candidate_names,
+    index_docs: dict[str, dict[str, Any]],
+    terms: list[str],
+    lowered_question: str,
+) -> list[dict[str, Any]]:
+    results = []
+    for name in candidate_names:
+        item = index_docs[name]
+        score = 0
+        reasons = []
+        haystacks = [
+            name.lower(),
+            str(item.get("title", "")).lower(),
+            str(item.get("summary", "")).lower(),
+        ]
+        for term in terms:
+            term_lower = term.lower()
+            if any(term_lower in bucket for bucket in haystacks):
+                score += 22
+                reasons.append(f"term match: {term}")
+            linked_hits = sum(
+                1 for linked in item.get("links", []) if term_lower in linked.lower()
+            )
+            if linked_hits:
+                score += 8 * linked_hits
+                reasons.append(f"link hit: {term} x{linked_hits}")
+        if score <= 0 and name.lower() in lowered_question:
+            score += 12
+            reasons.append("name mention")
+        if score <= 0:
+            continue
+        results.append(
+            {
+                "name": name,
+                "score": score,
+                "selection_reason": "; ".join(dict.fromkeys(reasons)) or "heuristic match",
+                "links": item.get("links", []),
+                "segment": item.get("segment", name),
+            }
+        )
+    results.sort(key=lambda value: (-value["score"], value["name"]))
+    return results
 
 
 def _entry_objects(data: dict[str, Any]) -> dict[str, ParsedEntry]:

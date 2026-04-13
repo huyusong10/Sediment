@@ -53,6 +53,40 @@ def _build_project(tmp_path: Path) -> tuple[Path, Path]:
         - [[回音壁]] - 观测同步
         """,
     )
+    _write(
+        kb_path / "index.root.md",
+        """
+        ---
+        kind: index
+        segment: root
+        last_tidied_at: 2026-04-13
+        entry_count: 1
+        estimated_tokens: 64
+        ---
+        # 索引入口
+
+        运维导航入口。
+
+        - [[index.ops]]
+        """,
+    )
+    _write(
+        kb_path / "indexes" / "index.ops.md",
+        """
+        ---
+        kind: index
+        segment: ops
+        last_tidied_at: 2026-04-13
+        entry_count: 1
+        estimated_tokens: 64
+        ---
+        # 运维索引
+
+        热备份相关入口。
+
+        - [[热备份]]
+        """,
+    )
 
     return project_root, kb_path
 
@@ -153,8 +187,21 @@ def test_direct_jsonrpc_malformed_body_returns_error_payload() -> None:
 def test_tool_definitions_follow_locale(monkeypatch) -> None:
     monkeypatch.setenv("SEDIMENT_LOCALE", "en")
     tools_en = server._tool_definitions()
-    assert "Return all knowledge entry names" in tools_en[0].description
+    assert "Return all knowledge document names" in tools_en[0].description
 
     monkeypatch.setenv("SEDIMENT_LOCALE", "zh")
     tools_zh = server._tool_definitions()
-    assert "返回知识库中所有条目的名称列表" in tools_zh[0].description
+    assert "返回知识库中所有知识文档的名称列表" in tools_zh[0].description
+
+
+def test_white_box_tools_expose_indexes(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = _build_project(tmp_path)
+    monkeypatch.setattr(server, "_PROJECT_ROOT", project_root)
+    monkeypatch.setattr(server, "KB_PATH", kb_path)
+
+    names = asyncio.run(server._knowledge_list())
+    assert "index.root" in names
+    assert "index.ops" in names
+
+    content = asyncio.run(server._knowledge_read("index.root"))
+    assert "# 索引入口" in content

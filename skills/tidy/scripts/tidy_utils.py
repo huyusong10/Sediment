@@ -16,6 +16,7 @@ from mcp_server.kb import (
     graph_links_from_text,
     graph_relevant_text,
     normalize_section_name,
+    plan_index_repairs,
     split_frontmatter,
     split_sections,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "graph_links_from_text",
     "graph_relevant_text",
     "normalize_section_name",
+    "plan_index_repairs",
     "split_frontmatter",
     "split_sections",
 ]

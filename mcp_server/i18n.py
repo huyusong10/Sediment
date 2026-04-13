@@ -10,16 +10,16 @@ SUPPORTED_LOCALES = {"en", "zh"}
 _MESSAGES: dict[str, dict[str, str]] = {
     "en": {
         "tool.knowledge_list.description": (
-            "Return all knowledge entry names (without .md suffix). "
-            "Includes .md files under entries/ and placeholders/. "
+            "Return all knowledge document names (without .md suffix). "
+            "Includes entries, placeholders, and index files. "
             "Useful as the first step for agentic exploration."
         ),
         "tool.knowledge_read.description": (
-            "Read full Markdown for a knowledge entry by filename (without .md suffix). "
-            "Searches entries/ first, then placeholders/. "
+            "Read full Markdown for a knowledge document by filename (without .md suffix). "
+            "Searches entries/, placeholders/, root index, then indexes/. "
             "Returns an error string instead of raising exceptions when not found."
         ),
-        "tool.knowledge_read.filename": "Entry name without .md suffix",
+        "tool.knowledge_read.filename": "Entry or index name without .md suffix",
         "tool.knowledge_ask.description": (
             "Ask a natural-language question against the KB via explore runtime. "
             "Response includes answer and sources, with confidence, exploration_summary, "
@@ -29,16 +29,17 @@ _MESSAGES: dict[str, dict[str, str]] = {
     },
     "zh": {
         "tool.knowledge_list.description": (
-            "返回知识库中所有条目的名称列表（不含 .md 后缀）。"
-            "包含 entries/ 和 placeholders/ 下的所有 .md 文件。"
+            "返回知识库中所有知识文档的名称列表（不含 .md 后缀）。"
+            "包含 entries/、placeholders/ 以及 index 文件。"
             "供调用方 Agent 推理相关文件名，是自主探索路径的入口。"
         ),
         "tool.knowledge_read.description": (
-            "读取指定知识条目的完整 Markdown 内容。"
-            "filename 不含 .md 后缀。自动在 entries/ 和 placeholders/ 中查找。"
+            "读取指定知识文档的完整 Markdown 内容。"
+            "filename 不含 .md 后缀。"
+            "自动在 entries/、placeholders/、root index 和 indexes/ 中查找。"
             "如果文件不存在，返回错误信息而非抛出异常。"
         ),
-        "tool.knowledge_read.filename": "条目名称，不含 .md 后缀",
+        "tool.knowledge_read.filename": "条目或索引名称，不含 .md 后缀",
         "tool.knowledge_ask.description": (
             "针对知识库提出自然语言问题，由内部 explore runtime 返回综合答案。"
             "返回格式至少包含 answer 和 sources，并附带 confidence、"

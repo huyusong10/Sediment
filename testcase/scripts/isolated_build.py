@@ -31,8 +31,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from mcp_server.llm_cli import build_cli_command
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -47,6 +45,8 @@ FULL_BUILD_INGEST_BATCHES = 3
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from mcp_server.llm_cli import build_cli_command
 
 
 # ---------------------------------------------------------------------------

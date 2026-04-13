@@ -47,6 +47,7 @@ python -c "from skills.tidy.scripts.tidy_utils import find_dangling_links; impor
 python -c "from skills.tidy.scripts.tidy_utils import count_placeholder_refs; import json; print(json.dumps(count_placeholder_refs('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
 python -c "from skills.tidy.scripts.tidy_utils import find_orphan_entries; import json; print(json.dumps(find_orphan_entries('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
 python -c "from skills.tidy.scripts.tidy_utils import collect_ref_contexts; import json; print(json.dumps(collect_ref_contexts('$SEDIMENT_KB_PATH', 'CONCEPT_NAME'), ensure_ascii=False, indent=2))"
+python -c "from skills.tidy.scripts.tidy_utils import plan_index_repairs; import json; print(json.dumps(plan_index_repairs('$SEDIMENT_KB_PATH'), ensure_ascii=False, indent=2))"
 ```
 
 ## Main Tidy Actions
@@ -75,6 +76,15 @@ python -c "from skills.tidy.scripts.tidy_utils import collect_ref_contexts; impo
 - Use `find_orphan_entries()`.
 - Add meaningful `Related` links when the relationship is clear.
 - Do not add links just to satisfy a metric.
+
+### 5. Govern the index network
+
+- Start from `audit-kb` and `plan_index_repairs()`.
+- Keep `index.root.md` present and usable as the default navigation entry.
+- Split overloaded index segments when they exceed the configured entry/token thresholds.
+- Repair broken index links and add coverage for formal entries that are not reachable from any index.
+- Consider merges only for low-density, highly overlapping non-root indexes.
+- Do not rewrite factual entry bodies when doing index refactors; only repair navigation structure.
 
 ## Interaction Rule
 

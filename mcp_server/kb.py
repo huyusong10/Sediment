@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ VALID_STATUSES = {"fact", "inferred", "disputed"}
 LINK_PATTERN = re.compile(r"\[\[([^\]]+)\]\]")
 TITLE_PATTERN = re.compile(r"^#\s+(.+?)\s*$")
 SECTION_PATTERN = re.compile(r"^##\s+(.+?)\s*$")
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 PROVENANCE_HEADINGS = {"Source"}
 PROVENANCE_LINE_PREFIXES = (
     "> Appears in:",
@@ -40,6 +42,12 @@ SECTION_ALIASES = {
 }
 SECTION_ALIASES.update(kb_localized_aliases())
 SENTENCE_STYLE_MARKERS = kb_sentence_markers()
+INDEX_DEFAULTS = {
+    "max_entries": 120,
+    "max_tokens": 8000,
+    "root_file": "index.root.md",
+    "segment_glob": "index*.md",
+}
 
 
 @dataclass(slots=True)
@@ -158,6 +166,7 @@ class SelectedPassage:
 class ParsedIndex:
     name: str
     path: Path
+    kind: str
     title: str
     summary: str
     links: tuple[str, ...]
@@ -165,11 +174,13 @@ class ParsedIndex:
     estimated_tokens: int
     is_root: bool
     segment: str
+    last_tidied_at: str
 
     def to_record(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "path": str(self.path),
+            "kind": self.kind,
             "title": self.title,
             "summary": self.summary,
             "links": list(self.links),
@@ -177,6 +188,7 @@ class ParsedIndex:
             "estimated_tokens": self.estimated_tokens,
             "is_root": self.is_root,
             "segment": self.segment,
+            "last_tidied_at": self.last_tidied_at,
         }
 
 
@@ -267,6 +279,7 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
 
     return {
         "kb_path": str(root),
+        "index_config": index_config(),
         "entries": entries,
         "placeholders": placeholders,
         "aliases": {alias: sorted(set(names)) for alias, names in alias_map.items()},
@@ -277,6 +290,38 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
         "index_docs": {name: item.to_record() for name, item in index_objects.items()},
         "docs": docs,
     }
+
+
+def index_config() -> dict[str, Any]:
+    max_entries = _env_int("SEDIMENT_INDEX_MAX_ENTRIES", INDEX_DEFAULTS["max_entries"])
+    max_tokens = _env_int("SEDIMENT_INDEX_MAX_TOKENS", INDEX_DEFAULTS["max_tokens"])
+    root_file = os.environ.get("SEDIMENT_INDEX_ROOT_FILE", INDEX_DEFAULTS["root_file"]).strip()
+    segment_glob = os.environ.get(
+        "SEDIMENT_INDEX_SEGMENT_GLOB",
+        INDEX_DEFAULTS["segment_glob"],
+    ).strip()
+    return {
+        "max_entries": max_entries,
+        "max_tokens": max_tokens,
+        "root_file": root_file or INDEX_DEFAULTS["root_file"],
+        "segment_glob": segment_glob or INDEX_DEFAULTS["segment_glob"],
+    }
+
+
+def resolve_kb_document_path(kb_path: str | Path, filename: str) -> Path | None:
+    root = Path(kb_path)
+    candidates = [
+        root / "entries" / f"{filename}.md",
+        root / "placeholders" / f"{filename}.md",
+        root / index_config()["root_file"],
+    ]
+    for path in _index_paths(root):
+        if path.stem == filename:
+            candidates.append(path)
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file() and candidate.stem == filename:
+            return candidate
+    return None
 
 
 def parse_entry(
@@ -416,10 +461,15 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
     entry_objects: dict[str, ParsedEntry] = data["entry_objects"]
     docs = data["docs"]
     index_objects: dict[str, ParsedIndex] = data.get("index_objects", {})
+    cfg = data["index_config"]
 
     entry_validations = [
         validate_entry(path=entry.path, kind=entry.kind, name=entry.name)
         for entry in entry_objects.values()
+    ]
+    index_validations = [
+        validate_index(path=item.path)
+        for item in index_objects.values()
     ]
     formal_validations = [item for item in entry_validations if item["kind"] == "formal"]
     placeholder_validations = [item for item in entry_validations if item["kind"] == "placeholder"]
@@ -428,6 +478,7 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
     placeholder_hard_fail_entries = [
         item["name"] for item in placeholder_validations if item["hard_failures"]
     ]
+    invalid_indexes = [item["name"] for item in index_validations if item["hard_failures"]]
     missing_scope = [
         item["name"]
         for item in formal_validations
@@ -497,8 +548,9 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
     index_link_coverage: set[str] = set()
     overloaded_indexes = []
     unknown_index_links = []
+    root_index_name = Path(cfg["root_file"]).stem
     for item in index_objects.values():
-        if item.entry_count > 120 or item.estimated_tokens > 8000:
+        if item.entry_count > cfg["max_entries"] or item.estimated_tokens > cfg["max_tokens"]:
             overloaded_indexes.append(
                 {
                     "name": item.name,
@@ -509,12 +561,13 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
         for target in item.links:
             if target in formal_names:
                 index_link_coverage.add(target)
-            elif target not in placeholder_names and target not in known_indexes:
+            elif target in placeholder_names or target not in known_indexes:
                 unknown_index_links.append({"index": item.name, "link": target})
     uncovered_formal = sorted(formal_names - index_link_coverage)
 
     return {
         "kb_path": str(root),
+        "index_config": cfg,
         "formal_entry_count": len(data["entries"]),
         "concept_entry_count": sum(
             1 for name in data["entries"] if docs[name]["entry_type"] == "concept"
@@ -563,8 +616,11 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
             if item["hard_failures"]
         ][:10],
         "entry_validation": entry_validations,
+        "index_validation": index_validations,
         "index_count": len(index_objects),
-        "root_index_present": "index.root" in index_objects,
+        "invalid_index_count": len(invalid_indexes),
+        "invalid_indexes": sorted(invalid_indexes),
+        "root_index_present": root_index_name in index_objects,
         "overloaded_index_count": len(overloaded_indexes),
         "overloaded_indexes": sorted(overloaded_indexes, key=lambda item: item["name"]),
         "uncovered_formal_entry_count": len(uncovered_formal),
@@ -572,6 +628,74 @@ def audit_kb(kb_path: str | Path) -> dict[str, Any]:
         "unknown_index_link_count": len(unknown_index_links),
         "unknown_index_links": unknown_index_links[:100],
     }
+
+
+def plan_index_repairs(kb_path: str | Path) -> list[dict[str, Any]]:
+    root = Path(kb_path)
+    data = inventory(root)
+    report = audit_kb(root)
+    index_docs: dict[str, dict[str, Any]] = data.get("index_docs", {})
+    actions: list[dict[str, Any]] = []
+
+    if not report["root_index_present"]:
+        actions.append(
+            {
+                "action": "create_root_index",
+                "target": Path(data["index_config"]["root_file"]).stem,
+                "reason": "root index is missing",
+                "priority": "high",
+            }
+        )
+
+    for name in report["invalid_indexes"]:
+        actions.append(
+            {
+                "action": "repair_index_contract",
+                "target": name,
+                "reason": "index frontmatter or metadata is invalid",
+                "priority": "high",
+            }
+        )
+
+    for item in report["overloaded_indexes"]:
+        actions.append(
+            {
+                "action": "split_index",
+                "target": item["name"],
+                "reason": (
+                    f"index exceeds threshold "
+                    f"(entries={item['entry_count']}, tokens={item['estimated_tokens']})"
+                ),
+                "priority": "medium",
+            }
+        )
+
+    for item in report["unknown_index_links"]:
+        actions.append(
+            {
+                "action": "repair_index_link",
+                "target": item["index"],
+                "link": item["link"],
+                "reason": "index references a missing, placeholder, or unknown target",
+                "priority": "high",
+            }
+        )
+
+    for name in report["uncovered_formal_entries"]:
+        actions.append(
+            {
+                "action": "cover_entry_from_index",
+                "target": name,
+                "reason": "formal entry is not reachable from any index",
+                "priority": "medium",
+            }
+        )
+
+    actions.extend(_merge_candidate_actions(index_docs))
+    actions.sort(
+        key=lambda item: (_priority_rank(item["priority"]), item["action"], item["target"])
+    )
+    return actions
 
 
 def find_dangling_links(kb_path: str) -> list[dict[str, Any]]:
@@ -594,6 +718,40 @@ def find_dangling_links(kb_path: str) -> list[dict[str, Any]]:
                         }
                     )
     return results
+
+
+def _merge_candidate_actions(index_docs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    names = sorted(name for name, item in index_docs.items() if not item.get("is_root"))
+    actions = []
+    for idx, left in enumerate(names):
+        left_links = set(index_docs[left].get("links", []))
+        if not left_links or len(left_links) > 3:
+            continue
+        for right in names[idx + 1 :]:
+            right_links = set(index_docs[right].get("links", []))
+            if not right_links or len(right_links) > 3:
+                continue
+            overlap = left_links & right_links
+            union = left_links | right_links
+            if len(overlap) < 2:
+                continue
+            if len(union) == 0:
+                continue
+            jaccard = len(overlap) / len(union)
+            if jaccard < 0.6:
+                continue
+            actions.append(
+                {
+                    "action": "merge_index_candidates",
+                    "target": f"{left}+{right}",
+                    "reason": (
+                        "two low-density indexes have high overlap "
+                        f"(jaccard={jaccard:.2f})"
+                    ),
+                    "priority": "low",
+                }
+            )
+    return actions
 
 
 def count_placeholder_refs(kb_path: str) -> list[dict[str, Any]]:
@@ -714,12 +872,13 @@ def _split_body_structure(body: str, *, kind: str = "formal") -> dict[str, Any]:
 
 def _index_paths(root: Path) -> list[Path]:
     candidates = []
-    root_index = root / "index.root.md"
+    cfg = index_config()
+    root_index = root / cfg["root_file"]
     if root_index.is_file():
         candidates.append(root_index)
     indexes_dir = root / "indexes"
     if indexes_dir.is_dir():
-        candidates.extend(sorted(indexes_dir.glob("index*.md")))
+        candidates.extend(sorted(indexes_dir.glob(cfg["segment_glob"])))
     return candidates
 
 
@@ -732,30 +891,86 @@ def parse_index(path: str | Path) -> ParsedIndex:
     title = title_match.group(1).strip() if title_match else source_path.stem
     summary = _extract_summary(preamble, kind="formal")
     links = tuple(extract_wikilinks(body))
+    kind = str(frontmatter.get("kind", "")).strip()
     raw_entry_count = frontmatter.get("entry_count")
     raw_estimated_tokens = frontmatter.get("estimated_tokens")
     segment = str(frontmatter.get("segment", source_path.stem)).strip() or source_path.stem
+    last_tidied_at = str(frontmatter.get("last_tidied_at", "")).strip()
     entry_count = int(raw_entry_count) if isinstance(raw_entry_count, int) else len(set(links))
     estimated_tokens = (
         int(raw_estimated_tokens)
         if isinstance(raw_estimated_tokens, int)
         else _estimate_tokens(text)
     )
+    root_name = Path(index_config()["root_file"]).stem
     return ParsedIndex(
         name=source_path.stem,
         path=source_path,
+        kind=kind,
         title=title,
         summary=summary,
         links=links,
         entry_count=entry_count,
         estimated_tokens=estimated_tokens,
-        is_root=source_path.stem == "index.root",
+        is_root=source_path.stem == root_name,
         segment=segment,
+        last_tidied_at=last_tidied_at,
     )
+
+
+def validate_index(path: str | Path) -> dict[str, Any]:
+    item = parse_index(path)
+    hard_failures = []
+    warnings = []
+
+    if item.kind != "index":
+        hard_failures.append("index frontmatter.kind must be 'index'")
+    if not item.segment:
+        hard_failures.append("index must declare a non-empty frontmatter.segment")
+    if item.is_root and item.segment != "root":
+        hard_failures.append("root index must use frontmatter.segment='root'")
+    if item.last_tidied_at and not DATE_PATTERN.fullmatch(item.last_tidied_at):
+        hard_failures.append("index last_tidied_at must use YYYY-MM-DD format")
+    if item.entry_count < 0:
+        hard_failures.append("index entry_count must be >= 0")
+    if item.estimated_tokens <= 0:
+        hard_failures.append("index estimated_tokens must be > 0")
+    if not item.summary:
+        warnings.append("index should include a short summary/purpose statement")
+    if not item.links:
+        warnings.append("index should link to at least one segment or formal entry")
+
+    return {
+        "name": item.name,
+        "valid": not hard_failures,
+        "hard_failures": hard_failures,
+        "warnings": warnings,
+        "metrics": {
+            "entry_count": item.entry_count,
+            "estimated_tokens": item.estimated_tokens,
+            "link_count": len(item.links),
+            "is_root": item.is_root,
+        },
+    }
 
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _priority_rank(priority: str) -> int:
+    return {"high": 0, "medium": 1, "low": 2}.get(priority, 3)
 
 
 def _infer_entry_type(

@@ -81,6 +81,20 @@ def print_report(report: dict) -> None:
         f"low={report['placeholder_ref_buckets']['low']}"
     )
     print()
+    print("INDEX HEALTH")
+    print("------------")
+    print(f"Indexes:             {report['index_count']}")
+    print(f"Root index present:  {report['root_index_present']}")
+    print(f"Overloaded indexes:  {report['overloaded_index_count']}")
+    print(f"Unknown index links: {report['unknown_index_link_count']}")
+    print(f"Uncovered entries:   {report['uncovered_formal_entry_count']}")
+    if report["overloaded_indexes"]:
+        for item in report["overloaded_indexes"][:5]:
+            print(
+                f"  - {item['name']} (entries={item['entry_count']}, "
+                f"tokens={item['estimated_tokens']})"
+            )
+    print()
     print("CONCEPT COVERAGE")
     print("----------------")
     print(f"Promotable placeholders: {report['promotable_placeholder_count']}")
@@ -121,6 +135,16 @@ def build_recommendations(report: dict) -> list[str]:
     if report["provenance_contamination_count"]:
         recommendations.append(
             "Clean provenance-only wikilinks so sources stay metadata instead of graph edges."
+        )
+    if report["overloaded_index_count"]:
+        recommendations.append(
+            "Run tidy index refactor: split or merge oversized index segments."
+        )
+    if report["unknown_index_link_count"]:
+        recommendations.append("Repair broken index links to keep index routing reliable.")
+    if report["uncovered_formal_entry_count"]:
+        recommendations.append(
+            "Expand index coverage so formal entries can be reached from index navigation."
         )
     if not recommendations:
         recommendations.append("Knowledge base looks healthy. Continue ingesting documents.")

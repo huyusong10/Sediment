@@ -7,6 +7,7 @@ from skills.explore.scripts.kb_query import (
     audit_kb,
     inventory,
     neighbors,
+    prepare_explore_context,
     shortlist,
     snippets,
     validate_answer,
@@ -197,6 +198,52 @@ def _build_sample_kb(root: Path) -> Path:
         """,
     )
 
+    _write(
+        kb_path / "index.root.md",
+        """
+        ---
+        kind: index
+        segment: root
+        ---
+        # 索引入口
+
+        这是全局导航入口，优先跳转到子索引。
+
+        - [[index.ops]]
+        - [[index.darkflow]]
+        """,
+    )
+    _write(
+        kb_path / "indexes" / "index.ops.md",
+        """
+        ---
+        kind: index
+        segment: ops
+        ---
+        # 运维索引
+
+        聚焦切流、泄洪和热备份策略。
+
+        - [[热备份]]
+        - [[泄洪前先确认热备份]]
+        """,
+    )
+    _write(
+        kb_path / "indexes" / "index.darkflow.md",
+        """
+        ---
+        kind: index
+        segment: darkflow
+        ---
+        # 暗流索引
+
+        聚焦暗流定位与回放。
+
+        - [[暗流检测]]
+        - [[暗流回放]]
+        """,
+    )
+
     return kb_path
 
 
@@ -209,6 +256,8 @@ def test_inventory_shortlist_neighbors_and_snippets(tmp_path: Path) -> None:
     assert data["docs"]["热备份"]["entry_type"] == "concept"
     assert data["docs"]["泄洪前先确认热备份"]["entry_type"] == "lesson"
     assert data["docs"]["热备份"]["summary"] == "热备份是在主链路失效前准备好的可接管路径能力。"
+    assert "index.root" in data["indexes"]
+    assert "index.ops" in data["indexes"]
 
     ranked = shortlist("什么是热切换？", inventory_data=data, limit=3)
     assert ranked[0]["name"] == "热备份"
@@ -340,6 +389,9 @@ def test_audit_kb_reports_v4_quality_and_concept_gaps(tmp_path: Path) -> None:
     assert any(item["name"] == "暗流" for item in report["promotable_placeholders"])
     assert report["canonical_gap_count"] >= 1
     assert any(item["name"] == "泄洪" for item in report["canonical_gaps"])
+    assert report["index_count"] >= 3
+    assert report["root_index_present"] is True
+    assert report["unknown_index_link_count"] == 0
 
 
 def test_audit_kb_reports_invalid_placeholder_and_provenance_noise(tmp_path: Path) -> None:
@@ -461,3 +513,13 @@ def test_provenance_sections_do_not_create_graph_noise(tmp_path: Path) -> None:
     assert "权限系统重构设计文档" not in dangling_names
     assert "另一份来源文档" not in dangling_names
     assert all("2024年Q3支付模块故障复盘" not in item for item in contexts)
+
+
+def test_prepare_explore_context_prefers_index_routed_entries(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    data = inventory(kb_path)
+
+    context = prepare_explore_context("泄洪前做什么检查？", inventory_data=data)
+
+    assert context["index_routing"]["selected_indexes"]
+    assert any("index" in item["matched_fields"] for item in context["initial_shortlist"])

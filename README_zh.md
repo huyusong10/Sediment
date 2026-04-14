@@ -90,6 +90,8 @@ sediment --help
 
 这也是 Windows 上更推荐的路径。
 
+如果你处于企业内网（无法访问公网 PyPI/GitHub），请参考专用手工部署文档：[`docs/offline-install-zh.md`](docs/offline-install-zh.md)。
+
 本地开发可直接运行：
 
 ```bash

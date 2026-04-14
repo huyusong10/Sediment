@@ -1,0 +1,66 @@
+@startuml 旋涡协议时序图
+' 旋涡协议时序图 - 哈基米传输标准协议的交互流程
+' 旋涡协议: 哈基米传输的标准协议
+' 哈基米: 基础能量单元
+' 晶格化: 将离散哈基米固化为可用形态的过程
+' 剥离: 从混合态中分离纯净哈基米
+' 跃迁: 哈基米瞬间转移的技术
+' 信使: 传递状态信息的进程
+' 对钟: 校准时间同步
+' 断流: 传输意外中断
+' 回流: 反向流动
+' 驿站: 临时中转哈基米的缓冲节点
+
+actor "发送端" as Sender
+participant "驿站" as Relay
+participant "接收端" as Receiver
+entity "信使" as Messenger
+
+== 传输前准备 ==
+Sender -> Sender: 晶格化哈基米
+Sender -> Messenger: 发送传输请求
+Messenger -> Receiver: 转发请求
+Receiver --> Messenger: 确认就绪
+Messenger --> Sender: 准备完成
+
+== 时间同步(对钟) ==
+Sender -> Sender: 发起对钟
+Sender -> Relay: 时间戳同步
+Relay -> Receiver: 同步时间
+Receiver --> Relay: 确认
+Relay --> Sender: 对钟完成
+
+== 哈基米传输 ==
+Sender -> Sender: 剥离纯净哈基米
+Sender -> Relay: 传输晶格化哈基米
+note right Relay: 驿站临时缓存\n验证清浊比
+Relay -> Receiver: 转发哈基米
+Receiver -> Receiver: 执行跃迁接收
+Receiver --> Messenger: 接收成功
+Messenger --> Sender: 确认送达
+
+== 异常处理 - 断流 ==
+alt 传输中断(断流)
+  Relay --> Sender: 报告断流
+  Sender -> Relay: 重新发起传输
+  note right: 触发三振法则计数
+end
+
+== 异常处理 - 回流 ==
+alt 检测到回流
+  Receiver --> Relay: 回流告警
+  Relay -> Sender: 暂停传输
+  Sender -> Receiver: 检查接收端状态
+  Receiver --> Sender: 状态恢复
+  Sender -> Relay: 恢复传输
+end
+
+note over Sender, Receiver
+  旋涡协议核心要求:
+  1. 传输前必须完成对钟同步
+  2. 哈基米需先晶格化再剥离
+  3. 驿站作为缓冲验证清浊比
+  4. 断流/回流均有标准处理流程
+end note
+
+@enduml

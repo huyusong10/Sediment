@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 驿站缓冲策略 - 定义临时中转哈基米的缓冲节点管理规则 -->
+<!-- 驿站作为传输链路中的缓冲节点，负责流量整形与临时存储 -->
+<config version="2.0" xmlns="http://hajimi.example.org/schema">
+
+    <!-- 驿站基础参数 -->
+    <section name="驿站容量配置">
+        <param name="单站最大容量" value="2000" unit="哈基米">
+            <description>单个驿站可缓存的最大哈基米数量</description>
+        </param>
+        <param name="节点角色" value="中继+缓冲" unit="职责">
+            <description>驿站既承担长距离传输中的中继，也承担短时缓存与流量整形</description>
+        </param>
+        <param name="饱和度预警线" value="0.70" unit="比例">
+            <description>驿站饱和度超过此值时触发溢出处理</description>
+        </param>
+        <param name="饱和度紧急线" value="0.95" unit="比例">
+            <description>超过此值时执行紧急溢出策略</description>
+        </param>
+    </section>
+
+    <!-- 流量整形策略 -->
+    <section name="分流与合流">
+        <strategy name="分流策略" trigger="饱和度>0.60">
+            <action type="分流" target="下游驿站">
+                <param name="分流比例" value="动态计算" unit="基于下游容量"/>
+                <param name="最小分流单元" value="100" unit="哈基米"/>
+            </action>
+            <description>当驿站饱和度偏高时自动将流量分流至下游节点</description>
+        </strategy>
+        <strategy name="合流策略" trigger="多路输入到达">
+            <action type="合流" target="主传输通道">
+                <param name="合流缓冲窗口" value="200" unit="毫秒"/>
+                <param name="最大合流路数" value="4"/>
+            </action>
+            <description>多路哈基米流到达驿站时按策略合流输出</description>
+        </strategy>
+        <strategy name="部署策略" trigger="高频路径或偏远区域新增">
+            <action type="增补驿站" target="高负载链路">
+                <param name="部署原则" value="高频路径双站负载均衡，偏远区域使用种月部署小型驿站"/>
+            </action>
+            <description>驿站按分布式方式部署在高频路径、跨区边界和偏远区域，承担负载均衡与中继职责</description>
+        </strategy>
+    </section>
+
+    <!-- 待机与休眠 -->
+    <section name="能量管理">
+        <param name="温存嗡鸣度" value="120.0">
+            <description>维持驿站最低嗡鸣度待机状态的能量水平</description>
+        </param>
+        <param name="温存超时" value="7200" unit="秒">
+            <description>超过此时长无流量则进入温存待机</description>
+        </param>
+        <param name="封窖触发条件" value="枯水期持续>72小时" unit="规则">
+            <description>长期无流量时触发封窖休眠模式</description>
+        </param>
+        <param name="封窖唤醒方式" value="信使心跳" unit="方式">
+            <description>通过信使心跳信号唤醒封窖中的驿站</description>
+        </param>
+    </section>
+
+    <!-- 异常处理 -->
+    <section name="异常处理">
+        <rule id="BUFF-001" priority="1">
+            <condition field="断流" operator="==" threshold="true">
+                <description>传输意外中断时的处理策略</description>
+            </condition>
+            <action type="缓存保留" target="本地存储">
+                <param name="保留时长" value="3600" unit="秒"/>
+                <param name="恢复后行为" value="优先续传"/>
+            </action>
+        </rule>
+        <rule id="BUFF-002" priority="2">
+            <condition field="饱和度" operator=">" threshold="0.95">
+                <description>驿站溢出时的紧急处理</description>
+            </condition>
+            <action type="紧急晶格化" target="溢出哈基米">
+                <param name="晶格化优先级" value="最高"/>
+                <param name="剥离标志" value="true" description="溢出时同步执行剥离保证纯度"/>
+            </action>
+        </rule>
+    </section>
+
+</config>

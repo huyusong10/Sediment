@@ -1,0 +1,66 @@
+@startuml 潮涌处理组件图
+' 潮涌处理组件图 - 哈基米浓度突然升高时的处理架构
+' 潮涌: 哈基米浓度突然升高的现象
+' 引雷针: 引导潮涌能量
+' 泄洪: 紧急释放过量哈基米
+' 判官: 决定是否泄洪的决策系统
+' 回音壁: 用于监测嗡鸣度的设备
+' 八卦镜: 反射散斑污染
+' 补天: 修复大规模散斑污染
+' 散斑: 哈基米泄漏形成的副产物
+' 清道夫: 清理散斑的维护流程
+' 假涌: 设备故障误报潮涌
+
+package "潮涌检测层" {
+  [回音壁] as EchoWall
+  note right of 回音壁: 监测嗡鸣度变化\n检测潮涌信号
+  [照妖镜] as Mirror
+  note right of 照妖镜: 验证潮涌真实性\n排除假涌
+}
+
+package "决策层" {
+  [判官] as Judge
+  note right of 判官: 决策是否泄洪\n评估潮涌等级
+}
+
+package "执行层" {
+  [引雷针] as LightningRod
+  note right of 引雷针: 引导能量\n引导潮涌能量\n定向疏导
+  [泄洪] as FloodGate
+  note right of 泄洪: 紧急释放\n过量哈基米
+}
+
+package "防护层" {
+  [八卦镜] as BaguaMirror
+  note right of 八卦镜: 反射污染\n反射散斑污染\n保护谐振腔\n超过单镜容量需并联部署
+}
+
+package "清理层" {
+  [清道夫] as Scavenger
+  note right of 清道夫: 清理散斑\n执行补天流程
+}
+
+' 组件关系
+回音壁 --> 照妖镜 : 传递监测数据
+照妖镜 --> 判官 : 验证后的潮涌信号
+note on link: 排除假涌后上报
+判官 --> 引雷针 : 疏导指令
+判官 --> 泄洪 : 泄洪指令
+note on link: 浓度超红线时触发
+引雷针 --> [泄洪] : 引导潮涌能量安全释放
+[泄洪] --> BaguaMirror : 伴随产生的散斑风险
+BaguaMirror --> Scavenger : 散斑污染通知
+Scavenger --> Scavenger : 执行补天流程
+note right of Scavenger: 修复散斑污染\n恢复清浊比
+
+note as N1
+  潮涌处理流程:
+  1. 回音壁检测嗡鸣度异常升高
+  2. 照妖镜验证是否为假涌
+  3. 判官根据等级决定处理方式
+  4. 引雷针疏导或泄洪释放
+  5. 八卦镜防护散斑污染
+  6. 清道夫执行补天清理
+end note
+
+@enduml

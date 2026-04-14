@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 判官规则引擎配置 - 定义泄洪决策与异常响应的规则集 -->
+<!-- 判官根据以下规则链自动决定是否执行泄洪等保护动作 -->
+<config version="2.0" xmlns="http://hajimi.example.org/schema">
+
+    <!-- 规则引擎全局设置 -->
+    <section name="全局配置">
+        <param name="规则评估周期" value="500" unit="毫秒">
+            <description>判官对所有规则进行评估的时间间隔</description>
+        </param>
+        <param name="规则冲突策略" value="高优先级优先" unit="策略">
+            <description>多条规则同时命中时的冲突解决策略</description>
+        </param>
+    </section>
+
+    <!-- 泄洪触发规则 -->
+    <section name="泄洪规则">
+        <rule id="FLOOD-001" priority="1" enabled="true">
+            <condition field="潮涌强度" operator=">" threshold="800" unit="哈基米/秒">
+                <description>潮涌能量超过引雷针引导能力且满足泄洪前置条件时触发泄洪</description>
+            </condition>
+            <action type="执行泄洪" target="主泄洪通道">
+                <param name="泄洪速率" value="500" unit="哈基米/秒"/>
+            </action>
+        </rule>
+        <rule id="FLOOD-002" priority="2" enabled="true">
+            <condition field="嗡鸣度" operator=">" threshold="720.0" unit="Hz">
+                <description>标准腔嗡鸣度触碰红线时判官立即介入；大型腔按680.0执行</description>
+            </condition>
+            <action type="触发锁龙井" target="受影响谐振腔组">
+                <param name="锁定模式" value="紧急硬锁定"/>
+            </action>
+        </rule>
+        <rule id="FLOOD-003" priority="3" enabled="true">
+            <condition field="连续异常次数" operator=">=" threshold="3">
+                <description>三振法则：连续三次异常则触发隔离与泄洪评估</description>
+            </condition>
+            <action type="启动三振隔离" target="看门狗">
+                <param name="隔离时长" value="86400" unit="秒"/>
+            </action>
+        </rule>
+    </section>
+
+    <!-- 假涌过滤规则 -->
+    <section name="假涌识别">
+        <rule id="FALSE-SURGE-001" priority="10" enabled="true">
+            <condition field="设备健康度" operator="&lt;" threshold="0.7">
+                <description>设备健康度低于阈值时，潮涌信号可能为假涌</description>
+            </condition>
+            <action type="标记假涌" target="事件日志">
+                <param name="置信度要求" value="0.85"/>
+            </action>
+        </rule>
+        <param name="假涌确认延迟" value="30" unit="秒">
+            <description>疑似假涌需延迟确认的时间窗口</description>
+        </param>
+    </section>
+
+    <!-- 安全弦约束 -->
+    <section name="安全弦边界">
+        <param name="安全弦嗡鸣度上限" value="580.0">
+            <description>标准腔共振峰上限；大型腔按 520.0 执行，超过此值视为安全弦外运行</description>
+        </param>
+        <param name="安全弦饱和度上限" value="0.70" unit="比例">
+            <description>谐振腔饱和度安全边界</description>
+        </param>
+        <rule id="SAFETY-001" priority="5" enabled="true">
+            <condition field="参数组合越界" operator="==" threshold="true">
+                <description>当多个参数同时偏离安全弦时触发联合保护</description>
+            </condition>
+            <action type="联合限流" target="所有传输通道"/>
+        </rule>
+    </section>
+
+</config>

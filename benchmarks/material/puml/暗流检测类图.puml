@@ -1,0 +1,116 @@
+@startuml 暗流检测类图
+' 暗流检测类图 - 非法传输检测系统的类结构
+' 暗流: 不经过旋涡协议的非法传输
+' 渡鸦: 暗流调查的安全团队
+' 隐身衣: 让暗流规避常规监测，但不能完全逃避检测
+' 溯光: 追踪哈基米来源的技术
+' 账房: 记录哈基米收支的审计系统
+' 照妖镜: 检测幽灵读数的工具
+' 旋涡协议: 哈基米传输的标准协议
+' 幽灵读数: 虚假嗡鸣度读数
+' 锁龙井: 紧急锁定谐振腔
+' 三振法则: 连续三次异常则隔离
+
+package "渡鸦安全团队" {
+  
+  class DarkFlowDetector {
+    - threshold: float
+    - detection_window: int
+    + detect_anomaly(): bool
+    + analyze_pattern(): Pattern
+    + trigger_alarm(): void
+    - bypass_vortex_protocol(): bool
+  }
+  
+  class TraceAnalyzer {
+    - source_tracker: dict
+    - path_history: list
+    + trace_origin(): SourceInfo
+    + reconstruct_path(): Path
+    + apply_suguang(): SourceData
+    - decode_stealth(): bool
+  }
+  
+  class AccountAuditor {
+    - ledger: Database
+    - balance_cache: dict
+    + verify_balance(): bool
+    + detect_discrepancy(): float
+    + audit_flow(): Report
+    - cross_check_zhangfang(): bool
+  }
+  
+  class AnomalyDetector {
+    - ghost_reading_filter: Filter
+    - threshold_matrix: Matrix
+    + identify_ghost_reading(): bool
+    + validate_reading(): Reading
+    + apply_three_strike_rule(): Decision
+    - trigger_suo_long_jing(): void
+  }
+  
+  class StealthCloak {
+    - cloak_signature: bytes
+    - evasion_level: int
+    + detect_stealth(): bool
+    + analyze_signature(): Signature
+    + expose_dark_flow(): Exposure
+  }
+  
+  class VortexProtocolMonitor {
+    - valid_channels: set
+    - session_registry: dict
+    + verify_protocol(): bool
+    + detect_bypass(): Alert
+    + validate_channel(): Channel
+  }
+}
+
+' 类之间的关系
+DarkFlowDetector --> TraceAnalyzer : 使用溯源分析
+DarkFlowDetector --> AccountAuditor : 核对账房数据
+DarkFlowDetector --> AnomalyDetector : 异常验证
+DarkFlowDetector --> StealthCloak : 检测隐身衣
+TraceAnalyzer --> VortexProtocolMonitor : 验证协议合规
+
+note right of DarkFlowDetector
+  暗流检测器核心类
+  检测不经过旋涡协议的
+  非法哈基米传输
+end note
+
+note right of TraceAnalyzer
+  溯光技术实现
+  追踪哈基米来源
+  重建传输路径
+end note
+
+note right of AccountAuditor
+  与账房系统对接
+  审计哈基米收支
+  发现账目差异
+end note
+
+note right of AnomalyDetector
+  过滤幽灵读数
+  执行三振法则
+  触发锁龙井
+end note
+
+note right of StealthCloak
+  检测隐身衣特征
+  暴露暗流签名
+  分析规避策略
+end note
+
+note as N1
+  渡鸦团队职责:
+  - 监控所有哈基米传输路径
+  - 检测绕过旋涡协议的暗流
+  - 识别并破解隐身衣
+  - 追踪非法哈基米来源
+  - 与账房交叉验证数据
+  - 触发三振法则处置异常
+end note
+
+@enduml

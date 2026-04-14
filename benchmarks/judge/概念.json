@@ -1,0 +1,1924 @@
+{
+  "version": "1.0",
+  "description": "哈基米行业隐式知识提取系统测试集 - Ground Truth",
+  "total_terms": 100,
+  "total_files": 100,
+  "terms": {
+    "哈基米": {
+      "definition": "基础能量单元，系统的核心资源，一切运作的物质基础",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "yaml/system_config.yaml"
+      ],
+      "clues_scattered_in": [
+        "md/年度哈基米产出报告.md",
+        "python/harvester.py",
+        "cpp/hjim_energy.h"
+      ],
+      "related_terms": [
+        "晶格化",
+        "剥离",
+        "清浊比",
+        "潮涌",
+        "散斑"
+      ]
+    },
+    "嗡鸣度": {
+      "definition": "衡量哈基米活跃状态的指标，数值越高表示能量越活跃",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "yaml/system_config.yaml"
+      ],
+      "clues_scattered_in": [
+        "md/听风者周报模板.md",
+        "python/echo_wall.py",
+        "cpp/spectrum_analyzer.h"
+      ],
+      "related_terms": [
+        "共振峰",
+        "红线",
+        "底噪",
+        "毛刺",
+        "回音壁"
+      ]
+    },
+    "旋涡协议": {
+      "definition": "哈基米传输的标准通信协议，定义了数据格式和交互流程",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md",
+        "xml/旋涡协议报文定义.xml"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py",
+        "cpp/vortex_engine.cpp",
+        "md/账房审计接口文档.md"
+      ],
+      "related_terms": [
+        "晶格化",
+        "剥离",
+        "跃迁",
+        "断流",
+        "回流"
+      ]
+    },
+    "晶格化": {
+      "definition": "将离散哈基米固化为可用形态的处理过程",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/启明仪式操作checklist.md"
+      ],
+      "clues_scattered_in": [
+        "python/crystalizer.py",
+        "cpp/hjim_energy.cpp",
+        "md/年度哈基米产出报告.md"
+      ],
+      "related_terms": [
+        "哈基米",
+        "剥离",
+        "清浊比",
+        "镀层"
+      ]
+    },
+    "溯光": {
+      "definition": "追踪哈基米来源和路径的技术手段",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "md/暗流事件调查记录-202405.md"
+      ],
+      "clues_scattered_in": [
+        "python/tracer.py",
+        "md/账房审计接口文档.md",
+        "docx/暗流防范培训教材.docx"
+      ],
+      "related_terms": [
+        "暗流",
+        "账房",
+        "散斑",
+        "渡鸦"
+      ]
+    },
+    "谐振腔": {
+      "definition": "存储和处理哈基米的核心容器/设备",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/谐振腔操作手册.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "cpp/resonator_core.h",
+        "xml/谐振腔配置模板.xml"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "饱和度",
+        "镀层",
+        "坍缩",
+        "金蝉脱壳"
+      ]
+    },
+    "潮涌": {
+      "definition": "哈基米浓度突然升高的异常现象，可能导致系统过载",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/哈基米系统架构设计.md"
+      ],
+      "clues_scattered_in": [
+        "python/tidal_surge_detector.py",
+        "cpp/burst_buffer.h",
+        "md/潮涌应急预案V3.md"
+      ],
+      "related_terms": [
+        "假涌",
+        "泄洪",
+        "引雷针",
+        "判官",
+        "散斑"
+      ]
+    },
+    "静默态": {
+      "definition": "系统无哈基米流动的低功耗状态",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "puml/谐振腔状态机.puml"
+      ],
+      "clues_scattered_in": [
+        "md/封窖操作注意事项.md",
+        "cpp/resonator_core.h",
+        "yaml/system_config.yaml"
+      ],
+      "related_terms": [
+        "温存",
+        "破茧",
+        "守望者",
+        "封窖"
+      ]
+    },
+    "织网": {
+      "definition": "建立多个谐振腔之间连接的网络化操作",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md",
+        "md/哈基米系统架构设计.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py",
+        "json/deployment_topology.json",
+        "docx/织网项目验收报告.docx"
+      ],
+      "related_terms": [
+        "编织者",
+        "收网",
+        "量天尺",
+        "叠韵",
+        "走线"
+      ]
+    },
+    "剥离": {
+      "definition": "从混合态中分离纯净哈基米的提纯过程",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md",
+        "python/harvester.py"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py",
+        "python/crystalizer.py",
+        "xml/驿站缓冲策略.xml"
+      ],
+      "related_terms": [
+        "晶格化",
+        "清浊比",
+        "哈基米"
+      ]
+    },
+    "镀层": {
+      "definition": "保护哈基米免受外部干扰的防护外壳",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/散斑清理最佳实践.md"
+      ],
+      "clues_scattered_in": [
+        "python/crystalizer.py",
+        "xml/镀层材质参数.xml",
+        "md/谐振腔镀层老化分析报告.md"
+      ],
+      "related_terms": [
+        "溢彩",
+        "晦暗",
+        "换羽",
+        "照骨灯",
+        "散斑"
+      ]
+    },
+    "散斑": {
+      "definition": "哈基米泄漏后形成的有害副产物",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "md/哈基米系统架构设计.md"
+      ],
+      "clues_scattered_in": [
+        "python/cleaner.py",
+        "md/补天流程演练总结.md",
+        "json/metric_definitions.json"
+      ],
+      "related_terms": [
+        "清道夫",
+        "补天",
+        "八卦镜",
+        "清浊比",
+        "坍缩"
+      ]
+    },
+    "回音壁": {
+      "definition": "用于监测嗡鸣度的传感器设备",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/晨祷流程规范v2.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "xml/回音壁监测点配置.xml",
+        "md/听风者周报模板.md"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "盲区",
+        "埋点",
+        "幽灵读数",
+        "底噪"
+      ]
+    },
+    "跃迁": {
+      "definition": "哈基米从一个谐振腔瞬间转移到另一个的技术",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/跃迁性能调优记录.md",
+        "md/旋涡协议技术白皮书.md"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py",
+        "cpp/vortex_engine.cpp",
+        "puml/跃迁过程序列图.puml"
+      ],
+      "related_terms": [
+        "风火轮",
+        "对钟",
+        "断流",
+        "金蝉脱壳"
+      ]
+    },
+    "坍缩": {
+      "definition": "谐振腔失效导致哈基米意外释放的故障状态",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "puml/谐振腔状态机.puml"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "md/金蝉脱壳实施指南.md",
+        "md/补天流程演练总结.md"
+      ],
+      "related_terms": [
+        "金蝉脱壳",
+        "热备份",
+        "锁龙井",
+        "散斑"
+      ]
+    },
+    "编织者": {
+      "definition": "负责织网操作的工程师角色",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py",
+        "json/deployment_topology.json",
+        "md/织网项目进度汇报.md"
+      ],
+      "related_terms": [
+        "织网",
+        "收网",
+        "量天尺",
+        "走线"
+      ]
+    },
+    "守望者": {
+      "definition": "负责监控静默态的值班人员角色",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "md/封窖操作注意事项.md",
+        "yaml/role_permissions.yaml",
+        "docx/守望者值班交接规范.docx"
+      ],
+      "related_terms": [
+        "静默态",
+        "温存",
+        "守夜人"
+      ]
+    },
+    "调音师": {
+      "definition": "负责调整谐振腔嗡鸣度的技术专家",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/叠韵技术内部培训.md"
+      ],
+      "clues_scattered_in": [
+        "python/singer.py",
+        "docx/调音师技能等级评定标准.docx"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "共振峰",
+        "定音鼓",
+        "叠韵"
+      ]
+    },
+    "清道夫": {
+      "definition": "负责清理散斑的自动化维护流程",
+      "type": "direct",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "md/2024年Q3潮涌事故复盘.md"
+      ],
+      "clues_scattered_in": [
+        "python/cleaner.py",
+        "xml/千机匣任务调度配置.xml"
+      ],
+      "related_terms": [
+        "散斑",
+        "补天",
+        "八卦镜",
+        "清浊比"
+      ]
+    },
+    "启明": {
+      "definition": "首次向系统注入哈基米的初始化仪式",
+      "type": "semi_implicit",
+      "category": "核心概念",
+      "first_appears_in": [
+        "md/启明仪式操作checklist.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "puml/启明仪式协作图.puml",
+        "docx/启明仪式风险评估报告.docx",
+        "md/掌灯人年度述职报告.md"
+      ],
+      "related_terms": [
+        "掌灯人",
+        "开光",
+        "谐振腔",
+        "晶格化"
+      ]
+    },
+    "晨祷": {
+      "definition": "每日系统启动时的标准检查流程",
+      "type": "direct",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "puml/晨祷流程活动图.puml",
+        "python/orchestrator.py",
+        "xml/千机匣任务调度配置.xml"
+      ],
+      "related_terms": [
+        "晚课",
+        "嗡鸣度",
+        "试音",
+        "对钟"
+      ]
+    },
+    "晚课": {
+      "definition": "每日系统关闭前的数据归档流程",
+      "type": "direct",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md",
+        "md/封窖操作注意事项.md"
+      ],
+      "clues_scattered_in": [
+        "python/orchestrator.py",
+        "xml/账房审计日志格式.xml",
+        "xml/千机匣任务调度配置.xml"
+      ],
+      "related_terms": [
+        "晨祷",
+        "账房",
+        "对钟"
+      ]
+    },
+    "三振法则": {
+      "definition": "连续三次嗡鸣度异常则自动触发隔离的安全策略",
+      "type": "direct",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/三振法则触发案例分析.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "python/watchdog.py",
+        "python/judge.py",
+        "puml/三振法则判断流程.puml"
+      ],
+      "related_terms": [
+        "看门狗",
+        "判官",
+        "锁龙井",
+        "嗡鸣度"
+      ]
+    },
+    "逆灌": {
+      "definition": "反向输送哈基米的高风险操作",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py"
+      ],
+      "related_terms": [
+        "回流",
+        "旋涡协议"
+      ]
+    },
+    "叠韵": {
+      "definition": "将多个谐振腔调整至相同频率的同步技巧",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/叠韵技术内部培训.md",
+        "md/织网工程师认证指南.md"
+      ],
+      "clues_scattered_in": [
+        "python/singer.py",
+        "json/deployment_topology.json"
+      ],
+      "related_terms": [
+        "调音师",
+        "定音鼓",
+        "共振峰",
+        "织网"
+      ]
+    },
+    "暗流": {
+      "definition": "不经过旋涡协议的非法哈基米传输",
+      "type": "direct",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md"
+      ],
+      "clues_scattered_in": [
+        "python/tracer.py",
+        "xml/分水岭隔离策略.xml",
+        "docx/暗流防范培训教材.docx"
+      ],
+      "related_terms": [
+        "渡鸦",
+        "隐身衣",
+        "账房",
+        "溯光"
+      ]
+    },
+    "换羽": {
+      "definition": "定期更换镀层的周期性维护操作",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/清浊比月度趋势报告.md"
+      ],
+      "clues_scattered_in": [
+        "python/crystalizer.py",
+        "xml/镀层材质参数.xml",
+        "python/orchestrator.py"
+      ],
+      "related_terms": [
+        "镀层",
+        "晦暗",
+        "铁匠",
+        "照骨灯"
+      ]
+    },
+    "对钟": {
+      "definition": "校准分布式系统时间同步的操作",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/旋涡协议技术白皮书.md"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py",
+        "xml/账房审计日志格式.xml",
+        "cpp/vortex_engine.cpp"
+      ],
+      "related_terms": [
+        "信使",
+        "晨祷"
+      ]
+    },
+    "封窖": {
+      "definition": "长期存储哈基米的休眠存储模式",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/封窖操作注意事项.md",
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [
+        "puml/谐振腔状态机.puml",
+        "xml/驿站缓冲策略.xml"
+      ],
+      "related_terms": [
+        "静默态",
+        "温存",
+        "哈基米"
+      ]
+    },
+    "开光": {
+      "definition": "新谐振腔首次启用的初始化流程",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/启明仪式操作checklist.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "puml/启明仪式协作图.puml",
+        "docx/谐振腔生命周期管理.docx"
+      ],
+      "related_terms": [
+        "谐振腔",
+        "启明",
+        "试音"
+      ]
+    },
+    "试音": {
+      "definition": "快速测试谐振腔是否可用的检查流程",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/晨祷流程规范v2.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "xml/千机匣任务调度配置.xml",
+        "docx/谐振腔生命周期管理.docx"
+      ],
+      "related_terms": [
+        "谐振腔",
+        "开光",
+        "嗡鸣度"
+      ]
+    },
+    "走线": {
+      "definition": "规划和设计哈基米传输路径的过程",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py",
+        "xml/信使路由表.xml",
+        "python/messenger.py"
+      ],
+      "related_terms": [
+        "埋点",
+        "巡河",
+        "量天尺"
+      ]
+    },
+    "埋点": {
+      "definition": "在传输路径上设置监测点的操作",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/回音壁部署位置优化.md",
+        "md/织网工程师认证指南.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "python/messenger.py"
+      ],
+      "related_terms": [
+        "走线",
+        "巡河",
+        "回音壁"
+      ]
+    },
+    "巡河": {
+      "definition": "定期检查所有传输路径的巡检流程",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/回音壁部署位置优化.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py",
+        "xml/千机匣任务调度配置.xml"
+      ],
+      "related_terms": [
+        "走线",
+        "埋点",
+        "量天尺"
+      ]
+    },
+    "洗髓": {
+      "definition": "深度清洁谐振腔内部的维护流程",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md"
+      ],
+      "clues_scattered_in": [
+        "python/cleaner.py",
+        "docx/谐振腔生命周期管理.docx"
+      ],
+      "related_terms": [
+        "清道夫",
+        "散斑",
+        "换骨"
+      ]
+    },
+    "换骨": {
+      "definition": "更换谐振腔核心部件的大修操作",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "docx/谐振腔生命周期管理.docx",
+        "xml/镀层材质参数.xml"
+      ],
+      "related_terms": [
+        "铁匠",
+        "换羽",
+        "洗髓"
+      ]
+    },
+    "接力": {
+      "definition": "多个谐振腔串联传输哈基米的模式",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md"
+      ],
+      "clues_scattered_in": [
+        "xml/信使路由表.xml",
+        "python/messenger.py"
+      ],
+      "related_terms": [
+        "分流",
+        "合流",
+        "驿站"
+      ]
+    },
+    "分流": {
+      "definition": "将单股哈基米流分成多路的操作",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [
+        "python/messenger.py",
+        "cpp/vortex_engine.cpp",
+        "xml/驿站缓冲策略.xml"
+      ],
+      "related_terms": [
+        "合流",
+        "接力",
+        "驿站"
+      ]
+    },
+    "合流": {
+      "definition": "将多路哈基米流汇聚的操作",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [
+        "python/messenger.py",
+        "cpp/vortex_engine.cpp",
+        "xml/驿站缓冲策略.xml"
+      ],
+      "related_terms": [
+        "分流",
+        "接力",
+        "驿站"
+      ]
+    },
+    "泄洪": {
+      "definition": "紧急释放过量哈基米的安全措施",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [
+        "python/judge.py",
+        "cpp/burst_buffer.cpp",
+        "md/潮涌应急预案V3.md"
+      ],
+      "related_terms": [
+        "判官",
+        "潮涌",
+        "引雷针",
+        "锁龙井"
+      ]
+    },
+    "补天": {
+      "definition": "修复大规模散斑污染的应急响应流程",
+      "type": "semi_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/补天流程演练总结.md",
+        "md/散斑清理最佳实践.md"
+      ],
+      "clues_scattered_in": [
+        "python/cleaner.py",
+        "xml/千机匣任务调度配置.xml",
+        "puml/潮涌处理组件图.puml"
+      ],
+      "related_terms": [
+        "散斑",
+        "清道夫",
+        "八卦镜",
+        "引雷针"
+      ]
+    },
+    "种月": {
+      "definition": "在偏远节点部署小型谐振腔的扩展操作",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [
+        "json/deployment_topology.json"
+      ],
+      "related_terms": [
+        "谐振腔",
+        "织网"
+      ]
+    },
+    "收网": {
+      "definition": "结束织网操作后的验证和确认流程",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py",
+        "json/deployment_topology.json",
+        "docx/织网项目验收报告.docx"
+      ],
+      "related_terms": [
+        "织网",
+        "编织者",
+        "量天尺"
+      ]
+    },
+    "点睛": {
+      "definition": "为自动化流程注入初始参数的操作",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "xml/千机匣任务调度配置.xml"
+      ],
+      "clues_scattered_in": [
+        "python/orchestrator.py"
+      ],
+      "related_terms": [
+        "千机匣",
+        "晨祷"
+      ]
+    },
+    "破茧": {
+      "definition": "从静默态恢复到正常运行态的完整流程",
+      "type": "pure_implicit",
+      "category": "流程/方法",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/封窖操作注意事项.md"
+      ],
+      "clues_scattered_in": [
+        "puml/谐振腔状态机.puml"
+      ],
+      "related_terms": [
+        "静默态",
+        "温存"
+      ]
+    },
+    "清浊比": {
+      "definition": "纯净哈基米与散斑的比例，衡量系统健康度的核心指标",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/晨祷流程规范v2.md"
+      ],
+      "clues_scattered_in": [
+        "python/harvester.py",
+        "json/metric_definitions.json",
+        "md/清浊比月度趋势报告.md"
+      ],
+      "related_terms": [
+        "散斑",
+        "哈基米",
+        "八卦镜",
+        "补天"
+      ]
+    },
+    "共振峰": {
+      "definition": "嗡鸣度的理想工作区间，系统最佳运行状态",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/谐振腔操作手册.md"
+      ],
+      "clues_scattered_in": [
+        "python/singer.py",
+        "cpp/spectrum_analyzer.cpp",
+        "json/metric_definitions.json"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "定音鼓",
+        "叠韵",
+        "调音师"
+      ]
+    },
+    "枯水期": {
+      "definition": "哈基米产出的低谷周期",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/枯水期应对策略.md",
+        "pptx/Q4哈基米产能规划.pptx"
+      ],
+      "clues_scattered_in": [
+        "md/年度哈基米产出报告.md"
+      ],
+      "related_terms": [
+        "丰水期",
+        "借东风",
+        "封窖"
+      ]
+    },
+    "丰水期": {
+      "definition": "哈基米产出的高峰周期",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/枯水期应对策略.md",
+        "pptx/Q4哈基米产能规划.pptx"
+      ],
+      "clues_scattered_in": [
+        "md/年度哈基米产出报告.md"
+      ],
+      "related_terms": [
+        "枯水期",
+        "借东风",
+        "潮涌"
+      ]
+    },
+    "盲区": {
+      "definition": "回音壁监测无法覆盖的区域",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/回音壁部署位置优化.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "xml/回音壁监测点配置.xml",
+        "xml/分水岭隔离策略.xml"
+      ],
+      "related_terms": [
+        "回音壁",
+        "埋点",
+        "照妖镜"
+      ]
+    },
+    "红线": {
+      "definition": "嗡鸣度不可超过的安全阈值，标准腔为720 Hz，大型腔为680 Hz。超过红线意味着系统处于危险状态，可能触发三振法则和泄洪操作。",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "python/judge.py",
+        "xml/谐振腔配置模板.xml"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "判官",
+        "三振法则",
+        "泄洪"
+      ]
+    },
+    "安全弦": {
+      "definition": "系统稳定运行的参数边界范围",
+      "type": "semi_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md",
+        "md/听风者周报模板.md"
+      ],
+      "clues_scattered_in": [
+        "cpp/vortex_engine.h",
+        "python/judge.py",
+        "xml/分水岭隔离策略.xml"
+      ],
+      "related_terms": [
+        "红线",
+        "嗡鸣度",
+        "判官"
+      ]
+    },
+    "幽灵读数": {
+      "definition": "回音壁显示但实际不存在的虚假嗡鸣度读数",
+      "type": "semi_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/三振法则触发案例分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "python/watchdog.py",
+        "xml/回音壁监测点配置.xml"
+      ],
+      "related_terms": [
+        "照妖镜",
+        "回音壁",
+        "假涌",
+        "毛刺"
+      ]
+    },
+    "假涌": {
+      "definition": "看起来像潮涌但实际是设备故障的误报",
+      "type": "semi_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/听风者周报模板.md",
+        "md/潮涌事故root cause分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/tidal_surge_detector.py",
+        "yaml/alert_rules.yaml",
+        "cpp/burst_buffer.h"
+      ],
+      "related_terms": [
+        "潮涌",
+        "判官",
+        "回音壁"
+      ]
+    },
+    "冷启动": {
+      "definition": "系统从完全关闭到可用状态的启动时间",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py"
+      ],
+      "related_terms": [
+        "启明",
+        "开光",
+        "破茧"
+      ]
+    },
+    "热备份": {
+      "definition": "随时可接管的主谐振腔冗余副本",
+      "type": "direct",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/跃迁性能调优记录.md",
+        "md/判官系统决策逻辑说明.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "cpp/resonator_core.h",
+        "md/金蝉脱壳实施指南.md"
+      ],
+      "related_terms": [
+        "金蝉脱壳",
+        "坍缩",
+        "谐振腔"
+      ]
+    },
+    "温存": {
+      "definition": "维持最低嗡鸣度的待机保持状态",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/封窖操作注意事项.md"
+      ],
+      "clues_scattered_in": [
+        "puml/谐振腔状态机.puml",
+        "yaml/system_config.yaml",
+        "xml/驿站缓冲策略.xml"
+      ],
+      "related_terms": [
+        "静默态",
+        "破茧",
+        "底噪"
+      ]
+    },
+    "断流": {
+      "definition": "哈基米传输意外中断的故障",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md",
+        "md/三振法则触发案例分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py",
+        "python/watchdog.py",
+        "cpp/vortex_engine.cpp"
+      ],
+      "related_terms": [
+        "回流",
+        "跃迁",
+        "信使"
+      ]
+    },
+    "回流": {
+      "definition": "哈基米反向流动的异常现象",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md"
+      ],
+      "clues_scattered_in": [
+        "python/vortex_protocol.py",
+        "cpp/vortex_engine.cpp"
+      ],
+      "related_terms": [
+        "断流",
+        "逆灌",
+        "旋涡协议"
+      ]
+    },
+    "溢彩": {
+      "definition": "镀层完好时散发的光泽，系统健康的视觉标志",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/封窖操作注意事项.md"
+      ],
+      "clues_scattered_in": [
+        "python/crystalizer.py",
+        "xml/镀层材质参数.xml",
+        "md/谐振腔镀层老化分析报告.md"
+      ],
+      "related_terms": [
+        "镀层",
+        "晦暗",
+        "照骨灯"
+      ]
+    },
+    "晦暗": {
+      "definition": "镀层老化失去保护能力的表现",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/散斑清理最佳实践.md"
+      ],
+      "clues_scattered_in": [
+        "python/crystalizer.py",
+        "xml/镀层材质参数.xml",
+        "json/metric_definitions.json"
+      ],
+      "related_terms": [
+        "镀层",
+        "溢彩",
+        "换羽",
+        "照骨灯"
+      ]
+    },
+    "毛刺": {
+      "definition": "嗡鸣度曲线上的瞬间异常波动",
+      "type": "semi_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/听风者周报模板.md",
+        "md/三振法则触发案例分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "python/watchdog.py",
+        "python/singer.py"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "底噪",
+        "峰谷差",
+        "幽灵读数"
+      ]
+    },
+    "底噪": {
+      "definition": "系统固有的最低嗡鸣度基线",
+      "type": "semi_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/听风者周报模板.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "python/singer.py",
+        "yaml/system_config.yaml"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "毛刺",
+        "留声机"
+      ]
+    },
+    "峰谷差": {
+      "definition": "一个周期内嗡鸣度最大值与最小值的差",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/听风者周报模板.md"
+      ],
+      "clues_scattered_in": [
+        "python/singer.py",
+        "cpp/spectrum_analyzer.h",
+        "json/metric_definitions.json"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "毛刺",
+        "底噪"
+      ]
+    },
+    "饱和度": {
+      "definition": "谐振腔当前容量占最大容量的百分比",
+      "type": "pure_implicit",
+      "category": "指标/状态",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md",
+        "md/封窖操作注意事项.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "cpp/resonator_core.h",
+        "xml/谐振腔配置模板.xml"
+      ],
+      "related_terms": [
+        "谐振腔",
+        "红线",
+        "金蝉脱壳"
+      ]
+    },
+    "掌灯人": {
+      "definition": "负责启明仪式的最高权限管理员",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md",
+        "md/启明仪式操作checklist.md"
+      ],
+      "clues_scattered_in": [
+        "puml/启明仪式协作图.puml",
+        "md/掌灯人年度述职报告.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "启明",
+        "祭司团",
+        "红线"
+      ]
+    },
+    "守夜人": {
+      "definition": "负责夜间值班监控的运维团队",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "yaml/role_permissions.yaml",
+        "docx/守望者值班交接规范.docx"
+      ],
+      "related_terms": [
+        "守望者",
+        "静默态",
+        "温存"
+      ]
+    },
+    "听风者": {
+      "definition": "负责分析嗡鸣度模式的数据分析团队",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/听风者周报模板.md",
+        "md/暗流事件调查记录-202405.md"
+      ],
+      "clues_scattered_in": [
+        "pptx/听风者数据分析平台建设.pptx",
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "留声机",
+        "回音壁"
+      ]
+    },
+    "渡鸦": {
+      "definition": "负责暗流调查和安全的审计团队",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md"
+      ],
+      "clues_scattered_in": [
+        "python/tracer.py",
+        "md/渡鸦团队年度工作总结.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "暗流",
+        "隐身衣",
+        "账房",
+        "照妖镜"
+      ]
+    },
+    "园丁": {
+      "definition": "负责日常清道夫操作的运维团队",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "md/2024年Q3潮涌事故复盘.md"
+      ],
+      "clues_scattered_in": [
+        "python/cleaner.py",
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "清道夫",
+        "散斑",
+        "补天"
+      ]
+    },
+    "铁匠": {
+      "definition": "负责换骨和换羽等硬件维护的工程团队",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/谐振腔操作手册.md"
+      ],
+      "clues_scattered_in": [
+        "docx/谐振腔生命周期管理.docx",
+        "xml/镀层材质参数.xml",
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "换骨",
+        "换羽",
+        "照骨灯"
+      ]
+    },
+    "祭司团": {
+      "definition": "制定晨祷和晚课规范的系统架构团队",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md",
+        "md/启明仪式操作checklist.md"
+      ],
+      "clues_scattered_in": [
+        "docx/祭司团架构设计规范.docx",
+        "md/掌灯人年度述职报告.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "晨祷",
+        "晚课",
+        "启明"
+      ]
+    },
+    "外乡人": {
+      "definition": "新入职员工的内部称呼",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md"
+      ],
+      "clues_scattered_in": [
+        "yaml/role_permissions.yaml"
+      ],
+      "related_terms": [
+        "老把式",
+        "晨祷",
+        "谐振腔"
+      ]
+    },
+    "老把式": {
+      "definition": "有十年以上经验的高级工程师",
+      "type": "direct",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/外乡人入职培训大纲.md",
+        "md/叠韵技术内部培训.md"
+      ],
+      "clues_scattered_in": [
+        "yaml/role_permissions.yaml",
+        "docx/调音师技能等级评定标准.docx"
+      ],
+      "related_terms": [
+        "外乡人",
+        "调音师"
+      ]
+    },
+    "影子": {
+      "definition": "不记录在文档中的备用/灾备系统",
+      "type": "semi_implicit",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md"
+      ],
+      "clues_scattered_in": [
+        "yaml/role_permissions.yaml",
+        "docx/暗流防范培训教材.docx"
+      ],
+      "related_terms": [
+        "暗流",
+        "渡鸦",
+        "账房"
+      ]
+    },
+    "信使": {
+      "definition": "在不同谐振腔间传递状态信息的通信进程",
+      "type": "semi_implicit",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md",
+        "md/通天塔控制台用户手册.md"
+      ],
+      "clues_scattered_in": [
+        "python/messenger.py",
+        "python/vortex_protocol.py",
+        "xml/信使路由表.xml"
+      ],
+      "related_terms": [
+        "旋涡协议",
+        "对钟",
+        "驿站"
+      ]
+    },
+    "看门狗": {
+      "definition": "自动触发三振法则的监控守护进程",
+      "type": "semi_implicit",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/晨祷流程规范v2.md",
+        "md/三振法则触发案例分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/watchdog.py",
+        "python/orchestrator.py",
+        "yaml/alert_rules.yaml"
+      ],
+      "related_terms": [
+        "三振法则",
+        "判官",
+        "锁龙井"
+      ]
+    },
+    "判官": {
+      "definition": "决定是否触发泄洪的自动化决策系统",
+      "type": "semi_implicit",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/判官系统决策逻辑说明.md",
+        "md/2024年Q3潮涌事故复盘.md"
+      ],
+      "clues_scattered_in": [
+        "python/judge.py",
+        "xml/判官规则引擎配置.xml",
+        "puml/潮涌处理组件图.puml"
+      ],
+      "related_terms": [
+        "泄洪",
+        "三振法则",
+        "潮涌",
+        "锁龙井"
+      ]
+    },
+    "账房": {
+      "definition": "记录哈基米收支流水的审计系统",
+      "type": "semi_implicit",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/账房审计接口文档.md"
+      ],
+      "clues_scattered_in": [
+        "python/auditor.py",
+        "xml/账房审计日志格式.xml",
+        "docx/哈基米贸易结算规范.docx"
+      ],
+      "related_terms": [
+        "哈基米",
+        "暗流",
+        "溯光",
+        "清浊比"
+      ]
+    },
+    "驿站": {
+      "definition": "临时中转哈基米的缓冲节点",
+      "type": "semi_implicit",
+      "category": "角色/组织",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [
+        "python/messenger.py",
+        "xml/驿站缓冲策略.xml",
+        "cpp/vortex_engine.cpp"
+      ],
+      "related_terms": [
+        "分流",
+        "合流",
+        "接力",
+        "信使"
+      ]
+    },
+    "量天尺": {
+      "definition": "测量传输路径哈基米损耗的工具",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md",
+        "md/回音壁部署位置优化.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py",
+        "json/deployment_topology.json"
+      ],
+      "related_terms": [
+        "走线",
+        "埋点",
+        "巡河"
+      ]
+    },
+    "定音鼓": {
+      "definition": "校准谐振腔频率的硬件设备",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/叠韵技术内部培训.md"
+      ],
+      "clues_scattered_in": [
+        "python/singer.py",
+        "cpp/spectrum_analyzer.h"
+      ],
+      "related_terms": [
+        "调音师",
+        "共振峰",
+        "叠韵"
+      ]
+    },
+    "照骨灯": {
+      "definition": "检测镀层内部缺陷的诊断仪器",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "md/清浊比月度趋势报告.md"
+      ],
+      "clues_scattered_in": [
+        "python/crystalizer.py",
+        "xml/镀层材质参数.xml",
+        "md/谐振腔镀层老化分析报告.md"
+      ],
+      "related_terms": [
+        "镀层",
+        "晦暗",
+        "换羽",
+        "铁匠"
+      ]
+    },
+    "引雷针": {
+      "definition": "引导潮涌能量的安全泄放装置",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/补天流程演练总结.md",
+        "md/潮涌事故root cause分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/tidal_surge_detector.py",
+        "cpp/burst_buffer.h",
+        "xml/判官规则引擎配置.xml"
+      ],
+      "related_terms": [
+        "潮涌",
+        "泄洪",
+        "八卦镜"
+      ]
+    },
+    "锁龙井": {
+      "definition": "紧急情况下锁定谐振腔的安全机制",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/三振法则触发案例分析.md"
+      ],
+      "clues_scattered_in": [
+        "python/judge.py",
+        "python/watchdog.py",
+        "yaml/alert_rules.yaml"
+      ],
+      "related_terms": [
+        "判官",
+        "三振法则",
+        "看门狗"
+      ]
+    },
+    "八卦镜": {
+      "definition": "反射散斑污染的防护装置",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/散斑清理最佳实践.md",
+        "md/清浊比月度趋势报告.md"
+      ],
+      "clues_scattered_in": [
+        "python/cleaner.py",
+        "puml/潮涌处理组件图.puml",
+        "md/潮涌应急预案V3.md"
+      ],
+      "related_terms": [
+        "散斑",
+        "补天",
+        "引雷针"
+      ]
+    },
+    "千机匣": {
+      "definition": "自动化控制谐振腔集群的管理系统",
+      "type": "direct",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/通天塔控制台用户手册.md"
+      ],
+      "clues_scattered_in": [
+        "python/orchestrator.py",
+        "json/deployment_topology.json",
+        "pptx/千机匣自动化演进.pptx"
+      ],
+      "related_terms": [
+        "晨祷",
+        "晚课",
+        "看门狗",
+        "点睛"
+      ]
+    },
+    "无字碑": {
+      "definition": "不记录操作日志的调试模式",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/旋涡协议技术白皮书.md",
+        "md/账房审计接口文档.md"
+      ],
+      "clues_scattered_in": [
+        "python/tracer.py",
+        "xml/账房审计日志格式.xml",
+        "python/vortex_protocol.py"
+      ],
+      "related_terms": [
+        "账房",
+        "对钟",
+        "暗流"
+      ]
+    },
+    "留声机": {
+      "definition": "记录嗡鸣度历史数据的存储系统",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/听风者周报模板.md",
+        "md/回音壁部署位置优化.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "cpp/spectrum_analyzer.h",
+        "json/metric_definitions.json"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "底噪",
+        "毛刺"
+      ]
+    },
+    "风火轮": {
+      "definition": "加速跃迁过程的性能优化技术",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/跃迁性能调优记录.md",
+        "md/金蝉脱壳实施指南.md"
+      ],
+      "clues_scattered_in": [
+        "cpp/vortex_engine.cpp",
+        "cpp/hjim_energy.h"
+      ],
+      "related_terms": [
+        "跃迁",
+        "对钟",
+        "金蝉脱壳"
+      ]
+    },
+    "分水岭": {
+      "definition": "隔离不同谐振腔的安全边界机制",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/通天塔控制台用户手册.md"
+      ],
+      "clues_scattered_in": [
+        "json/deployment_topology.json",
+        "xml/分水岭隔离策略.xml",
+        "docx/祭司团架构设计规范.docx"
+      ],
+      "related_terms": [
+        "暗流",
+        "锁龙井",
+        "三振法则"
+      ]
+    },
+    "通天塔": {
+      "definition": "集中管理所有谐振腔的统一控制台",
+      "type": "direct",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/哈基米系统架构设计.md",
+        "md/通天塔控制台用户手册.md"
+      ],
+      "clues_scattered_in": [
+        "json/deployment_topology.json",
+        "puml/通天塔模块依赖图.puml"
+      ],
+      "related_terms": [
+        "千机匣",
+        "判官",
+        "账房",
+        "回音壁"
+      ]
+    },
+    "乾坤袋": {
+      "definition": "便携式哈基米存储容器",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/枯水期应对策略.md"
+      ],
+      "clues_scattered_in": [],
+      "related_terms": [
+        "哈基米",
+        "封窖",
+        "驿站"
+      ]
+    },
+    "隐身衣": {
+      "definition": "让暗流不被渡鸦检测到的隐藏技术",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md"
+      ],
+      "clues_scattered_in": [
+        "python/tracer.py",
+        "docx/暗流防范培训教材.docx"
+      ],
+      "related_terms": [
+        "暗流",
+        "渡鸦",
+        "溯光"
+      ]
+    },
+    "照妖镜": {
+      "definition": "检测幽灵读数的专项诊断工具",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/暗流事件调查记录-202405.md",
+        "md/回音壁部署位置优化.md"
+      ],
+      "clues_scattered_in": [
+        "python/echo_wall.py",
+        "xml/回音壁监测点配置.xml"
+      ],
+      "related_terms": [
+        "幽灵读数",
+        "回音壁",
+        "盲区"
+      ]
+    },
+    "定海针": {
+      "definition": "稳定嗡鸣度的PID反馈控制算法",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/听风者周报模板.md"
+      ],
+      "clues_scattered_in": [
+        "python/singer.py"
+      ],
+      "related_terms": [
+        "嗡鸣度",
+        "共振峰",
+        "安全弦"
+      ]
+    },
+    "移星斗": {
+      "definition": "重新规划和优化传输路径的工具",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/织网工程师认证指南.md",
+        "md/跃迁性能调优记录.md"
+      ],
+      "clues_scattered_in": [
+        "python/weaver.py"
+      ],
+      "related_terms": [
+        "走线",
+        "织网",
+        "量天尺"
+      ]
+    },
+    "借东风": {
+      "definition": "利用丰水期超额产能的调度技巧",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/枯水期应对策略.md",
+        "pptx/Q4哈基米产能规划.pptx"
+      ],
+      "clues_scattered_in": [],
+      "related_terms": [
+        "丰水期",
+        "枯水期",
+        "千机匣"
+      ]
+    },
+    "草船借箭": {
+      "definition": "从其他系统临时借用哈基米的应急操作",
+      "type": "pure_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/枯水期应对策略.md",
+        "docx/哈基米贸易结算规范.docx"
+      ],
+      "clues_scattered_in": [],
+      "related_terms": [
+        "哈基米",
+        "账房",
+        "驿站"
+      ]
+    },
+    "金蝉脱壳": {
+      "definition": "将故障谐振腔的哈基米无损迁移的技术",
+      "type": "semi_implicit",
+      "category": "工具/技术",
+      "first_appears_in": [
+        "md/金蝉脱壳实施指南.md",
+        "md/跃迁性能调优记录.md"
+      ],
+      "clues_scattered_in": [
+        "python/resonator.py",
+        "cpp/resonator_core.cpp",
+        "md/补天流程演练总结.md"
+      ],
+      "related_terms": [
+        "坍缩",
+        "热备份",
+        "跃迁",
+        "风火轮"
+      ]
+    }
+  },
+  "files": {
+    "markdown": {
+      "count": 25,
+      "path": "md/*.md"
+    },
+    "docx": {
+      "count": 15,
+      "path": "docx/*.docx"
+    },
+    "pptx": {
+      "count": 10,
+      "path": "pptx/*.pptx"
+    },
+    "plantuml": {
+      "count": 10,
+      "path": "puml/*.puml"
+    },
+    "xml": {
+      "count": 10,
+      "path": "xml/*.xml"
+    },
+    "python": {
+      "count": 15,
+      "path": "python/*.py"
+    },
+    "cpp": {
+      "count": 10,
+      "path": "cpp/*.{h,cpp}"
+    },
+    "config": {
+      "count": 5,
+      "path": "{yaml/*.yaml,json/*.json}"
+    }
+  },
+  "statistics": {
+    "by_type": {
+      "direct": 36,
+      "semi_implicit": 33,
+      "pure_implicit": 31
+    },
+    "by_category": {
+      "核心概念": 20,
+      "流程/方法": 25,
+      "指标/状态": 20,
+      "角色/组织": 15,
+      "工具/技术": 20
+    }
+  }
+}

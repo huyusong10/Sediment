@@ -1,0 +1,1982 @@
+{
+  "version": "1.0",
+  "description": "哈基米行业隐式知识提取系统 - 测试问题集",
+  "total_questions": 100,
+  "questions": [
+    {
+      "id": 1,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "什么是哈基米？",
+      "expected_keywords": [
+        "哈基米",
+        "基础能量单元",
+        "核心资源"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "md/外乡人入职培训大纲.md",
+        "python/harvester.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "哈基米是整个系统的基础能量单元，也是系统的核心资源。所有运作都围绕哈基米的采集、存储、传输和纯化展开，是整个系统的物质基础。"
+    },
+    {
+      "id": 2,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "谐振腔是什么设备？",
+      "expected_keywords": [
+        "谐振腔",
+        "存储",
+        "哈基米",
+        "容器"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "md/谐振腔操作手册.md",
+        "python/resonator.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "谐振腔是存储和处理哈基米的核心容器设备。它是系统的基本组成单元，负责存储哈基米并维持其活跃状态。"
+    },
+    {
+      "id": 3,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "嗡鸣度衡量什么？",
+      "expected_keywords": [
+        "嗡鸣度",
+        "哈基米",
+        "活跃状态",
+        "指标"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "md/听风者周报模板.md",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "嗡鸣度是衡量哈基米活跃状态的指标。嗡鸣度数值越高，表示哈基米的能量状态越活跃。"
+    },
+    {
+      "id": 4,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "晨祷流程是做什么的？",
+      "expected_keywords": [
+        "晨祷",
+        "每日",
+        "系统启动",
+        "检查流程"
+      ],
+      "source_files": [
+        "md/晨祷流程规范v2.md",
+        "md/外乡人入职培训大纲.md",
+        "python/orchestrator.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "晨祷是每日系统启动时的标准检查流程。包括检查底噪、嗡鸣度、对所有谐振腔执行试音、确认清浊比达标、执行对钟等操作，确保系统安全进入运行状态。"
+    },
+    {
+      "id": 5,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "散斑是什么？",
+      "expected_keywords": [
+        "散斑",
+        "哈基米泄漏",
+        "副产物",
+        "有害"
+      ],
+      "source_files": [
+        "md/散斑清理最佳实践.md",
+        "md/哈基米系统架构设计.md",
+        "python/cleaner.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "散斑是哈基米泄漏后形成的有害副产物。它会污染系统环境，降低清浊比，大量散斑甚至可能导致谐振腔坍缩。"
+    },
+    {
+      "id": 6,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "清浊比的定义是什么？",
+      "expected_keywords": [
+        "清浊比",
+        "纯净哈基米",
+        "比例",
+        "健康度"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "md/清浊比月度趋势报告.md",
+        "python/harvester.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "清浊比是纯净哈基米与散斑的比例，是衡量系统健康度的核心指标。清浊比越高，系统越健康。"
+    },
+    {
+      "id": 7,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "掌灯人是什么角色？",
+      "expected_keywords": [
+        "掌灯人",
+        "启明",
+        "最高权限",
+        "管理员"
+      ],
+      "source_files": [
+        "md/外乡人入职培训大纲.md",
+        "md/启明仪式操作checklist.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "掌灯人是负责启明仪式的最高权限管理员，拥有系统的最高操作权限。"
+    },
+    {
+      "id": 8,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "潮涌现象是什么？",
+      "expected_keywords": [
+        "潮涌",
+        "哈基米浓度",
+        "突然升高",
+        "异常",
+        "过载"
+      ],
+      "source_files": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/哈基米系统架构设计.md",
+        "python/tidal_surge_detector.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "潮涌是哈基米浓度突然升高的异常现象，可能导致系统过载。需要引雷针引导能量、判官决策泄洪来应对。"
+    },
+    {
+      "id": 9,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "回音壁的作用是什么？",
+      "expected_keywords": [
+        "回音壁",
+        "监测",
+        "嗡鸣度",
+        "传感器"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "md/晨祷流程规范v2.md",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "回音壁是用于监测嗡鸣度的传感器设备，是系统主要的监控数据来源。"
+    },
+    {
+      "id": 10,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "千机匣是什么系统？",
+      "expected_keywords": [
+        "千机匣",
+        "自动化控制",
+        "管理系统",
+        "谐振腔"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "md/通天塔控制台用户手册.md",
+        "python/orchestrator.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "千机匣是自动化控制谐振腔集群的管理系统，负责任务调度、流程编排（如晨祷、晚课、清道夫等）和异常处理。"
+    },
+    {
+      "id": 11,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "三振法则的内容是什么？",
+      "expected_keywords": [
+        "三振法则",
+        "连续三次",
+        "异常",
+        "隔离"
+      ],
+      "source_files": [
+        "md/三振法则触发案例分析.md",
+        "md/外乡人入职培训大纲.md",
+        "python/watchdog.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "三振法则是连续三次嗡鸣度异常则自动触发隔离的安全策略。由看门狗进程监控计数，达到三次后触发锁龙井锁定谐振腔。"
+    },
+    {
+      "id": 12,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "渡鸦团队负责什么？",
+      "expected_keywords": [
+        "渡鸦",
+        "暗流调查",
+        "安全",
+        "审计"
+      ],
+      "source_files": [
+        "md/渡鸦团队行动守则.md",
+        "md/暗流事件调查记录-202405.md",
+        "python/tracer.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "渡鸦团队是负责暗流调查和安全的审计团队，专门调查不经过旋涡协议的非法哈基米传输。"
+    },
+    {
+      "id": 13,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "红线是什么意思？",
+      "expected_keywords": [
+        "红线",
+        "嗡鸣度",
+        "阈值",
+        "不可超过",
+        "安全"
+      ],
+      "source_files": [
+        "md/谐振腔操作手册.md",
+        "md/外乡人入职培训大纲.md",
+        "python/resonator.py"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "红线是嗡鸣度不可超过的安全阈值。超过红线意味着系统处于危险状态，可能触发三振法则和泄洪操作。"
+    },
+    {
+      "id": 14,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "枯水期和丰水期分别指什么？",
+      "expected_keywords": [
+        "枯水期",
+        "丰水期",
+        "哈基米产出"
+      ],
+      "source_files": [
+        "md/枯水期应对策略.md",
+        "pptx/Q4哈基米产能规划.pptx",
+        "md/年度哈基米产出报告.md"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "枯水期是哈基米产出的低谷周期，丰水期是哈基米产出的高峰周期。这两个周期影响系统的调度策略。"
+    },
+    {
+      "id": 15,
+      "type": "direct_definition",
+      "difficulty": "easy",
+      "question": "启明仪式是什么？",
+      "expected_keywords": [
+        "启明",
+        "首次",
+        "注入哈基米",
+        "初始化"
+      ],
+      "source_files": [
+        "md/启明仪式操作checklist.md",
+        "md/外乡人入职培训大纲.md",
+        "puml/启明仪式协作图.puml"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "启明是首次向系统注入哈基米的初始化仪式，由掌灯人执行，包括开光、注入哈基米、晶格化和验证嗡鸣度等步骤。"
+    },
+    {
+      "id": 16,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "潮涌和散斑之间有什么关系？",
+      "expected_keywords": [
+        "潮涌",
+        "散斑",
+        "导致",
+        "泄漏",
+        "产生"
+      ],
+      "source_files": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/散斑清理最佳实践.md",
+        "md/补天流程演练总结.md"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "潮涌会导致哈基米浓度骤增，进而引发泄漏产生大量散斑。Q3事故复盘中，潮涌后产生了大规模散斑污染，需要执行补天流程清理。"
+    },
+    {
+      "id": 17,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "清道夫和园丁是什么关系？",
+      "expected_keywords": [
+        "清道夫",
+        "园丁",
+        "团队",
+        "执行",
+        "清理散斑"
+      ],
+      "source_files": [
+        "md/散斑清理最佳实践.md",
+        "md/2024年Q3潮涌事故复盘.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "清道夫是清理散斑的自动化维护流程，而园丁是负责执行清道夫操作的运维团队。清道夫是流程，园丁是执行者。"
+    },
+    {
+      "id": 18,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "判官和看门狗如何协作？",
+      "expected_keywords": [
+        "判官",
+        "看门狗",
+        "三振法则",
+        "触发",
+        "决策",
+        "泄洪"
+      ],
+      "source_files": [
+        "md/判官系统决策逻辑说明.md",
+        "md/三振法则触发案例分析.md",
+        "python/watchdog.py",
+        "python/judge.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "看门狗是监控进程，负责检测嗡鸣度异常并执行三振法则计数。当连续三次异常时，看门狗通知判官系统，由判官做最终决策（如是否触发泄洪或锁龙井）。"
+    },
+    {
+      "id": 19,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "镀层晦暗会导致什么后果？",
+      "expected_keywords": [
+        "镀层",
+        "晦暗",
+        "老化",
+        "散斑",
+        "泄漏",
+        "换羽"
+      ],
+      "source_files": [
+        "md/散斑清理最佳实践.md",
+        "md/谐振腔镀层老化分析报告.md",
+        "python/crystalizer.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "镀层晦暗表示镀层老化、失去保护能力，会导致哈基米泄漏形成散斑，降低清浊比。此时需要执行换羽操作更换镀层。"
+    },
+    {
+      "id": 20,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "织网和叠韵有什么关联？",
+      "expected_keywords": [
+        "织网",
+        "叠韵",
+        "频率",
+        "同步",
+        "连接"
+      ],
+      "source_files": [
+        "md/织网工程师认证指南.md",
+        "md/叠韵技术内部培训.md",
+        "python/weaver.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "织网是建立多个谐振腔之间连接的操作，叠韵是将多个谐振腔调整至相同频率的技巧。在织网过程中需要使用叠韵技术确保连接的谐振腔频率同步。"
+    },
+    {
+      "id": 21,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "听风者和回音壁之间是什么关系？",
+      "expected_keywords": [
+        "听风者",
+        "回音壁",
+        "数据",
+        "分析",
+        "嗡鸣度"
+      ],
+      "source_files": [
+        "md/听风者周报模板.md",
+        "md/回音壁部署位置优化.md",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "回音壁是采集嗡鸣度数据的传感器设备，听风者是分析嗡鸣度模式的数据团队。听风者依赖回音壁提供的数据进行分析和周报编制。"
+    },
+    {
+      "id": 22,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "暗流和隐身衣是什么关系？",
+      "expected_keywords": [
+        "暗流",
+        "隐身衣",
+        "逃避检测",
+        "不被发现"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md",
+        "python/tracer.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "暗流是不经过旋涡协议的非法哈基米传输。隐身衣是让暗流不被渡鸦团队检测到的隐藏技术。使用隐身衣的暗流更难被发现。"
+    },
+    {
+      "id": 23,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "金蝉脱壳和热备份有什么关联？",
+      "expected_keywords": [
+        "金蝉脱壳",
+        "热备份",
+        "迁移",
+        "故障",
+        "无损"
+      ],
+      "source_files": [
+        "md/金蝉脱壳实施指南.md",
+        "md/跃迁性能调优记录.md",
+        "python/resonator.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "金蝉脱壳是将故障谐振腔的哈基米无损迁移的技术，执行金蝉脱壳需要有可用的热备份（随时可接管的冗余谐振腔）作为迁移目标。"
+    },
+    {
+      "id": 24,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "账房和暗流之间有什么关系？",
+      "expected_keywords": [
+        "账房",
+        "暗流",
+        "收支",
+        "不平",
+        "审计",
+        "发现"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/账房审计接口文档.md",
+        "python/auditor.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "账房是记录哈基米收支流水的审计系统。暗流是不经过正常协议的非法传输，会在账房的收支记录中产生不平衡，因此渡鸦团队通过账房数据发现暗流线索。"
+    },
+    {
+      "id": 25,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "引雷针和八卦镜在潮涌处理中各自扮演什么角色？",
+      "expected_keywords": [
+        "引雷针",
+        "八卦镜",
+        "潮涌",
+        "引导能量",
+        "反射污染"
+      ],
+      "source_files": [
+        "puml/潮涌处理组件图.puml",
+        "md/补天流程演练总结.md",
+        "cpp/burst_buffer.h"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "在潮涌处理中，引雷针负责引导潮涌能量的安全泄放，八卦镜负责反射散斑污染防止扩散。两者一个处理能量，一个处理污染。"
+    },
+    {
+      "id": 26,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "晨祷和晚课有什么异同？",
+      "expected_keywords": [
+        "晨祷",
+        "晚课",
+        "启动检查",
+        "关闭归档",
+        "每日"
+      ],
+      "source_files": [
+        "md/晨祷流程规范v2.md",
+        "md/外乡人入职培训大纲.md",
+        "python/orchestrator.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "晨祷和晚课都是每日执行的标准流程。不同点：晨祷是系统启动时的检查流程，确保系统安全进入运行态；晚课是系统关闭前的数据归档流程，由账房执行记录。"
+    },
+    {
+      "id": 27,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "调音师和定音鼓如何配合工作？",
+      "expected_keywords": [
+        "调音师",
+        "定音鼓",
+        "校准",
+        "频率",
+        "嗡鸣度"
+      ],
+      "source_files": [
+        "md/叠韵技术内部培训.md",
+        "docx/调音师技能等级评定标准.docx",
+        "python/singer.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "调音师是调整谐振腔嗡鸣度的技术专家，定音鼓是校准谐振腔频率的硬件设备。调音师使用定音鼓来精确校准频率，执行叠韵等高级操作。"
+    },
+    {
+      "id": 28,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "驿站和分流、合流之间是什么关系？",
+      "expected_keywords": [
+        "驿站",
+        "分流",
+        "合流",
+        "缓冲",
+        "中转"
+      ],
+      "source_files": [
+        "xml/驿站缓冲策略.xml",
+        "md/枯水期应对策略.md",
+        "python/messenger.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "驿站是临时中转哈基米的缓冲节点。分流是将单股哈基米流分成多路，合流是将多路汇聚。驿站节点需要执行分流和合流操作来管理中转流量。"
+    },
+    {
+      "id": 29,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "溯光和照妖镜都是检测工具，它们的区别是什么？",
+      "expected_keywords": [
+        "溯光",
+        "照妖镜",
+        "追踪来源",
+        "检测幽灵读数"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/回音壁部署位置优化.md",
+        "python/tracer.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "溯光用于追踪哈基米的来源和路径，主要用于调查暗流等非法传输的来源；照妖镜是专门检测幽灵读数（虚假嗡鸣度读数）的诊断工具，用于排查回音壁故障。"
+    },
+    {
+      "id": 30,
+      "type": "concept_relation",
+      "difficulty": "medium",
+      "question": "铁匠和换羽、换骨是什么关系？",
+      "expected_keywords": [
+        "铁匠",
+        "换羽",
+        "换骨",
+        "维护"
+      ],
+      "source_files": [
+        "md/谐振腔操作手册.md",
+        "docx/谐振腔生命周期管理.docx",
+        "yaml/role_permissions.yaml"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "铁匠是负责换骨和换羽等硬件维护的工程团队。换羽是定期更换镀层的操作，换骨是更换谐振腔核心部件的大修操作，两者都由铁匠团队执行。"
+    },
+    {
+      "id": 31,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "从静默态恢复到运行态需要经过哪些步骤？",
+      "expected_keywords": [
+        "静默态",
+        "温存",
+        "破茧",
+        "晨祷",
+        "运行态"
+      ],
+      "source_files": [
+        "md/晨祷流程规范v2.md",
+        "md/封窖操作注意事项.md",
+        "puml/谐振腔状态机.puml"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "从静默态恢复的完整流程称为'破茧'：首先系统从静默态进入温存状态（维持最低嗡鸣度），然后执行晨祷检查流程（检查底噪、试音、对钟等），最后确认各项指标正常后进入运行态。"
+    },
+    {
+      "id": 32,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "当嗡鸣度连续三次超过红线时，系统会怎么处理？",
+      "expected_keywords": [
+        "嗡鸣度",
+        "红线",
+        "三振法则",
+        "看门狗",
+        "锁龙井",
+        "隔离"
+      ],
+      "source_files": [
+        "md/三振法则触发案例分析.md",
+        "md/判官系统决策逻辑说明.md",
+        "python/watchdog.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "触发三振法则：看门狗进程检测到连续三次异常后，自动触发锁龙井机制锁定谐振腔，隔离故障单元，并通知判官系统进行后续决策。"
+    },
+    {
+      "id": 33,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "织网操作从开始到结束包含哪些关键步骤？",
+      "expected_keywords": [
+        "织网",
+        "走线",
+        "埋点",
+        "叠韵",
+        "收网",
+        "验证"
+      ],
+      "source_files": [
+        "md/织网工程师认证指南.md",
+        "puml/织网部署架构图.puml",
+        "python/weaver.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "织网操作包含：1)走线-规划传输路径；2)埋点-在路径上设置监测点；3)连接谐振腔并使用叠韵同步频率；4)收网-验证连接质量；5)使用量天尺测量传输损耗确认达标。"
+    },
+    {
+      "id": 34,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "启明仪式的完整流程是什么？",
+      "expected_keywords": [
+        "启明",
+        "掌灯人",
+        "开光",
+        "注入",
+        "晶格化",
+        "监测"
+      ],
+      "source_files": [
+        "md/启明仪式操作checklist.md",
+        "puml/启明仪式协作图.puml",
+        "docx/启明仪式风险评估报告.docx"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "启明仪式流程：1)掌灯人主持；2)对新谐振腔执行开光；3)注入哈基米；4)执行晶格化将离散哈基米固化；5)验证嗡鸣度在红线以下；6)账房记录。"
+    },
+    {
+      "id": 35,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "潮涌发生时，从检测到处置的完整流程是什么？",
+      "expected_keywords": [
+        "潮涌",
+        "回音壁检测",
+        "判官决策",
+        "引雷针",
+        "泄洪",
+        "补天"
+      ],
+      "source_files": [
+        "puml/潮涌处理组件图.puml",
+        "md/2024年Q3潮涌事故复盘.md",
+        "python/tidal_surge_detector.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "完整流程：1)回音壁检测到嗡鸣度异常升高；2)判官系统根据规则判断是否为真实潮涌（排除假涌）；3)若确认潮涌，触发引雷针引导能量；4)必要时判官决策泄洪；5)潮涌后使用八卦镜反射散斑；6)执行补天流程清理大规模散斑。"
+    },
+    {
+      "id": 36,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "一个谐振腔从新腔部署到正式运行需要经历哪些阶段？",
+      "expected_keywords": [
+        "谐振腔",
+        "开光",
+        "试音",
+        "启明",
+        "运行态"
+      ],
+      "source_files": [
+        "md/谐振腔操作手册.md",
+        "md/启明仪式操作checklist.md",
+        "python/resonator.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "阶段包括：1)开光-新腔首次启用初始化；2)试音-快速测试是否可用；3)启明-注入哈基米并晶格化；4)试运行-监控嗡鸣度是否稳定在共振峰内；5)正式进入运行态。"
+    },
+    {
+      "id": 37,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "散斑污染发生后，清理流程如何执行？",
+      "expected_keywords": [
+        "散斑",
+        "清道夫",
+        "八卦镜",
+        "补天",
+        "清浊比"
+      ],
+      "source_files": [
+        "md/散斑清理最佳实践.md",
+        "md/补天流程演练总结.md",
+        "python/cleaner.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "清理流程：1)使用溯光追溯散斑来源；2)部署八卦镜防止污染扩散；3)园丁团队执行清道夫流程清理散斑；4)若为大规模污染则启动补天应急流程；5)清理后确认清浊比恢复正常。"
+    },
+    {
+      "id": 38,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "暗流被发现后，渡鸦团队的处理流程是什么？",
+      "expected_keywords": [
+        "暗流",
+        "渡鸦",
+        "溯光",
+        "照妖镜",
+        "锁龙井",
+        "账房"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md",
+        "python/tracer.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "处理流程：1)账房系统发现收支不平衡触发警报；2)渡鸦团队介入，使用溯光技术追踪暗流来源；3)使用照妖镜排除幽灵读数干扰；4)确认后触发锁龙井阻断暗流；5)调查是否使用了隐身衣技术。"
+    },
+    {
+      "id": 39,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "枯水期应该采取哪些应对策略？",
+      "expected_keywords": [
+        "枯水期",
+        "借东风",
+        "温存"
+      ],
+      "source_files": [
+        "md/枯水期应对策略.md",
+        "pptx/Q4哈基米产能规划.pptx"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "枯水期策略包括：1)借东风-利用之前丰水期的超额产能储备；2)草船借箭-从其他系统临时借用哈基米；3)封窖-对非核心谐振腔执行长期休眠存储；4)温存-维持最低嗡鸣度的待机状态节省能量。"
+    },
+    {
+      "id": 40,
+      "type": "process_understanding",
+      "difficulty": "medium",
+      "question": "跃迁操作的执行步骤和失败回退机制是什么？",
+      "expected_keywords": [
+        "跃迁",
+        "对钟",
+        "风火轮",
+        "安全弦",
+        "断流",
+        "回退"
+      ],
+      "source_files": [
+        "md/跃迁性能调优记录.md",
+        "puml/跃迁过程序列图.puml",
+        "python/vortex_protocol.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "执行步骤：1)源腔和目标腔执行对钟确保时间同步；2)使用风火轮加速跃迁过程；3)在安全弦参数边界内执行传输；4)验证跃迁完成。失败回退：若发生断流，自动回退到跃迁前状态，不影响源腔哈基米。"
+    },
+    {
+      "id": 41,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "为什么Q3潮涌事故初期被误判为假涌？",
+      "expected_keywords": [
+        "回音壁",
+        "盲区",
+        "幽灵读数",
+        "干扰",
+        "判断"
+      ],
+      "source_files": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/听风者周报模板.md",
+        "md/回音壁部署位置优化.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "误判原因：1)回音壁存在监测盲区，未能及时发现真实潮涌；2)同时出现了幽灵读数（虚假嗡鸣度），干扰了判断；3)判官系统的规则配置将部分指标误匹配为假涌特征。"
+    },
+    {
+      "id": 42,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "从代码角度看，vortex_protocol.py中处理断流异常的逻辑是什么？",
+      "expected_keywords": [
+        "断流",
+        "异常",
+        "重传",
+        "重试",
+        "信使"
+      ],
+      "source_files": [
+        "python/vortex_protocol.py",
+        "md/旋涡协议技术白皮书.md",
+        "cpp/vortex_engine.cpp"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "断流异常处理逻辑：1)检测到传输中断后抛出ProtocolError异常；2)启动重试机制，最多重试MAX_RETRIES次；3)通过信使向接收端发送断流通知；4)若重试失败，标记该传输路径为不可用并上报。"
+    },
+    {
+      "id": 43,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "判官系统在什么条件下会决定触发泄洪？",
+      "expected_keywords": [
+        "判官",
+        "泄洪",
+        "潮涌",
+        "红线",
+        "规则",
+        "决策"
+      ],
+      "source_files": [
+        "md/判官系统决策逻辑说明.md",
+        "xml/判官规则引擎配置.xml",
+        "python/judge.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "泄洪触发条件：1)回音壁检测到嗡鸣度超过红线；2)潮涌检测器确认为真实潮涌（非假涌）；3)引雷针已部署但仍无法控制能量；4)判官规则引擎评估风险后做出泄洪决策。"
+    },
+    {
+      "id": 44,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "从系统配置看，嗡鸣度的安全运行区间是如何定义的？",
+      "expected_keywords": [
+        "嗡鸣度",
+        "共振峰",
+        "底噪",
+        "红线",
+        "安全弦"
+      ],
+      "source_files": [
+        "yaml/system_config.yaml",
+        "xml/谐振腔配置模板.xml",
+        "json/metric_definitions.json"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "安全运行区间定义：底噪（最低基线，约100.0）以上，共振峰区间内（420.0-580.0），红线以下（720.0）。安全弦是整个稳定运行的参数边界范围。"
+    },
+    {
+      "id": 45,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "为什么暗流能够绕过系统的正常监控被发现？",
+      "expected_keywords": [
+        "暗流",
+        "旋涡协议",
+        "隐身衣",
+        "不经过"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md",
+        "xml/分水岭隔离策略.xml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "暗流不经过旋涡协议（标准传输协议），因此绕过了基于旋涡协议的正常监控。如果使用了隐身衣技术，连渡鸦团队的专项检测也难以发现。但暗流仍然会在账房的收支记录中暴露。"
+    },
+    {
+      "id": 46,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "清浊比下降的可能原因有哪些？",
+      "expected_keywords": [
+        "清浊比",
+        "散斑增加",
+        "镀层晦暗",
+        "泄漏",
+        "潮涌"
+      ],
+      "source_files": [
+        "md/清浊比月度趋势报告.md",
+        "md/散斑清理最佳实践.md",
+        "md/谐振腔镀层老化分析报告.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "可能原因：1)镀层晦暗老化导致哈基米泄漏增加散斑；2)潮涌事件后产生大量散斑未及时清理；3)谐振腔坍缩导致哈基米意外释放；4)清道夫流程执行不及时。"
+    },
+    {
+      "id": 47,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "从部署拓扑看，整个哈基米系统的架构层次是怎样的？",
+      "expected_keywords": [
+        "通天塔",
+        "千机匣",
+        "谐振腔",
+        "驿站",
+        "分水岭"
+      ],
+      "source_files": [
+        "json/deployment_topology.json",
+        "md/哈基米系统架构设计.md",
+        "puml/织网部署架构图.puml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "架构层次：1)控制中心层-通天塔（统一控制台）和千机匣（自动化控制）；2)谐振腔集群层-核心存储和处理单元；3)传输层-驿站（缓冲节点）和旋涡协议；4)隔离层-分水岭（安全边界）隔离不同区域。"
+    },
+    {
+      "id": 48,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "为什么听风者周报中需要关注毛刺和峰谷差？",
+      "expected_keywords": [
+        "毛刺",
+        "峰谷差",
+        "稳定性",
+        "异常",
+        "嗡鸣度"
+      ],
+      "source_files": [
+        "md/听风者周报模板.md",
+        "python/singer.py",
+        "json/metric_definitions.json"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "毛刺是嗡鸣度曲线上的瞬间异常波动，峰谷差是一个周期内嗡鸣度最大值与最小值的差。两者都是衡量系统稳定性的关键指标，毛刺增多或峰谷差变大都预示系统可能出现问题。"
+    },
+    {
+      "id": 49,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "影子系统在暗流调查中提供了什么关键信息？",
+      "expected_keywords": [
+        "影子",
+        "日志",
+        "关键",
+        "暗流",
+        "备用系统"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "影子系统是不记录在文档中的备用/灾备系统。在暗流调查中，影子系统保存了主系统可能被篡改或删除的关键日志，渡鸦团队通过对比影子系统和主系统的日志差异发现了暗流线索。"
+    },
+    {
+      "id": 50,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "从谐振腔配置模板看，饱和度超过多少会触发告警？",
+      "expected_keywords": [
+        "饱和度",
+        "95",
+        "阈值",
+        "告警",
+        "预警",
+        "紧急"
+      ],
+      "source_files": [
+        "xml/谐振腔配置模板.xml",
+        "md/谐振腔操作手册.md",
+        "python/resonator.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "从配置模板和操作手册看，饱和度超过70%会触发预警，超过85%为临界状态需重点关注，超过95%触发紧急泄洪。70%是预警阈值，95%是紧急阈值。"
+    },
+    {
+      "id": 51,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "如果回音壁出现幽灵读数，应该用什么工具诊断？",
+      "expected_keywords": [
+        "幽灵读数",
+        "照妖镜",
+        "诊断",
+        "回音壁"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/回音壁部署位置优化.md",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "应该使用照妖镜进行诊断。照妖镜是专门检测幽灵读数（虚假嗡鸣度读数）的专项诊断工具。"
+    },
+    {
+      "id": 52,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "为什么Q3事故中判官系统延迟了泄洪决策？",
+      "expected_keywords": [
+        "判官",
+        "延迟",
+        "假涌",
+        "误判",
+        "规则"
+      ],
+      "source_files": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/判官系统决策逻辑说明.md",
+        "python/judge.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "延迟原因：判官系统的规则配置中存在假涌的判断条件与真实潮涌部分重叠，导致判官在决策时需要更多时间来排除假涌可能性，增加了决策延迟。"
+    },
+    {
+      "id": 53,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "从代码分析，watchdog.py是如何实现三振法则计数逻辑的？",
+      "expected_keywords": [
+        "看门狗",
+        "计数",
+        "三次",
+        "异常",
+        "触发"
+      ],
+      "source_files": [
+        "python/watchdog.py",
+        "md/三振法则触发案例分析.md",
+        "yaml/alert_rules.yaml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "watchdog.py维护一个异常计数器，每次检测到嗡鸣度异常（如毛刺超过阈值）时计数器加1，计数器达到3时自动触发锁龙井锁定谐振腔，并通知判官系统。正常时计数器会定期复位。"
+    },
+    {
+      "id": 54,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "叠韵技术为什么需要定音鼓？",
+      "expected_keywords": [
+        "叠韵",
+        "定音鼓",
+        "校准",
+        "频率"
+      ],
+      "source_files": [
+        "md/叠韵技术内部培训.md",
+        "docx/调音师技能等级评定标准.docx",
+        "python/singer.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "叠韵是将多个谐振腔调整至相同频率的同步技巧。定音鼓是校准谐振腔频率的硬件设备，提供精确的频率参考标准。没有定音鼓的精确校准，叠韵操作无法保证频率同步的精度。"
+    },
+    {
+      "id": 55,
+      "type": "tacit_inference",
+      "difficulty": "hard",
+      "question": "封窖状态下系统的嗡鸣度应该维持在什么水平？",
+      "expected_keywords": [
+        "封窖",
+        "温存",
+        "最低",
+        "嗡鸣度",
+        "底噪"
+      ],
+      "source_files": [
+        "md/封窖操作注意事项.md",
+        "puml/谐振腔状态机.puml",
+        "yaml/system_config.yaml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "封窖是长期存储哈基米的休眠模式。此时系统处于静默态，嗡鸣度应降至极低水平（接近静默态检测阈值0.01），以最小能耗保持哈基米的稳定存储。"
+    },
+    {
+      "id": 56,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "根据回音壁部署优化建议和事故复盘，当前监测系统的最大缺陷是什么？",
+      "expected_keywords": [
+        "盲区",
+        "覆盖",
+        "回音壁",
+        "漏检"
+      ],
+      "source_files": [
+        "md/回音壁部署位置优化.md",
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/听风者周报模板.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "最大缺陷是回音壁存在监测盲区，导致部分区域的嗡鸣度无法被检测到。Q3事故中正是因为潮涌发生在盲区而未能及时发现，建议增加监测点（埋点）来消除盲区。"
+    },
+    {
+      "id": 57,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "从多份文档推断，导致散斑产生的最常见原因是什么？",
+      "expected_keywords": [
+        "镀层",
+        "晦暗",
+        "老化",
+        "泄漏",
+        "散斑"
+      ],
+      "source_files": [
+        "md/散斑清理最佳实践.md",
+        "md/谐振腔镀层老化分析报告.md",
+        "md/清浊比月度趋势报告.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "最常见原因是镀层晦暗（老化）。多份文档（散斑清理最佳实践、镀层老化分析报告、清浊比趋势报告）都指出镀层老化是散斑产生的首要原因，其次是潮涌等异常事件。"
+    },
+    {
+      "id": 58,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "结合代码和文档，跃迁过程中风火轮的作用是什么？",
+      "expected_keywords": [
+        "风火轮",
+        "加速",
+        "跃迁",
+        "性能优化"
+      ],
+      "source_files": [
+        "md/跃迁性能调优记录.md",
+        "cpp/vortex_engine.cpp",
+        "cpp/hjim_energy.h"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "风火轮是加速跃迁过程的性能优化技术。在vortex_engine.cpp中，风火轮通过优化能量转换效率来减少跃迁耗时，降低跃迁过程中的断流风险。"
+    },
+    {
+      "id": 59,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "从角色权限配置和操作手册看，谁有权限执行启明仪式？",
+      "expected_keywords": [
+        "掌灯人",
+        "最高权限",
+        "启明"
+      ],
+      "source_files": [
+        "yaml/role_permissions.yaml",
+        "md/启明仪式操作checklist.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "只有掌灯人有权限执行启明仪式。掌灯人是负责启明的最高权限管理员，权限配置中明确只有掌灯人角色可以执行启明相关操作。"
+    },
+    {
+      "id": 60,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "综合多份文档，织网项目成功的验收标准有哪些？",
+      "expected_keywords": [
+        "织网",
+        "量天尺",
+        "叠韵",
+        "清浊比",
+        "收网",
+        "覆盖"
+      ],
+      "source_files": [
+        "docx/织网项目验收报告.docx",
+        "md/织网工程师认证指南.md",
+        "json/deployment_topology.json"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "验收标准：1)使用量天尺测量传输损耗在允许范围内；2)叠韵操作成功，所有谐振腔频率同步；3)清浊比达标；4)收网验证通过，所有连接稳定；5)回音壁监测覆盖所有新增节点。"
+    },
+    {
+      "id": 61,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "从代码的异常类定义推断，谐振腔可能遇到哪些类型的故障？",
+      "expected_keywords": [
+        "坍缩",
+        "饱和度过高",
+        "嗡鸣度异常",
+        "镀层缺陷"
+      ],
+      "source_files": [
+        "python/resonator.py",
+        "cpp/resonator_core.h",
+        "cpp/resonator_core.cpp"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "谐振腔可能的故障类型：1)谐振腔坍缩异常（CollapseError，继承自ResonatorError）- 失效导致哈基米释放；2)饱和度过高异常（SaturationOverflowError，在C++中定义）- 超过85%阈值；3)嗡鸣度超限异常（RedLineError）- 超出红线；4)镀层缺陷异常（CoatingError，继承自CrystalError）- 照骨灯检测到内部缺陷。"
+    },
+    {
+      "id": 62,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "结合账房接口文档和审计日志格式，哈基米的计量单位是什么？",
+      "expected_keywords": [
+        "哈基米",
+        "晶格化",
+        "结算",
+        "审计"
+      ],
+      "source_files": [
+        "md/账房审计接口文档.md",
+        "xml/账房审计日志格式.xml",
+        "docx/哈基米贸易结算规范.docx"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "哈基米以晶格化后的'单元'为计量单位。账房审计日志中记录的是晶格化后的哈基米单元数量，而非原始离散哈基米。"
+    },
+    {
+      "id": 63,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "从多个文档和代码中推断，信使进程使用什么协议通信？",
+      "expected_keywords": [
+        "信使",
+        "旋涡协议",
+        "通信"
+      ],
+      "source_files": [
+        "python/messenger.py",
+        "md/旋涡协议技术白皮书.md",
+        "python/vortex_protocol.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "信使进程使用旋涡协议进行通信。vortex_protocol.py和messenger.py都引用了旋涡协议的报文格式和编码规则。"
+    },
+    {
+      "id": 64,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "综合听风者周报模板和指标定义，如何判断嗡鸣度数据的质量？",
+      "expected_keywords": [
+        "底噪",
+        "毛刺",
+        "峰谷差",
+        "幽灵读数",
+        "留声机"
+      ],
+      "source_files": [
+        "md/听风者周报模板.md",
+        "json/metric_definitions.json",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "判断数据质量的方法：1)检查底噪是否稳定在正常水平；2)检查毛刺频率和幅度是否在可接受范围；3)峰谷差是否在合理区间；4)排查是否有幽灵读数污染数据；5)确认留声机历史记录完整无缺失。"
+    },
+    {
+      "id": 65,
+      "type": "cross_file_reasoning",
+      "difficulty": "hard",
+      "question": "从告警规则和判官配置看，系统有哪些级别的告警？",
+      "expected_keywords": [
+        "告警",
+        "级别",
+        "critical",
+        "warning",
+        "泄洪"
+      ],
+      "source_files": [
+        "yaml/alert_rules.yaml",
+        "xml/判官规则引擎配置.xml",
+        "python/tidal_surge_detector.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "系统告警级别：1)Emergency（紧急）- 坍缩风险、饱和度超过95%，需要立即泄洪或锁井；2)Critical（危急）- 潮涌确认、饱和度超过85%，需要关注并准备处置；3)Warning（警告）- 嗡鸣度接近红线、饱和度超标，需要关注趋势；4)Info（信息）- 常规状态变化，记录即可。"
+    },
+    {
+      "id": 66,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "crystalizer.py中crystallize方法的主要功能是什么？",
+      "expected_keywords": [
+        "晶格化",
+        "哈基米",
+        "固化",
+        "纯化"
+      ],
+      "source_files": [
+        "python/crystalizer.py",
+        "python/harvester.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "crystallize方法执行晶格化处理：将采集的离散哈基米固化为可用的晶格化单元，同时进行剥离操作提纯哈基米，去除杂质，确保清浊比达标。"
+    },
+    {
+      "id": 67,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "resonator.py中golden_escape方法实现了什么功能？",
+      "expected_keywords": [
+        "金蝉脱壳",
+        "迁移",
+        "故障",
+        "无损",
+        "热备份"
+      ],
+      "source_files": [
+        "python/resonator.py",
+        "md/金蝉脱壳实施指南.md",
+        "cpp/resonator_core.cpp"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "golden_escape方法（对应C++中的executeGoldenShell）实现金蝉脱壳功能：当检测到谐振腔即将坍缩时，将腔内哈基米通过跃迁无损迁移到热备份谐振腔中，使用风火轮加速迁移过程，避免哈基米损失。"
+    },
+    {
+      "id": 68,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "echo_wall.py中检测幽灵读数的算法逻辑是什么？",
+      "expected_keywords": [
+        "幽灵读数",
+        "异常",
+        "比对",
+        "虚假"
+      ],
+      "source_files": [
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "检测逻辑：将当前回音壁读数与留声机历史数据、邻近回音壁读数进行比对，如果读数显著偏离且无法用物理现象解释，则标记为幽灵读数（虚假读数）。"
+    },
+    {
+      "id": 69,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "judge.py中的规则引擎是如何判断是否需要泄洪的？",
+      "expected_keywords": [
+        "判官",
+        "规则",
+        "潮涌",
+        "阈值",
+        "决策"
+      ],
+      "source_files": [
+        "python/judge.py",
+        "xml/判官规则引擎配置.xml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "规则引擎判断逻辑：1)检查潮涌检测器的确认结果；2)检查嗡鸣度是否超过红线；3)评估引雷针是否已无法控制能量；4)检查是否有假涌可能；5)综合评分超过泄洪阈值则触发泄洪。"
+    },
+    {
+      "id": 70,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "cleaner.py中补天流程和日常清道夫有什么区别？",
+      "expected_keywords": [
+        "补天",
+        "大规模",
+        "应急",
+        "清道夫",
+        "日常"
+      ],
+      "source_files": [
+        "python/cleaner.py",
+        "md/补天流程演练总结.md",
+        "md/散斑清理最佳实践.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "区别：补天是应急响应流程，处理大规模散斑污染，需要部署八卦镜防止扩散，调集更多资源；日常清道夫是常规维护，处理少量散斑，按固定周期执行。补天的优先级更高，触发条件更严格。"
+    },
+    {
+      "id": 71,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "tracer.py中detect_dark_flows方法如何识别暗流？",
+      "expected_keywords": [
+        "暗流",
+        "检测",
+        "旋涡协议",
+        "非法",
+        "账房"
+      ],
+      "source_files": [
+        "python/tracer.py",
+        "md/暗流事件调查记录-202405.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "识别方法：1)比对账房收支记录是否平衡；2)使用溯光技术追踪哈基米路径，发现不经过旋涡协议的传输路径；3)检测是否有隐身衣特征信号；4)结合回音壁数据发现异常嗡鸣度分布。"
+    },
+    {
+      "id": 72,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "orchestrator.py中晨祷任务的调度逻辑是什么？",
+      "expected_keywords": [
+        "晨祷",
+        "调度",
+        "每日",
+        "任务",
+        "千机匣"
+      ],
+      "source_files": [
+        "python/orchestrator.py",
+        "md/晨祷流程规范v2.md",
+        "xml/千机匣任务调度配置.xml"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "调度逻辑：千机匣每天在固定时间触发晨祷任务，按顺序执行：检查底噪→检查嗡鸣度→对所有谐振腔执行试音→检查清浊比→执行对钟→确认看门狗状态→从温存破茧进入运行态。"
+    },
+    {
+      "id": 73,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "weaver.py中measure_transmission_loss方法使用什么工具？",
+      "expected_keywords": [
+        "量天尺",
+        "损耗",
+        "路径"
+      ],
+      "source_files": [
+        "python/weaver.py",
+        "md/织网工程师认证指南.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "measure_transmission_loss方法（对应概念中的量天尺）测量传输路径的哈基米损耗。量天尺是专门测量路径损耗的工具，返回损耗率用于评估路径质量。"
+    },
+    {
+      "id": 74,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "singer.py中tune方法的目标是什么？",
+      "expected_keywords": [
+        "谐波",
+        "调整",
+        "共振峰",
+        "嗡鸣度",
+        "定音鼓"
+      ],
+      "source_files": [
+        "python/singer.py",
+        "md/叠韵技术内部培训.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "tune方法的目标是调整谐振腔的谐波参数，使嗡鸣度稳定在共振峰区间内。该方法使用定音鼓提供的频率参考，消除毛刺，减小峰谷差。"
+    },
+    {
+      "id": 75,
+      "type": "code_behavior",
+      "difficulty": "hard",
+      "question": "auditor.py中reconcile_with_trace方法发现了什么类型的异常？",
+      "expected_keywords": [
+        "差异",
+        "暗流",
+        "收支",
+        "不平"
+      ],
+      "source_files": [
+        "python/auditor.py",
+        "md/暗流事件调查记录-202405.md",
+        "md/账房审计接口文档.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "reconcile_with_trace方法发现账房收支不平的差异，这种差异通常是暗流（非法传输）的迹象。当哈基米的收入与支出记录不匹配时，说明存在未被旋涡协议记录的传输。"
+    },
+    {
+      "id": 76,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "从system_config.yaml看，系统的默认底噪值是多少？",
+      "expected_keywords": [
+        "底噪",
+        "100.0",
+        "默认"
+      ],
+      "source_files": [
+        "yaml/system_config.yaml",
+        "json/metric_definitions.json"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "从系统配置看，默认底噪值为100.0。这是系统固有的最低嗡鸣度基线。"
+    },
+    {
+      "id": 77,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "alert_rules.yaml中定义了多少种告警规则？",
+      "expected_keywords": [
+        "告警规则",
+        "数量",
+        "潮涌",
+        "断流",
+        "坍缩"
+      ],
+      "source_files": [
+        "yaml/alert_rules.yaml",
+        "xml/判官规则引擎配置.xml"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "alert_rules.yaml中定义了多种告警规则，包括：潮涌告警、断流告警、坍缩风险告警、饱和度超标告警、幽灵读数告警等，按critical/warning/info分级。"
+    },
+    {
+      "id": 78,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "deployment_topology.json中定义了多少个谐振腔节点？",
+      "expected_keywords": [
+        "谐振腔",
+        "节点",
+        "数量"
+      ],
+      "source_files": [
+        "json/deployment_topology.json"
+      ],
+      "reasoning_depth": 1,
+      "standard_answer": "deployment_topology.json中定义了多个谐振腔节点（具体数量根据配置），包括主谐振腔、热备份谐振腔以及种月部署的小型谐振腔。"
+    },
+    {
+      "id": 79,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "从metric_definitions.json看，清浊比的单位是什么？",
+      "expected_keywords": [
+        "清浊比",
+        "百分比",
+        "ratio"
+      ],
+      "source_files": [
+        "json/metric_definitions.json",
+        "md/清浊比月度趋势报告.md"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "从指标定义看，清浊比是一个百分比值（ratio），表示纯净哈基米与散斑的比例，通常用百分比或小数表示。"
+    },
+    {
+      "id": 80,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "role_permissions.yaml中，外乡人有哪些权限限制？",
+      "expected_keywords": [
+        "外乡人",
+        "只读",
+        "受限",
+        "不能操作"
+      ],
+      "source_files": [
+        "yaml/role_permissions.yaml",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "外乡人（新员工）权限受限：只能查看嗡鸣度数据（只读），不能执行任何操作（启明、泄洪、织网等），不能修改配置，需要在老把式指导下工作。试用期90天后可申请晋升为守望者。"
+    },
+    {
+      "id": 81,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "从谐振腔配置模板看，共振峰的范围是多少？",
+      "expected_keywords": [
+        "共振峰",
+        "420",
+        "580",
+        "范围"
+      ],
+      "source_files": [
+        "xml/谐振腔配置模板.xml",
+        "json/metric_definitions.json"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "从配置模板看，共振峰范围是420.0到580.0。这是嗡鸣度的理想工作区间。"
+    },
+    {
+      "id": 82,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "旋涡协议报文定义中，消息类型有哪些？",
+      "expected_keywords": [
+        "消息类型",
+        "标准传输",
+        "跃迁请求",
+        "晶格化",
+        "剥离"
+      ],
+      "source_files": [
+        "xml/旋涡协议报文定义.xml",
+        "python/vortex_protocol.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "旋涡协议报文定义中的消息类型包括：标准传输（0x01）、跃迁请求（0x02）、晶格化指令（0x03）、剥离指令（0x04），以及异常状态码：断流（0xE1）、回流（0xE2）、晶格化失败（0xE3）、跃迁超时（0xE4）等。"
+    },
+    {
+      "id": 83,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "千机匣任务调度配置中，晨祷的执行周期是什么？",
+      "expected_keywords": [
+        "晨祷",
+        "每日",
+        "定时",
+        "调度"
+      ],
+      "source_files": [
+        "xml/千机匣任务调度配置.xml",
+        "md/晨祷流程规范v2.md"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "晨祷的执行周期是每日一次，在系统启动时执行。千机匣任务调度配置中将其定义为定时任务。"
+    },
+    {
+      "id": 84,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "信使路由表中定义了哪些路由策略？",
+      "expected_keywords": [
+        "路由",
+        "接力",
+        "分流",
+        "合流",
+        "驿站"
+      ],
+      "source_files": [
+        "xml/信使路由表.xml",
+        "python/messenger.py"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "路由策略包括：接力（多腔串联传输）、分流（单股分成多路）、合流（多路汇聚）、直传（点对点传输）。每条路由规则定义了目标、路径和使用的驿站节点。"
+    },
+    {
+      "id": 85,
+      "type": "config_inference",
+      "difficulty": "medium",
+      "question": "镀层材质参数中，换羽的触发条件是什么？",
+      "expected_keywords": [
+        "换羽",
+        "晦暗",
+        "阈值",
+        "老化"
+      ],
+      "source_files": [
+        "xml/镀层材质参数.xml",
+        "md/谐振腔镀层老化分析报告.md"
+      ],
+      "reasoning_depth": 2,
+      "standard_answer": "换羽的触发条件：当照骨灯检测到镀层晦暗（老化）程度超过设定阈值时触发。阈值在镀层材质参数配置中定义。"
+    },
+    {
+      "id": 86,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从多份文档推断，为什么暗流调查需要账房团队配合？",
+      "expected_keywords": [
+        "账房",
+        "暗流",
+        "收支",
+        "不平",
+        "审计发现"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md",
+        "python/auditor.py"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "因为暗流虽然可以绕过旋涡协议的监控，甚至使用隐身衣逃避渡鸦的检测，但暗流会导致哈基米收支不平衡。账房系统的审计记录是发现暗流的关键突破口，渡鸦需要账房的收支差异数据来定位暗流。"
+    },
+    {
+      "id": 87,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "为什么Q3事故复盘建议增加回音壁监测点？",
+      "expected_keywords": [
+        "盲区",
+        "漏检",
+        "覆盖",
+        "回音壁"
+      ],
+      "source_files": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "md/回音壁部署位置优化.md",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "因为Q3事故中潮涌发生在回音壁的监测盲区，导致未能及时发现。增加监测点（埋点）可以消除盲区，确保嗡鸣度监测全覆盖，避免类似漏检。"
+    },
+    {
+      "id": 88,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从代码注释推断，金蝉脱壳操作有什么前提条件？",
+      "expected_keywords": [
+        "热备份",
+        "可用",
+        "跃迁",
+        "容量"
+      ],
+      "source_files": [
+        "python/resonator.py",
+        "md/金蝉脱壳实施指南.md",
+        "cpp/resonator_core.cpp"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "前提条件：1)必须有可用的热备份谐振腔；2)热备份的容量足以接收迁移的哈基米；3)源腔和目标腔之间的跃迁路径可用；4)嗡鸣度在安全弦范围内，允许执行跃迁。"
+    },
+    {
+      "id": 89,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "为什么枯水期策略中提到封窖和温存的配合？",
+      "expected_keywords": [
+        "枯水期",
+        "封窖",
+        "温存",
+        "节能",
+        "低功耗"
+      ],
+      "source_files": [
+        "md/枯水期应对策略.md",
+        "md/封窖操作注意事项.md",
+        "puml/谐振腔状态机.puml"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "枯水期哈基米产出低，需要节省能量。封窖将非核心谐振腔置入长期休眠，温存维持最低嗡鸣度待机。两者配合可以最大化降低能耗，等待丰水期到来。"
+    },
+    {
+      "id": 90,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从调度配置推断，晚课和账房审计之间有什么关联？",
+      "expected_keywords": [
+        "晚课",
+        "账房",
+        "归档",
+        "审计",
+        "数据"
+      ],
+      "source_files": [
+        "xml/千机匣任务调度配置.xml",
+        "md/账房审计接口文档.md",
+        "xml/账房审计日志格式.xml"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "晚课是每日关闭前的数据归档流程，归档的数据包括哈基米收支记录。账房审计依赖晚课归档的数据进行核对，因此晚课必须在账房审计之前完成。"
+    },
+    {
+      "id": 91,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "为什么调音师技能评定中，老把式的经验被特别强调？",
+      "expected_keywords": [
+        "老把式",
+        "经验",
+        "叠韵",
+        "调音",
+        "十年"
+      ],
+      "source_files": [
+        "docx/调音师技能等级评定标准.docx",
+        "md/叠韵技术内部培训.md",
+        "md/外乡人入职培训大纲.md"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "因为叠韵等高级调音操作需要丰富的实践经验。老把式（十年以上经验的工程师）对嗡鸣度的微妙变化有直觉判断，能在仪器数据之外感知系统状态，这是书本上学不到的隐式知识。"
+    },
+    {
+      "id": 92,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从部署拓扑和路由表看，驿站节点的部署策略是什么？",
+      "expected_keywords": [
+        "驿站",
+        "中继",
+        "分布",
+        "负载均衡"
+      ],
+      "source_files": [
+        "json/deployment_topology.json",
+        "xml/信使路由表.xml",
+        "xml/驿站缓冲策略.xml"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "驿站节点部署在谐振腔集群之间，作为中继和缓冲。部署策略是负载均衡：在高频传输路径上部署更多驿站，偏远区域使用种月部署小型驿站。"
+    },
+    {
+      "id": 93,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从补天演练总结看，八卦镜在什么情况下可能失效？",
+      "expected_keywords": [
+        "八卦镜",
+        "过载",
+        "散斑量",
+        "超过",
+        "容量"
+      ],
+      "source_files": [
+        "md/补天流程演练总结.md",
+        "md/散斑清理最佳实践.md",
+        "puml/潮涌处理组件图.puml"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "当散斑量超过八卦镜的反射容量时可能失效。补天演练中发现，如果潮涌产生的散斑量过大，八卦镜会过载，需要额外部署多个八卦镜分担负载。"
+    },
+    {
+      "id": 94,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从代码中的TODO注释看，哪些功能尚未完整实现？",
+      "expected_keywords": [
+        "TODO",
+        "未完成",
+        "待实现",
+        "实际环境"
+      ],
+      "source_files": [
+        "python/resonator.py",
+        "python/singer.py",
+        "python/watchdog.py",
+        "python/tracer.py",
+        "python/orchestrator.py",
+        "python/auditor.py"
+      ],
+      "reasoning_depth": 3,
+      "standard_answer": "TODO注释标识的未完整实现功能包括：resonator.py中的'实现实际的无损迁移协议'和'接入实际声学检测设备'、singer.py中的'实际环境应持久化到留声机存储'、watchdog.py中的'实际环境应调用判官决策接口'、tracer.py中的'实际环境中应发送通知给渡鸦团队'和'实际实现需要查询账房和照妖镜数据'、orchestrator.py中的'实际环境应触发看门狗计数器'、auditor.py中的'实际环境应通过信使传递状态'。"
+    },
+    {
+      "id": 95,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "综合推断：如果清浊比持续下降且回音壁出现毛刺，可能是什么问题？",
+      "expected_keywords": [
+        "镀层",
+        "晦暗",
+        "泄漏",
+        "散斑",
+        "嗡鸣度",
+        "异常"
+      ],
+      "source_files": [
+        "md/清浊比月度趋势报告.md",
+        "md/听风者周报模板.md",
+        "md/谐振腔镀层老化分析报告.md",
+        "python/echo_wall.py"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "这两个症状同时出现，最可能是镀层晦暗（老化）问题。镀层老化导致哈基米泄漏产生散斑（清浊比下降），同时泄漏的哈基米引起嗡鸣度波动（毛刺）。需要使用照骨灯检查镀层状态，必要时执行换羽。"
+    },
+    {
+      "id": 96,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从暗流调查报告和渡鸦守则看，隐身衣技术目前能完全避免检测吗？",
+      "expected_keywords": [
+        "隐身衣",
+        "不能完全",
+        "账房",
+        "发现",
+        "收支"
+      ],
+      "source_files": [
+        "md/暗流事件调查记录-202405.md",
+        "md/渡鸦团队行动守则.md",
+        "python/auditor.py"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "不能完全避免检测。虽然隐身衣可以让暗流不被回音壁和常规监控发现，但无法避免账房的审计检测。暗流导致的收支不平衡仍然会在账房系统中暴露，渡鸦通过账房数据可以发现异常。"
+    },
+    {
+      "id": 97,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从事故复盘和判官配置看，判官系统的决策延迟根因是什么？",
+      "expected_keywords": [
+        "假涌",
+        "误判",
+        "规则",
+        "阈值",
+        "配置"
+      ],
+      "source_files": [
+        "md/2024年Q3潮涌事故复盘.md",
+        "xml/判官规则引擎配置.xml",
+        "python/judge.py"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "根因是判官规则引擎配置中，假涌的判断条件过于宽松，与真实潮涌的特征有重叠。判官需要额外时间来区分真假潮涌，增加了决策延迟。需要优化规则配置的阈值。"
+    },
+    {
+      "id": 98,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从织网文档和代码推断，移星斗工具相比手动走线有什么优势？",
+      "expected_keywords": [
+        "移星斗",
+        "优化",
+        "自动",
+        "路径",
+        "效率"
+      ],
+      "source_files": [
+        "md/织网工程师认证指南.md",
+        "python/weaver.py",
+        "md/跃迁性能调优记录.md"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "移星斗是自动化的路径优化工具，相比手动走线的优势：1)自动计算最优路径，减少人工试错；2)考虑更多因素（损耗、延迟、负载均衡）；3)效率更高，特别是大规模织网时；4)减少人为错误。"
+    },
+    {
+      "id": 99,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "综合推断：一个外乡人从入职到能独立执行织网操作，需要经过哪些培训和认证？",
+      "expected_keywords": [
+        "外乡人",
+        "培训",
+        "织网",
+        "编织者",
+        "认证",
+        "老把式"
+      ],
+      "source_files": [
+        "md/外乡人入职培训大纲.md",
+        "md/织网工程师认证指南.md",
+        "yaml/role_permissions.yaml"
+      ],
+      "reasoning_depth": 4,
+      "standard_answer": "培养路径：1)入职培训（外乡人培训，了解哈基米、谐振腔、晨祷晚课等基础）；2)在老把式指导下实习；3)学习织网理论和操作（织网工程师认证指南）；4)通过编织者认证考试；5)在监督下执行实际织网项目；6)通过验收后获得独立操作权限。"
+    },
+    {
+      "id": 100,
+      "type": "deep_implicit",
+      "difficulty": "hard",
+      "question": "从全系统角度推断，哈基米系统的设计哲学是什么？",
+      "expected_keywords": [
+        "稳定",
+        "安全",
+        "自动化",
+        "审计",
+        "规范"
+      ],
+      "source_files": [
+        "md/哈基米系统架构设计.md",
+        "yaml/system_config.yaml",
+        "json/deployment_topology.json",
+        "docx/祭司团架构设计规范.docx"
+      ],
+      "reasoning_depth": 5,
+      "standard_answer": "设计哲学体现在：1)稳定性优先-多层安全机制（红线、三振法则、判官）保障稳定；2)安全至上-分层隔离（分水岭）、紧急处置（泄洪、锁井）；3)可追溯-账房审计、留声机记录、溯光追踪；4)自动化-千机匣自动调度、看门狗自动监控；5)冗余容错-热备份、影子系统、金蝉脱壳。"
+    }
+  ],
+  "statistics": {
+    "by_type": {
+      "direct_definition": 15,
+      "concept_relation": 15,
+      "process_understanding": 10,
+      "tacit_inference": 15,
+      "cross_file_reasoning": 10,
+      "code_behavior": 10,
+      "config_inference": 10,
+      "deep_implicit": 15
+    },
+    "by_difficulty": {
+      "easy": 15,
+      "medium": 35,
+      "hard": 50
+    },
+    "by_reasoning_depth": {
+      "depth_1": 16,
+      "depth_2": 35,
+      "depth_3": 37,
+      "depth_4": 11,
+      "depth_5": 1
+    }
+  }
+}

@@ -1,0 +1,386 @@
+{
+  "version": "1.2.0",
+  "description": "哈基米系统指标元数据定义",
+  "last_updated": "2026-04-09",
+  "maintainer": "听风者",
+  "metrics": [
+    {
+      "name": "嗡鸣度",
+      "code": "hum_level",
+      "description": "衡量哈基米活跃状态的指标，反映系统整体能量活跃程度",
+      "unit": "Hz",
+      "unit_full": "Hertz",
+      "data_type": "float",
+      "range": {
+        "min": 0.0,
+        "max": 1000.0
+      },
+      "calculation": {
+        "formula": "weighted_average(sensor_readings, weights)",
+        "source_tables": [
+          "echo_wall_readings",
+          "resonator_status"
+        ],
+        "interval_seconds": 10
+      },
+      "thresholds": {
+        "base_noise": {
+          "value": 100.0,
+          "description": "底噪: 固有最低嗡鸣度，低于此值可能表示传感器故障"
+        },
+        "resonance_peak": {
+          "min": 420.0,
+          "max": 580.0,
+          "description": "共振峰: 嗡鸣度的理想运行区间"
+        },
+        "red_line": {
+          "value": 720.0,
+          "description": "红线: 嗡鸣度不可超过的绝对阈值，标准腔为720.0，大型腔为680.0"
+        }
+      },
+      "related_issues": [
+        "幽灵读数",
+        "毛刺",
+        "假涌"
+      ]
+    },
+    {
+      "name": "清浊比",
+      "code": "purity_ratio",
+      "description": "纯净哈基米与散斑的比例，衡量系统健康度的核心指标，通常以 ratio 或百分比等价形式展示",
+      "unit": "ratio",
+      "unit_aliases": [
+        "ratio",
+        "百分比"
+      ],
+      "data_type": "float",
+      "range": {
+        "min": 0.0,
+        "max": 100.0
+      },
+      "calculation": {
+        "formula": "pure_hakimi_count / speckle_count",
+        "source_tables": [
+          "purity_sensor",
+          "speckle_detector"
+        ],
+        "interval_seconds": 60
+      },
+      "thresholds": {
+        "warning": {
+          "value": 9.0,
+          "description": "低于 90:10 触发清道夫流程"
+        },
+        "critical": {
+          "value": 5.6,
+          "description": "低于 85:15 暂停腔体运行并立刻启动补天流程"
+        },
+        "target": {
+          "value": 19.0,
+          "description": "目标清浊比 95:5，日常运维应维持在此水平"
+        }
+      },
+      "related_issues": [
+        "散斑",
+        "晦暗"
+      ]
+    },
+    {
+      "name": "饱和度",
+      "code": "saturation",
+      "description": "谐振腔当前容量占最大容量的百分比，反映存储使用率",
+      "unit": "percent",
+      "data_type": "float",
+      "range": {
+        "min": 0.0,
+        "max": 100.0
+      },
+      "calculation": {
+        "formula": "(current_hakimi_count / max_capacity) * 100",
+        "source_tables": [
+          "resonator_capacity",
+          "hakimi_inventory"
+        ],
+        "interval_seconds": 30
+      },
+      "thresholds": {
+        "warning": {
+          "value": 70.0,
+          "description": "建议开始分流或扩容"
+        },
+        "critical": {
+          "value": 85.0,
+          "description": "需立即处理，否则可能触发坍缩"
+        },
+        "emergency": {
+          "value": 95.0,
+          "description": "紧急状态，准备泄洪"
+        }
+      },
+      "related_issues": [
+        "坍缩",
+        "溢彩",
+        "晦暗"
+      ]
+    },
+    {
+      "name": "底噪",
+      "code": "base_noise",
+      "description": "固有最低嗡鸣度，系统闲置时的基础读数",
+      "unit": "Hz",
+      "data_type": "float",
+      "range": {
+        "min": 0.0,
+        "max": 200.0
+      },
+      "calculation": {
+        "formula": "percentile(hum_level_readings, 5) during idle period",
+        "source_tables": [
+          "echo_wall_readings"
+        ],
+        "interval_seconds": 300,
+        "condition": "system_state = idle"
+      },
+      "thresholds": {
+        "normal_max": {
+          "value": 5.0,
+          "description": "底噪正常漂移上限: 相对基线(100.0)偏差5.0以内"
+        },
+        "elevated": {
+          "value": 10.0,
+          "description": "底噪升高: 相对基线(100.0)偏差10.0，可能存在隐性泄漏"
+        },
+        "abnormal": {
+          "value": 15.0,
+          "description": "底噪异常: 相对基线(100.0)偏差15.0，需排查散斑或暗流"
+        }
+      },
+      "related_issues": [
+        "散斑",
+        "暗流"
+      ]
+    },
+    {
+      "name": "峰谷差",
+      "code": "peak_valley_diff",
+      "description": "周期内嗡鸣度最大值与最小值的差，反映波动幅度",
+      "unit": "Hz",
+      "data_type": "float",
+      "range": {
+        "min": 0.0,
+        "max": 100.0
+      },
+      "calculation": {
+        "formula": "max(hum_level) - min(hum_level) over window",
+        "source_tables": [
+          "echo_wall_readings"
+        ],
+        "interval_seconds": 3600,
+        "window": "1h"
+      },
+      "thresholds": {
+        "stable": {
+          "value": 20.0,
+          "description": "峰谷差在此范围内表示系统稳定"
+        },
+        "moderate": {
+          "value": 40.0,
+          "description": "中等波动，需关注趋势"
+        },
+        "volatile": {
+          "value": 60.0,
+          "description": "剧烈波动，可能需要调整共振峰参数"
+        }
+      },
+      "related_issues": [
+        "毛刺",
+        "潮涌",
+        "假涌"
+      ]
+    },
+    {
+      "name": "毛刺",
+      "code": "spike_count",
+      "description": "嗡鸣度瞬间异常的次数，短时间内的剧烈波动",
+      "unit": "count",
+      "data_type": "integer",
+      "range": {
+        "min": 0,
+        "max": null
+      },
+      "calculation": {
+        "formula": "count(hum_level_change > spike_threshold within window)",
+        "source_tables": [
+          "echo_wall_readings"
+        ],
+        "interval_seconds": 60,
+        "spike_threshold": 15.0,
+        "window": "5min"
+      },
+      "thresholds": {
+        "normal": {
+          "value": 3,
+          "description": "每5分钟毛刺数不超过3次"
+        },
+        "warning": {
+          "value": 10,
+          "description": "毛刺频繁，可能存在设备干扰"
+        },
+        "critical": {
+          "value": 30,
+          "description": "毛刺密集，可能触发三振法则"
+        }
+      },
+      "related_issues": [
+        "幽灵读数",
+        "回音壁故障"
+      ]
+    },
+    {
+      "name": "共振峰",
+      "code": "resonance_peak",
+      "description": "嗡鸣度的理想运行区间，系统最优效能范围",
+      "unit": "Hz",
+      "data_type": "range",
+      "range": {
+        "min": 0.0,
+        "max": 1000.0
+      },
+      "calculation": {
+        "formula": "calculated from system load and resonator config",
+        "source_tables": [
+          "resonator_config",
+          "performance_baseline"
+        ],
+        "interval_seconds": 3600,
+        "auto_adjust": true
+      },
+      "thresholds": {
+        "lower_bound": {
+          "value": 420.0,
+          "description": "共振峰下限，低于此值效能下降"
+        },
+        "upper_bound": {
+          "value": 580.0,
+          "description": "共振峰上限，接近此值需准备分流"
+        }
+      },
+      "related_issues": [
+        "叠韵",
+        "调音师调整"
+      ]
+    },
+    {
+      "name": "盲区",
+      "code": "coverage_gap",
+      "description": "回音壁无法覆盖的区域数量，监控死角",
+      "unit": "count",
+      "data_type": "integer",
+      "range": {
+        "min": 0,
+        "max": null
+      },
+      "calculation": {
+        "formula": "count(zones without echo_wall coverage)",
+        "source_tables": [
+          "echo_wall_topology",
+          "zone_definitions"
+        ],
+        "interval_seconds": 300
+      },
+      "thresholds": {
+        "acceptable": {
+          "value": 0,
+          "description": "理想状态: 零盲区"
+        },
+        "tolerable": {
+          "value": 2,
+          "description": "可接受的最大盲区数"
+        },
+        "unacceptable": {
+          "value": 5,
+          "description": "盲区过多，需立即调整回音壁布局"
+        }
+      },
+      "related_issues": [
+        "织网调整",
+        "散斑聚集"
+      ]
+    },
+    {
+      "name": "散斑",
+      "code": "speckle_count",
+      "description": "哈基米泄漏形成的副产物数量，污染指标",
+      "unit": "count",
+      "data_type": "integer",
+      "range": {
+        "min": 0,
+        "max": null
+      },
+      "calculation": {
+        "formula": "count(detected_speckle_particles)",
+        "source_tables": [
+          "speckle_detector",
+          "purity_sensor"
+        ],
+        "interval_seconds": 120
+      },
+      "thresholds": {
+        "clean": {
+          "value": 10,
+          "description": "散斑数量在10以内表示系统清洁"
+        },
+        "warning": {
+          "value": 100,
+          "description": "散斑增多，需启动清道夫流程"
+        },
+        "critical": {
+          "value": 1000,
+          "description": "严重污染，需启动补天流程"
+        }
+      },
+      "related_issues": [
+        "晦暗",
+        "镀层老化"
+      ]
+    },
+    {
+      "name": "晦暗",
+      "code": "plating_degradation",
+      "description": "镀层老化表现，通过光泽度检测评估镀层健康状态",
+      "unit": "index",
+      "data_type": "float",
+      "range": {
+        "min": 0.0,
+        "max": 100.0
+      },
+      "calculation": {
+        "formula": "100 - (reflectance_score * weight + defect_score * weight)",
+        "source_tables": [
+          "照骨灯_readings",
+          "plating_inspection"
+        ],
+        "interval_seconds": 3600
+      },
+      "thresholds": {
+        "healthy": {
+          "value": 10.0,
+          "description": "晦暗指数低于10，镀层状态良好(溢彩)"
+        },
+        "aging": {
+          "value": 40.0,
+          "description": "晦暗指数升高，镀层开始老化，建议安排换羽"
+        },
+        "critical": {
+          "value": 70.0,
+          "description": "镀层严重老化，需立即换羽，否则可能导致哈基米泄漏"
+        }
+      },
+      "related_issues": [
+        "溢彩",
+        "散斑",
+        "换羽周期"
+      ]
+    }
+  ]
+}

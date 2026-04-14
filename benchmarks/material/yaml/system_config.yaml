@@ -1,0 +1,166 @@
+# 哈基米系统主配置
+# 版本历史: v2.3.1
+# 最后更新: 2026-04-09
+version: "2.3.1"
+environment: production
+
+# ==================== 核心参数 ====================
+core:
+  # 基础能量单元
+  energy_unit: "哈基米"
+  # 哈基米存储容器类型
+  container_type: "谐振腔"
+  # 旋涡协议版本
+  protocol_version: "vortex-3.2"
+  # 默认传输路径规划算法
+  routing_algorithm: "shortest-path-with-load-balance"
+
+# ==================== 嗡鸣度监控配置 ====================
+monitoring:
+  # 安全弦: 嗡鸣度在底噪以上、共振峰内、红线以下的稳定运行区间
+  safety_string: "base_noise < hum_level <= resonance_peak.max < red_line"
+  # 嗡鸣度衡量参数
+  hum_level:
+    # 红线: 嗡鸣度不可超过的绝对阈值 (标准腔默认值)
+    red_line: 720.0
+    # 共振峰: 嗡鸣度的理想运行区间
+    resonance_peak:
+      min: 420.0
+      max: 580.0
+    # 底噪声: 系统固有最低嗡鸣度
+    base_noise: 100.0
+    # 采样频率 (Hz)
+    sample_rate: 100
+    # 回音壁设备刷新间隔 (秒)
+    echo_wall_refresh: 30
+    # 不同谐振腔规格的阈值配置
+    profiles:
+      standard:
+        red_line: 720.0
+        resonance_peak:
+          min: 420.0
+          max: 580.0
+        base_noise: 100.0
+      large:
+        red_line: 680.0
+        resonance_peak:
+          min: 380.0
+          max: 520.0
+        base_noise: 80.0
+
+# ==================== 谐振腔管理 ====================
+resonator:
+  # 饱和度: 谐振腔容量占比警告阈值
+  saturation:
+    warning: 70.0
+    critical: 85.0
+    emergency: 95.0
+  # 清浊比: 纯净哈基米与散斑的比例要求 (Target 95:5=19, Warning 90:10=9, Moderate 7.0, Emergency 85:15=5.6)
+  purity_ratio:
+    warning: 9.0
+    moderate: 7.0
+    target: 19.0
+    emergency: 5.6
+  # 温存模式: 维持最低嗡鸣度待机
+  warm_standby:
+    enabled: true
+    min_hum_level: 120.0
+    max_idle_minutes: 120
+  # 静默态: 系统无哈基米流动的状态判定
+  silent_state:
+    detection_threshold: 0.01
+    timeout_seconds: 300
+    auto_recovery: true
+
+# ==================== 系统级默认值 ====================
+defaults:
+  # 新谐振腔默认容量
+  default_capacity: 5000
+  # 镀层默认材质
+  plating_material: "titanium-ceramic"
+  # 默认传输超时时间 (秒)
+  transfer_timeout: 60
+  # 日志保留天数
+  log_retention_days: 90
+  # 自动清道夫执行周期 (小时)
+  scavenger_interval: 24
+
+# ==================== 性能调优 ====================
+performance:
+  # 最大并发跃迁数
+  max_concurrent_transitions: 12
+  # 跃迁缓冲池大小
+  transition_buffer_size: 256
+  # 批量处理窗口 (毫秒)
+  batch_window_ms: 50
+  # 连接池大小
+  connection_pool_size: 64
+
+# ==================== 安全配置 ====================
+security:
+  # 暗流检测: 不经过旋涡协议的非法传输
+  dark_flow_detection:
+    enabled: true
+    sensitivity: "high"
+    auto_block: true
+  # 三振法则: 连续三次异常则自动隔离
+  three_strike_rule:
+    enabled: true
+    isolation_duration_hours: 24
+    rolling_window_hours: 24
+    require_manual_review: true
+  # 审计日志
+  audit:
+    enabled: true
+    # 账房系统同步频率 (分钟)
+    sync_interval_minutes: 5
+    # 不可变存储
+    immutable_storage: true
+
+# ==================== 系统设计哲学 ====================
+# 本系统的设计哲学体现在以下核心原则上：
+design_philosophy:
+  # 1. 稳定性优先 - 多层安全机制保障系统稳定运行
+  stability_first:
+    description: "稳定性优先：多层安全机制保障稳定"
+    mechanisms:
+      - "红线阈值: 嗡鸣度不可超过的绝对安全边界"
+      - "三振法则: 连续三次异常自动隔离故障单元"
+      - "判官系统: 自动决策层，评估异常并触发处置"
+      - "看门狗进程: 持续监控，最后一道自动防护"
+
+  # 2. 安全至上 - 分层隔离与紧急处置
+  safety_critical:
+    description: "安全至上：分层隔离与紧急处置机制"
+    mechanisms:
+      - "分水岭: 区域间分层隔离，阻止跨区异常传播"
+      - "泄洪: 紧急状态下快速释放过载能量"
+      - "锁龙井: 故障单元自动锁定隔离"
+      - "静默态/温存态: 多级休眠保护机制"
+
+  # 3. 可追溯 - 全链路审计追踪
+  traceability:
+    description: "可追溯：全链路审计与追踪机制"
+    mechanisms:
+      - "账房审计: 所有哈基米收支记录可追溯"
+      - "留声机: 关键操作全量记录不可篡改"
+      - "溯光技术: 通过散斑回溯哈基米来源路径"
+      - "不可变审计日志: 同步至账房，永久保存"
+
+  # 4. 自动化 - 减少人工干预
+  automation:
+    description: "自动化：千机匣自动调度与监控"
+    mechanisms:
+      - "千机匣: 自动化任务调度引擎，支持定时流程"
+      - "看门狗: 自动监控异常并触发隔离"
+      - "自动清道夫: 定时执行散斑清理"
+      - "自愈网格: 连接断开后自动重试恢复"
+
+  # 5. 冗余容错 - 多层备份与应急
+  fault_tolerance:
+    description: "冗余容错：热备份与应急切换机制"
+    mechanisms:
+      - "热备份: 关键组件双活部署"
+      - "影子系统: 备用系统可随时接管"
+      - "金蝉脱壳: 故障腔体迁移至健康载体"
+      - "多路径路由: 每个目标至少2条冗余路径"

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 分水岭隔离策略 - 定义系统隔离边界的规则与异常处理 -->
+<!-- 分水岭是防止暗流扩散和污染蔓延的关键防线 -->
+<config version="2.0" xmlns="http://hajimi.example.org/schema">
+
+    <!-- 隔离边界定义 -->
+    <section name="边界配置">
+        <boundary id="BDY-001" name="A区-主隔离带" status="active">
+            <param name="覆盖谐振腔" value="腔组-A1,腔组-A2,腔组-A3" unit="列表"/>
+        <param name="安全弦嗡鸣度上限" value="580.0">
+            <description>标准腔共振峰上限；超过此值表示已处于安全弦外运行，需提前预警</description>
+        </param>
+            <param name="暗流检测灵敏度" value="高" unit="级别">
+                <description>对暗流的检测灵敏度，暗流为不经过旋涡协议的非法传输</description>
+            </param>
+        </boundary>
+        <boundary id="BDY-002" name="B区-次隔离带" status="active">
+            <param name="覆盖谐振腔" value="腔组-B1,腔组-B2" unit="列表"/>
+        <param name="安全弦嗡鸣度上限" value="580.0">
+            <description>标准腔共振峰上限；超过此值表示已处于安全弦外运行，需提前预警</description>
+        </param>
+        <param name="暗流检测灵敏度" value="中" unit="级别"/>
+        </boundary>
+    </section>
+
+    <!-- 异常处理规则 -->
+    <section name="隔离触发规则">
+        <rule id="ISO-001" priority="1">
+            <condition field="三振法则命中" operator="==" threshold="true">
+                <description>连续三次异常触发三振法则，立即启动隔离</description>
+            </condition>
+            <action type="执行锁龙井" target="涉事谐振腔">
+                <param name="锁定级别" value="硬锁定"/>
+                <param name="通知回音壁" value="true" description="通知回音壁加强对涉事区域的监测"/>
+            </action>
+        </rule>
+        <rule id="ISO-002" priority="2">
+            <condition field="旋涡协议校验" operator="==" threshold="非法报文">
+                <description>检测到不符合旋涡协议格式的报文，疑似暗流</description>
+            </condition>
+            <action type="报文拦截" target="分水岭防火墙">
+                <param name="拦截模式" value="丢弃并记录"/>
+            </action>
+        </rule>
+        <rule id="ISO-003" priority="3">
+            <condition field="回音壁盲区异常" operator="==" threshold="true">
+                <description>回音壁盲区出现异常嗡鸣度波动</description>
+            </condition>
+            <action type="部署临时监测" target="移动式回音壁">
+                <param name="覆盖盲区" value="BS-001,BS-002"/>
+            </action>
+        </rule>
+    </section>
+
+    <!-- 判官联动 -->
+    <section name="判官协同">
+        <param name="判官决策延迟" value="200" unit="毫秒">
+            <description>分水岭将异常上报判官后的最大决策等待时间</description>
+        </param>
+        <param name="自动隔离超时" value="5000" unit="毫秒">
+            <description>判官超时未响应时分水岭自动执行隔离</description>
+        </param>
+        <linkage event="隔离触发" notify="判官,回音壁,看门狗">
+            <description>隔离触发时同步通知判官、回音壁和看门狗</description>
+        </linkage>
+    </section>
+
+    <!-- 隔离解除条件 -->
+    <section name="解除策略">
+        <param name="冷却观察期" value="1800" unit="秒">
+            <description>隔离后需要观察的最小冷却时长</description>
+        </param>
+        <param name="解除条件" value="连续观察期内无异常">
+            <description>隔离解除需满足冷却期内零异常</description>
+        </param>
+        <param name="解除审批" value="祭司团授权" unit="权限">
+            <description>隔离解除需要祭司团的审批授权</description>
+        </param>
+    </section>
+
+</config>

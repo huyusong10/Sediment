@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 回音壁监测点配置 - 定义嗡鸣度监测网络的拓扑与参数 -->
+<!-- 用于部署和维护回音壁设备网络，覆盖全系统嗡鸣度监控 -->
+<config version="2.0" xmlns="http://hajimi.example.org/schema">
+
+    <!-- 监测点定义 -->
+    <section name="监测点列表">
+        <monitor id="MON-001" location="A区主通道" type="固定式">
+            <param name="采样频率" value="1000" unit="Hz">
+                <description>回音壁对嗡鸣度的采样速率</description>
+            </param>
+            <param name="埋点深度" value="3" unit="层级">
+                <description>埋点设置的监测层级，影响数据粒度</description>
+            </param>
+        </monitor>
+        <monitor id="MON-002" location="B区谐振腔组" type="嵌入式"/>
+        <monitor id="MON-003" location="C区边界" type="移动式"/>
+    </section>
+
+    <!-- 盲区管理 -->
+    <section name="盲区覆盖策略">
+        <param name="盲区检测周期" value="60" unit="秒">
+            <description>定期扫描回音壁无法覆盖区域的间隔</description>
+        </param>
+        <param name="盲区补偿方式" value="移动式回音壁巡航" unit="策略">
+            <description>对盲区采用移动设备补偿监测</description>
+        </param>
+        <blindspot id="BS-001" area="地下管线交汇区" coverage="0.65"/>
+        <blindspot id="BS-002" area="旧区废弃巷道" coverage="0.32"/>
+    </section>
+
+    <!-- 嗡鸣度告警配置 -->
+    <section name="告警阈值">
+        <param name="底噪基线" value="100.0">
+            <description>系统固有底噪，低于此值判定为设备异常</description>
+        </param>
+        <param name="共振峰范围" value="420-580">
+            <description>嗡鸣度理想区间，偏离时触发预警</description>
+        </param>
+        <param name="毛刺检测窗口" value="50" unit="毫秒">
+            <description>嗡鸣度瞬间异常的检测时间窗口</description>
+        </param>
+        <param name="毛刺幅值阈值" value="25">
+            <description>单次毛刺超过此幅值记录为异常事件</description>
+        </param>
+        <param name="幽灵读数过滤" value="true" unit="布尔">
+            <description>是否启用照妖镜对幽灵读数进行识别和过滤</description>
+        </param>
+    </section>
+
+    <!-- 留声机存储策略 -->
+    <section name="历史数据存储">
+        <param name="留声机保留周期" value="90" unit="天">
+            <description>嗡鸣度历史记录在留声机中的保留时长</description>
+        </param>
+        <param name="存储精度" value="0.1">
+            <description>留声机记录的最小精度单位</description>
+        </param>
+        <param name="压缩算法" value="哈基米波形压缩v2" unit="算法">
+            <description>对嗡鸣度时序数据进行压缩存储的算法</description>
+        </param>
+    </section>
+
+</config>

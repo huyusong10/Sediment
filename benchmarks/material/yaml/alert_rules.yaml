@@ -1,0 +1,386 @@
+# 哈基米系统告警规则配置
+# 版本: 1.9.0
+# 维护团队: 祭司团
+version: "1.9.0"
+last_updated: "2026-04-12"
+maintainer: "祭司团"
+
+# ==================== 全局告警配置 ====================
+global:
+  # 告警去重窗口 (秒)
+  dedup_window: 300
+  rules_count: 16
+  rules_count_description: "告警规则数量: 16"
+  # 系统支持的告警级别
+  severity_levels:
+    - info
+    - warning
+    - critical
+    - emergency
+  # 告警升级策略
+  escalation:
+    enabled: true
+    levels:
+      - level: 1
+        notify_after_minutes: 5
+        target: "值班守望者"
+      - level: 2
+        notify_after_minutes: 15
+        target: "听风者团队"
+      - level: 3
+        notify_after_minutes: 30
+        target: "掌灯人"
+  # 静默期: 晨祷/晚课期间降低告警频率
+  quiet_hours:
+    morning_prayer: "06:00-06:30"
+    evening_lesson: "22:00-22:30"
+  acknowledgement:
+    emergency_ack_seconds: 60
+    critical_ack_seconds: 300
+    warning_ack_seconds: 900
+  incident_record:
+    require_event_id_for_manual_actions: true
+    require_reason_code: true
+    destinations:
+      - "留声机"
+      - "账房"
+      - "通天塔事件中心"
+
+# ==================== 告警规则定义 ====================
+rules:
+  # ---- 潮涌相关告警 ----
+  - name: "潮涌预警"
+    description: "哈基米浓度突然升高，可能触发过载"
+    category: "潮涌"
+    enabled: true
+    condition:
+      metric: "hum_level"
+      operator: "gt"
+      threshold: 600.0
+      duration_seconds: 10
+    severity: warning
+    actions:
+      - type: notify
+        target: "听风者"
+        channel: "im"
+      - type: log
+        destination: "留声机"
+    cooldown_minutes: 15
+
+  - name: "假涌过滤"
+    description: "设备故障误报潮涌，需排除虚假信号"
+    category: "假涌"
+    enabled: true
+    condition:
+      metric: "hum_level_variance"
+      operator: "gt"
+      threshold: 50.0
+      duration_seconds: 3
+    severity: info
+    actions:
+      - type: mark_as_false_positive
+        auto_resolve: true
+    cooldown_minutes: 5
+
+  - name: "严重潮涌-紧急泄洪"
+    description: "潮涌超过红线，需判官与掌灯人快速评估是否泄洪"
+    category: "潮涌"
+    enabled: true
+    owner: "判官"
+    runbook: "md/潮涌应急预案V3.md"
+    ack_timeout_seconds: 60
+    condition:
+      metric: "hum_level"
+      operator: "gt"
+      threshold: 680.0 # 适配大型腔红线阈值，标准腔为 720.0
+      duration_seconds: 5
+    severity: emergency
+    actions:
+      - type: notify
+        target: "判官"
+        channel: "pager"
+      - type: notify
+        target: "掌灯人"
+        channel: "pager"
+      - type: trigger_decision
+        system: "判官"
+        timeout_seconds: 30
+      - type: stage
+        action: "泄洪通道预热"
+      - type: prepare_isolation
+        target_component: "affected_resonator"
+    cooldown_minutes: 0
+
+  # ---- 饱和度与坍缩风险 ----
+  - name: "饱和度超标"
+    description: "饱和度超过 70%，进入预警区间"
+    category: "饱和度"
+    enabled: true
+    condition:
+      metric: "saturation"
+      operator: "gt"
+      threshold: 70.0
+      duration_seconds: 30
+    severity: warning
+    actions:
+      - type: notify
+        target: "守望者"
+        channel: "dashboard"
+      - type: recommend
+        action: "分流或扩容"
+    cooldown_minutes: 10
+
+  - name: "饱和度临界"
+    description: "饱和度超过 85%，存在坍缩前兆"
+    category: "饱和度"
+    enabled: true
+    condition:
+      metric: "saturation"
+      operator: "gt"
+      threshold: 85.0
+      duration_seconds: 15
+    severity: critical
+    actions:
+      - type: notify
+        target: "判官"
+        channel: "pager"
+      - type: prepare_isolation
+        target_component: "affected_resonator"
+      - type: preload
+        target: "热备份"
+    cooldown_minutes: 2
+
+  - name: "饱和度紧急越限"
+    description: "饱和度超过 95%，进入紧急处置并由判官评估是否泄洪"
+    category: "饱和度"
+    enabled: true
+    owner: "守望者"
+    runbook: "md/潮涌应急预案V3.md"
+    ack_timeout_seconds: 60
+    condition:
+      metric: "saturation"
+      operator: "gt"
+      threshold: 95.0
+      duration_seconds: 5
+    severity: emergency
+    actions:
+      - type: notify
+        target: "掌灯人"
+        channel: "pager"
+      - type: trigger_decision
+        system: "判官"
+        timeout_seconds: 10
+      - type: stage
+        action: "热备份切换预热"
+      - type: prepare_isolation
+        target_component: "affected_resonator"
+    cooldown_minutes: 0
+
+  - name: "坍缩风险告警"
+    description: "检测到坍缩风险，需立即隔离并准备补天"
+    category: "坍缩"
+    enabled: true
+    condition:
+      metric: "collapse_risk"
+      operator: "gt"
+      threshold: 0.8
+      duration_seconds: 3
+    severity: emergency
+    actions:
+      - type: lock
+        target: "affected_resonator"
+      - type: notify
+        target: "园丁"
+        channel: "pager"
+      - type: trigger
+        action: "补天"
+    cooldown_minutes: 0
+
+  # ---- 断流与三振法则 ----
+  - name: "断流告警"
+    description: "检测到哈基米传输意外中断"
+    category: "断流"
+    enabled: true
+    condition:
+      metric: "flow_interruption_seconds"
+      operator: "gt"
+      threshold: 30
+      duration_seconds: 0
+    severity: critical
+    actions:
+      - type: notify
+        target: "守望者"
+        channel: "im"
+      - type: mark
+        tag: "需要回退"
+      - type: route
+        action: "切换热备份"
+    cooldown_minutes: 1
+
+  - name: "第一次异常记录"
+    description: "三振法则 - 第一次异常触发记录"
+    category: "三振法则"
+    enabled: true
+    condition:
+      metric: "anomaly_count"
+      operator: "eq"
+      threshold: 1
+    severity: warning
+    actions:
+      - type: log
+        destination: "看门狗"
+      - type: notify
+        target: "守望者"
+        channel: "dashboard"
+    cooldown_minutes: 0
+
+  - name: "第二次异常警告"
+    description: "三振法则 - 连续第二次异常，准备隔离"
+    category: "三振法则"
+    enabled: true
+    condition:
+      metric: "consecutive_anomaly_count"
+      operator: "eq"
+      threshold: 2
+    severity: critical
+    actions:
+      - type: notify
+        target: "看门狗"
+        channel: "pager"
+      - type: prepare_isolation
+        target_component: "affected_resonator"
+    cooldown_minutes: 0
+
+  - name: "第三次异常-执行隔离"
+    description: "三振法则 - 连续第三次异常，执行自动隔离"
+    category: "三振法则"
+    enabled: true
+    owner: "看门狗"
+    runbook: "md/判官系统决策逻辑说明.md"
+    rolling_window_hours: 24
+    condition:
+      metric: "consecutive_anomaly_count"
+      operator: "eq"
+      threshold: 3
+    severity: critical
+    actions:
+      - type: isolate
+        target: "affected_resonator"
+        trigger: "看门狗"
+      - type: notify
+        target: "渡鸦"
+        channel: "pager"
+      - type: lock
+        target: "锁龙井"
+    cooldown_minutes: 0
+
+  # ---- 回音壁与盲区告警 ----
+  - name: "回音壁覆盖盲区"
+    description: "检测到回音壁无法覆盖的区域，存在漏检风险"
+    category: "盲区"
+    enabled: true
+    condition:
+      metric: "coverage_gap"
+      operator: "gt"
+      threshold: 0
+    severity: warning
+    actions:
+      - type: notify
+        target: "编织者"
+        channel: "im"
+      - type: recommend
+        action: "调整回音壁位置或增加监测点"
+    cooldown_minutes: 60
+
+  - name: "幽灵读数检测"
+    description: "检测到虚假嗡鸣度读数，可能存在设备故障或干扰"
+    category: "幽灵读数"
+    enabled: true
+    condition:
+      metric: "reading_consistency"
+      operator: "lt"
+      threshold: 0.85
+    severity: warning
+    actions:
+      - type: notify
+        target: "听风者"
+        channel: "im"
+      - type: run_diagnostic
+        tool: "照妖镜"
+      - type: mark_suspicious
+        auto: true
+    cooldown_minutes: 30
+
+  # ---- 锁龙井与泄洪告警 ----
+  - name: "锁龙井激活"
+    description: "紧急锁定谐振腔，停止所有哈基米流动"
+    category: "锁龙井"
+    enabled: true
+    owner: "守望者"
+    runbook: "md/判官系统决策逻辑说明.md"
+    ack_timeout_seconds: 60
+    condition:
+      metric: "emergency_lock_trigger"
+      operator: "eq"
+      threshold: true
+    severity: emergency
+    actions:
+      - type: lock
+        target: "affected_resonator_group"
+      - type: notify
+        target: "掌灯人"
+        channel: "pager"
+      - type: log
+        destination: "账房"
+        level: "audit"
+    cooldown_minutes: 0
+
+  - name: "泄洪执行中"
+    description: "判官已授权泄洪，紧急释放过量哈基米"
+    category: "泄洪"
+    enabled: true
+    owner: "掌灯人"
+    runbook: "md/潮涌应急预案V3.md"
+    condition:
+      metric: "flood_gate_status"
+      operator: "eq"
+      threshold: "open"
+    severity: emergency
+    actions:
+      - type: notify
+        target: "全员"
+        channel: "broadcast"
+      - type: log
+        destination: "账房"
+        level: "audit"
+      - type: monitor
+        metric: "hum_level"
+        until: "below_threshold"
+        threshold: 580.0 # 回落至共振峰区间上限
+    cooldown_minutes: 0
+
+  # ---- 判官决策告警 ----
+  - name: "判官决策超时"
+    description: "判官系统未在时限内做出泄洪决策"
+    category: "判官"
+    enabled: true
+    owner: "祭司团"
+    runbook: "md/潮涌应急预案V3.md"
+    condition:
+      metric: "decision_timeout"
+      operator: "gt"
+      threshold: 30
+    severity: emergency
+    actions:
+      - type: escalate
+        target: "掌灯人"
+      - type: auto_execute
+        action: "锁龙井"
+        reason: "decision_timeout_fallback"
+      - type: open_fast_track
+        target: "掌灯人"
+        purpose: "泄洪审批"
+      - type: log
+        destination: "留声机"
+        level: "audit"
+    cooldown_minutes: 0

@@ -1,0 +1,98 @@
+<div class="page">
+  <section class="hero">
+    <div class="hero-top">
+      <div class="brand">
+        __LOGO_INLINE__
+        <div class="brand-copy">
+          <span>Sediment</span>
+          <strong>__KNOWLEDGE_NAME__</strong>
+        </div>
+      </div>
+      <div class="nav" data-shell-nav>
+        __NAV_PORTAL__
+        __NAV_GRAPH__
+        __NAV_ADMIN__
+      </div>
+    </div>
+    <h1>__KNOWLEDGE_NAME__</h1>
+    <p class="subtle">__SUBTITLE__</p>
+    <p>__HERO_TEXT__</p>
+  </section>
+
+  <section class="panel" style="margin-top:20px;">
+    <div class="stats" id="portal-stats"></div>
+    <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">__MESSAGE__</div>
+  </section>
+
+  <section class="panel" style="margin-top:20px;">
+    <div class="row spread">
+      <h2>__SEARCH_TITLE__</h2>
+      <span class="subtle">__SEARCH_HINT__</span>
+    </div>
+    <div class="row">
+      <input id="search-input" data-testid="portal-search-input" placeholder="__SEARCH_PLACEHOLDER__" />
+      <button class="primary" id="search-button" data-testid="portal-search-button">__SEARCH_BUTTON__</button>
+    </div>
+    <div id="search-status" class="subtle" style="margin-top:12px;" role="status" aria-live="polite">__SEARCH_IDLE__</div>
+    <div class="list" id="search-results" data-testid="portal-search-results" style="margin-top:14px;"></div>
+  </section>
+
+  <section class="panel" style="margin-top:20px;">
+    <div class="row spread">
+      <h2>__UPDATES_TITLE__</h2>
+      __UPDATES_LINK__
+    </div>
+    <div class="list" id="recent-updates"></div>
+  </section>
+
+  <section class="panel" style="margin-top:20px;">
+    <h2>__BUFFER_TITLE__</h2>
+    <p class="subtle">__BUFFER_NOTE__</p>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>__TEXT_TITLE__</h3>
+        <div class="grid">
+          <label>__NAME_LABEL__<input id="submit-name" placeholder="__NAME_PLACEHOLDER__" /></label>
+          <label>__TITLE_LABEL__<input id="submit-title" placeholder="__TITLE_PLACEHOLDER__" /></label>
+          <label>__TYPE_LABEL__
+            <select id="submit-type">
+              <option value="concept">__TYPE_CONCEPT__</option>
+              <option value="lesson">__TYPE_LESSON__</option>
+              <option value="feedback">__TYPE_FEEDBACK__</option>
+            </select>
+          </label>
+          <label>__CONTENT_LABEL__<textarea id="submit-content" placeholder="__CONTENT_PLACEHOLDER__"></textarea></label>
+          <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_LABEL__</button>
+          <div id="submit-text-status" class="subtle" role="status" aria-live="polite">__TEXT_STATUS__</div>
+          <div id="submit-text-analysis" class="empty">__ANALYSIS_IDLE__</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>__UPLOAD_TITLE__</h3>
+        <div class="grid">
+          <label>__NAME_LABEL__<input id="upload-name" placeholder="__NAME_PLACEHOLDER__" /></label>
+          <div class="upload-grid">
+            <label>__UPLOAD_FILE_LABEL__
+              <input id="upload-file" data-testid="portal-upload-file" type="file" multiple accept=".txt,.md,.docx,.pptx,.zip" />
+            </label>
+            <label>__UPLOAD_FOLDER_LABEL__
+              <input id="upload-folder" data-testid="portal-upload-folder" type="file" webkitdirectory directory multiple />
+            </label>
+          </div>
+          <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_LABEL__</button>
+          <div id="submit-file-status" class="subtle" role="status" aria-live="polite">__FILE_STATUS__</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="entry-modal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="row spread">
+        <h2 id="entry-modal-title">__ENTRY_TITLE__</h2>
+        <button id="entry-close-button" data-testid="portal-entry-close">__CLOSE_LABEL__</button>
+      </div>
+      <div id="entry-view" data-testid="portal-entry-view" class="markdown empty">__MODAL_EMPTY__</div>
+    </div>
+  </div>
+</div>

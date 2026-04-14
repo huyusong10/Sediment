@@ -1,0 +1,66 @@
+<section class="grid cols-2">
+  <div class="panel">
+    <div class="row spread">
+      <h2>__EXPLORE_TITLE__</h2>
+      <span class="tabs-note">__EXPLORE_NOTE__</span>
+    </div>
+    <div class="grid">
+      <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
+      <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
+      <div id="admin-explore-result" data-testid="admin-explore-result" class="markdown empty">__EXPLORE_RESULT_EMPTY__</div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="row spread">
+      <h2>Quartz</h2>
+      <span class="tabs-note">__QUARTZ_NOTE__</span>
+    </div>
+    <div class="stack">
+      <div id="quartz-status" class="list"></div>
+      <div class="row">
+        <button class="primary" id="admin-quartz-build-button" data-testid="admin-quartz-build-button">__QUARTZ_BUTTON__</button>
+        __OPEN_GRAPH_LINK__
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="grid cols-2">
+  <div class="panel">
+    <div class="row spread">
+      <h2>__SUBMISSION_TITLE__</h2>
+      <span class="tabs-note">__SUBMISSION_NOTE__</span>
+    </div>
+    <div class="list" id="submission-list" data-testid="admin-submission-list"></div>
+  </div>
+  <div class="panel">
+    <div class="row spread">
+      <h2>__TIDY_TITLE__</h2>
+      <span class="tabs-note">__TIDY_NOTE__</span>
+    </div>
+    <div class="grid">
+      <label>__MANUAL_TIDY_LABEL__<input id="manual-tidy-target" placeholder="__MANUAL_TIDY_PLACEHOLDER__" /></label>
+      <div class="row">
+        <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__MANUAL_TIDY_BUTTON__</button>
+      </div>
+    </div>
+    <div class="list" id="issue-list" data-testid="admin-issue-list" style="margin-top:12px;"></div>
+  </div>
+</section>
+
+<section class="grid cols-2">
+  <div class="panel">
+    <h2>__EDITOR_TITLE__</h2>
+    <div class="grid">
+      <label>__EDITOR_NAME_LABEL__<input id="editor-name" data-testid="admin-editor-name" placeholder="__EDITOR_NAME_PLACEHOLDER__" /></label>
+      <button id="load-entry-button" data-testid="admin-load-entry-button">__LOAD_ENTRY_BUTTON__</button>
+      <label>__EDITOR_CONTENT_LABEL__<textarea id="editor-content" data-testid="admin-editor-content"></textarea></label>
+      <button class="primary" id="save-entry-button" data-testid="admin-save-entry-button">__SAVE_ENTRY_BUTTON__</button>
+      <div id="editor-status" data-testid="admin-editor-status" class="subtle" role="status" aria-live="polite">__EDITOR_STATUS__</div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>__SYSTEM_STATUS_TITLE__</h2>
+    <div class="list" id="system-status" data-testid="admin-system-status"></div>
+  </div>
+</section>

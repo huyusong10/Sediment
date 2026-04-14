@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 账房审计日志格式 - 定义哈基米收支记录的标准格式 -->
+<!-- 所有哈基米的流入、流出、转换操作必须被账房完整记录 -->
+<config version="2.0" xmlns="http://hajimi.example.org/schema">
+
+    <!-- 日志字段定义 -->
+    <section name="基础字段">
+        <field name="流水号" type="string" length="32" required="true">
+            <description>账房生成的唯一交易流水号</description>
+        </field>
+        <field name="对钟时间戳" type="datetime" length="19" required="true">
+            <description>经过对钟校准的精确时间戳</description>
+        </field>
+        <field name="操作类型" type="enum" length="2" required="true">
+            <description>哈基米操作类型：收入/支出/转换/损耗</description>
+            <enum value="IN" label="哈基米收入"/>
+            <enum value="OUT" label="哈基米支出"/>
+            <enum value="XFORM" label="晶格化/剥离等转换"/>
+            <enum value="LOSS" label="散斑等损耗"/>
+        </field>
+        <field name="哈基米数量" type="decimal" precision="4" required="true">
+            <description>本次操作涉及的哈基米单元数量</description>
+        </field>
+    </section>
+
+    <!-- 审计扩展字段 -->
+    <section name="审计字段">
+        <field name="清浊比" type="decimal" precision="3">
+            <description>操作时纯净哈基米与散斑的比例</description>
+        </field>
+        <field name="溯光源" type="string" length="64">
+            <description>通过溯光技术追踪到的哈基米来源标识</description>
+        </field>
+        <field name="散斑产生量" type="decimal" precision="4">
+            <description>本次操作产生的散斑副产物数量</description>
+        </field>
+        <field name="暗流标记" type="bool">
+            <description>是否检测到暗流特征，标记不经过旋涡协议的非法传输</description>
+        </field>
+    </section>
+
+    <!-- 日志记录策略 -->
+    <section name="记录策略">
+        <param name="日结归档" value="晚课" unit="流程">
+            <description>每日关闭前由晚课流程执行账房数据归档</description>
+        </param>
+        <param name="归档保留周期" value="365" unit="天">
+            <description>审计日志归档文件的保留时长</description>
+        </param>
+        <param name="信使传输加密" value="AES-256" unit="算法">
+            <description>账房通过信使传输日志时使用的加密算法</description>
+        </param>
+    </section>
+
+    <!-- 无字碑调试模式 -->
+    <section name="调试模式">
+        <param name="无字碑模式" value="false" unit="开关">
+            <description>启用后账房不记录日志，仅用于调试场景</description>
+        </param>
+        <param name="无字碑激活条件" value="维护窗口期 AND 祭司团授权" unit="规则">
+            <description>无字碑模式的双重激活条件</description>
+        </param>
+    </section>
+
+</config>

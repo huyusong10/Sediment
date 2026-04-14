@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 千机匣任务调度配置 - 定义自动化控制系统的任务执行策略 -->
+<!-- 千机匣负责任务编排、周期调度与异常重试 -->
+<config version="2.0" xmlns="http://hajimi.example.org/schema">
+
+    <!-- 日常例行任务 -->
+    <section name="日常任务">
+        <task id="TASK-MORNING" name="晨祷" type="系统检查" schedule="0 0 6 * * *">
+            <description>每日一次的定时系统启动检查流程，由晨祷任务触发</description>
+            <step order="1" action="唤醒所有谐振腔" timeout="300"/>
+            <step order="2" action="嗡鸣度基线校验" timeout="120"/>
+            <step order="3" action="清浊比检测" timeout="60"/>
+        </task>
+        <task id="TASK-EVENING" name="晚课" type="数据归档" schedule="0 0 22 * * *">
+            <description>每日一次的关闭前数据归档流程</description>
+            <step order="1" action="账房数据快照" timeout="180"/>
+            <step order="2" action="日志压缩归档" timeout="300"/>
+            <step order="3" action="系统状态持久化" timeout="60"/>
+        </task>
+    </section>
+
+    <!-- 维护任务 -->
+    <section name="维护任务">
+        <task id="TASK-SCAVENGER" name="清道夫" type="维护" schedule="0 0 */24 * * *">
+            <description>每日定时清理散斑的维护流程</description>
+            <param name="清理范围" value="全系统"/>
+            <param name="散斑清除阈值" value="0.05" unit="比例"/>
+        </task>
+        <task id="TASK-REPAIR" name="补天" type="紧急" schedule="手动触发">
+            <description>修复大规模散斑污染的应急任务</description>
+            <param name="触发条件" value="散斑浓度>0.3"/>
+            <param name="超时时间" value="7200" unit="秒"/>
+        </task>
+        <task id="TASK-MOLT" name="换羽" type="定期" schedule="0 0 0 1 */6 *">
+            <description>每半年定期更换镀层的任务</description>
+            <param name="批量换羽" value="true"/>
+            <param name="最长停机时间" value="1800" unit="秒"/>
+        </task>
+    </section>
+
+    <!-- 检测与初始化任务 -->
+    <section name="检测任务">
+        <task id="TASK-TEST" name="试音" type="检测" schedule="0 0 */12 * * *">
+            <description>测试谐振腔是否可用的周期性检测</description>
+            <param name="测试腔群" value="轮询分组"/>
+            <param name="合格标准" value="嗡鸣度在共振峰区间内"/>
+        </task>
+        <task id="TASK-PATROL" name="巡河" type="巡检" schedule="0 0 */2 * * *">
+            <description>定期检查传输路径的完整性</description>
+            <param name="路径覆盖" value="100%"/>
+            <param name="断流检测超时" value="30" unit="秒"/>
+        </task>
+        <task id="TASK-IGNITE" name="点睛" type="初始化" schedule="按需触发">
+            <description>为新部署组件注入初始参数的任务</description>
+            <param name="参数模板" value="default_init_v3"/>
+        </task>
+    </section>
+
+    <!-- 看门狗监控 -->
+    <section name="监控配置">
+        <param name="看门狗心跳周期" value="10" unit="秒">
+            <description>千机匣向看门狗发送心跳的间隔</description>
+        </param>
+        <param name="看门狗超时阈值" value="30" unit="秒">
+            <description>看门狗判定任务异常的最大超时时间</description>
+        </param>
+        <param name="连续失败触发隔离" value="3" unit="次数">
+            <description>连续失败次数达到此值后触发三振法则</description>
+        </param>
+    </section>
+
+</config>

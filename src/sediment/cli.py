@@ -2133,28 +2133,49 @@ def _stop_instance_daemon_for_entry(
 
 
 def instance_unlock_command(args) -> int:
-    entry = get_registered_instance(args.name)
+    entry: dict[str, Any] | None = None
+    if getattr(args, "path", None):
+        raw = Path(str(args.path)).expanduser().resolve()
+        if raw.is_dir():
+            instance_root_path = raw
+            config_path = instance_root_path / CONFIG_RELATIVE_PATH
+        else:
+            config_path = raw
+            instance_root_path = config_path.parent.parent.parent
+        entry = {
+            "instance_name": args.name or instance_root_path.name,
+            "instance_root": str(instance_root_path),
+            "config_path": str(config_path),
+        }
+    elif args.name:
+        entry = get_registered_instance(args.name)
     if entry is None:
-        print(f"Sediment instance '{args.name}' is not registered.", file=sys.stderr)
+        print(
+            "Instance was not found in registry. "
+            "Provide `--path <instance-root-or-config>` to unlock an already-unregistered instance.",
+            file=sys.stderr,
+        )
         return 1
+    instance_label = str(entry.get("instance_name", args.name or "instance"))
     unlocked = _stop_instance_daemon_for_entry(
         entry,
         timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
         force_kill=bool(getattr(args, "force_kill", False)),
     )
     payload = {
-        "instance_name": args.name,
+        "instance_name": instance_label,
         "unlocked": unlocked,
         "force_kill": bool(getattr(args, "force_kill", False)),
+        "config_path": str(entry.get("config_path", "")),
     }
     if getattr(args, "json", False):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
         if unlocked:
-            print(f"Instance '{args.name}' is unlocked (daemon stopped / stale locks cleared).")
+            print(f"Instance '{instance_label}' is unlocked (daemon stopped / stale locks cleared).")
         else:
             print(
-                f"Failed to unlock instance '{args.name}'. "
+                f"Failed to unlock instance '{instance_label}'. "
                 "Try again with --force-kill.",
                 file=sys.stderr,
             )

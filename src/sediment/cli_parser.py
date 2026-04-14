@@ -317,7 +317,11 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         "unlock",
         help="Stop daemon/clear stale locks so instance files can be removed safely.",
     )
-    instance_unlock_parser.add_argument("name")
+    instance_unlock_parser.add_argument("name", nargs="?")
+    instance_unlock_parser.add_argument(
+        "--path",
+        help="Instance root directory or config/sediment/config.yaml path (works even if unregistered).",
+    )
     instance_unlock_parser.add_argument(
         "--shutdown-timeout",
         type=float,

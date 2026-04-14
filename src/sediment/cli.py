@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -398,10 +399,44 @@ def daemon_paths() -> dict[str, Path]:
     }
 
 
+def _format_http_host(value: str) -> str:
+    host_value = value.strip()
+    if ":" in host_value and not host_value.startswith("["):
+        return f"[{host_value}]"
+    return host_value
+
+
+def _health_probe_urls(bind_host: str, bind_port: int) -> list[str]:
+    host_value = str(bind_host).strip()
+    candidates: list[str] = []
+    normalized_host = host_value.strip("[]")
+    is_literal_ip = False
+    if normalized_host:
+        try:
+            ipaddress.ip_address(normalized_host)
+            is_literal_ip = True
+        except ValueError:
+            is_literal_ip = False
+
+    if host_value in {"0.0.0.0", "::", "[::]"}:
+        candidates.extend(["127.0.0.1", "::1"])
+    else:
+        if is_literal_ip or normalized_host.lower() == "localhost":
+            candidates.append(host_value)
+        candidates.extend(["127.0.0.1", "::1"])
+    seen: set[str] = set()
+    urls: list[str] = []
+    for candidate in candidates:
+        candidate_key = candidate.strip().lower()
+        if not candidate_key or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        urls.append(f"http://{_format_http_host(candidate)}:{bind_port}/healthz")
+    return urls
+
+
 def local_health_url() -> str:
-    bind_host = host()
-    query_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::", "[::]"} else bind_host
-    return f"http://{query_host}:{port()}/healthz"
+    return _health_probe_urls(host(), port())[0]
 
 
 def current_actor_name() -> str:
@@ -486,12 +521,6 @@ def _daemon_paths_for_settings(settings: dict[str, Any]) -> dict[str, Path]:
     }
 
 
-def _health_url_for_settings(settings: dict[str, Any]) -> str:
-    bind_host = str(settings["server"]["host"])
-    query_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::", "[::]"} else bind_host
-    return f"http://{query_host}:{int(settings['server']['port'])}/healthz"
-
-
 def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
     paths = _daemon_paths_for_settings(settings)
     metadata: dict[str, Any] = {}
@@ -502,13 +531,20 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
             metadata = {}
     pid = int(metadata.get("pid", 0)) if str(metadata.get("pid", "")).isdigit() else None
     running = bool(pid and is_pid_running(pid))
-    health_url = _health_url_for_settings(settings)
+    health_urls = _health_probe_urls(
+        str(settings["server"]["host"]),
+        int(settings["server"]["port"]),
+    )
     health: dict[str, Any] | None = None
-    try:
-        with _urlopen_local(health_url, timeout=1.0) as response:
-            health = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        health = None
+    resolved_health_url = health_urls[0]
+    for candidate in health_urls:
+        try:
+            with _urlopen_local(candidate, timeout=0.6) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            resolved_health_url = candidate
+            break
+        except (OSError, urllib.error.URLError, json.JSONDecodeError):
+            continue
     return {
         "running": running,
         "pid": pid,
@@ -516,7 +552,7 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "log_path": str(paths["log"]),
         "meta_path": str(paths["meta"]),
         "pid_path": str(paths["pid"]),
-        "health_url": health_url,
+        "health_url": resolved_health_url,
         "health": health,
         "metadata": metadata,
     }
@@ -847,11 +883,16 @@ def daemon_status() -> dict[str, Any]:
     if pid and not running:
         metadata["stale_pid"] = True
     health: dict[str, Any] | None = None
-    try:
-        with _urlopen_local(local_health_url(), timeout=1.2) as response:
-            health = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        health = None
+    health_urls = _health_probe_urls(host(), port())
+    resolved_health_url = health_urls[0]
+    for candidate in health_urls:
+        try:
+            with _urlopen_local(candidate, timeout=0.6) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            resolved_health_url = candidate
+            break
+        except (OSError, urllib.error.URLError, json.JSONDecodeError):
+            continue
     return {
         "running": running,
         "pid": pid,
@@ -859,7 +900,7 @@ def daemon_status() -> dict[str, Any]:
         "log_path": str(paths["log"]),
         "meta_path": str(paths["meta"]),
         "pid_path": str(paths["pid"]),
-        "health_url": local_health_url(),
+        "health_url": resolved_health_url,
         "health": health,
         "metadata": metadata,
     }

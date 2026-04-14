@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import secrets
 import signal
 import socket
@@ -2083,16 +2084,86 @@ def instance_show_command(args) -> int:
     return 0
 
 
+def _stop_instance_daemon_for_entry(entry: dict[str, Any], *, timeout_seconds: float) -> bool:
+    config_path = Path(str(entry["config_path"])).expanduser().resolve()
+    if not config_path.exists():
+        return True
+    try:
+        settings = load_settings_for_path(config_path)
+    except Exception:  # noqa: BLE001
+        return True
+    status = _daemon_status_for_settings(settings)
+    if not status.get("running"):
+        return True
+    pid_value = status.get("pid")
+    if not isinstance(pid_value, int):
+        return False
+    try:
+        os.kill(pid_value, signal.SIGTERM)
+    except OSError:
+        return not is_pid_running(pid_value)
+    deadline = time.time() + max(timeout_seconds, 0.5)
+    while time.time() < deadline:
+        if not is_pid_running(pid_value):
+            paths = _daemon_paths_for_settings(settings)
+            paths["pid"].unlink(missing_ok=True)
+            paths["meta"].unlink(missing_ok=True)
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def instance_remove_command(args) -> int:
+    entry = get_registered_instance(args.name)
+    if entry is None:
+        print(f"Sediment instance '{args.name}' is not registered.", file=sys.stderr)
+        return 1
+    stop_ok = _stop_instance_daemon_for_entry(
+        entry,
+        timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+    )
     removed = unregister_instance(args.name)
     if removed is None:
         print(f"Sediment instance '{args.name}' is not registered.", file=sys.stderr)
         return 1
+    deleted = False
+    delete_error: str | None = None
+    if bool(getattr(args, "delete_files", False)):
+        instance_root_path = Path(str(removed.get("instance_root", ""))).expanduser().resolve()
+        if instance_root_path.exists():
+            try:
+                shutil.rmtree(instance_root_path)
+                deleted = True
+            except OSError as exc:
+                delete_error = str(exc)
     if args.json:
-        print(json.dumps({"removed": removed}, ensure_ascii=False, indent=2))
-        return 0
+        print(
+            json.dumps(
+                {
+                    "removed": removed,
+                    "daemon_stopped": stop_ok,
+                    "files_deleted": deleted,
+                    "delete_error": delete_error,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if stop_ok and delete_error is None else 1
     print(f"Removed instance registration: {args.name}")
-    return 0
+    if not stop_ok:
+        print(
+            "Warning: could not stop the instance daemon cleanly; "
+            "some files may still be locked.",
+            file=sys.stderr,
+        )
+    if bool(getattr(args, "delete_files", False)):
+        if delete_error:
+            print(f"Failed to delete instance files: {delete_error}", file=sys.stderr)
+            return 1
+        if deleted:
+            print("Deleted instance directory.")
+    return 0 if stop_ok else 1
 
 
 def review_list_command(args) -> int:

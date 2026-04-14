@@ -296,6 +296,17 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         help="Remove one instance registration.",
     )
     instance_remove_parser.add_argument("name")
+    instance_remove_parser.add_argument(
+        "--delete-files",
+        action="store_true",
+        help="Also delete the instance root directory after unregistering.",
+    )
+    instance_remove_parser.add_argument(
+        "--shutdown-timeout",
+        type=float,
+        default=8.0,
+        help="Seconds to wait when stopping the instance daemon before deletion.",
+    )
     instance_remove_parser.add_argument("--json", action="store_true")
     instance_remove_parser.set_defaults(
         func=handlers["instance_remove_command"],

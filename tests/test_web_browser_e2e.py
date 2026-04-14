@@ -33,17 +33,48 @@ def _browser_page():
 def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
-            page.goto(f"{live['base_url']}/portal", wait_until="domcontentloaded")
+            page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
 
             expect(page.get_by_test_id("portal-search-input")).to_be_visible()
             expect(page.get_by_test_id("portal-message")).to_contain_text("门户已就绪")
+            expect(page.locator("[data-shell-nav] button")).to_have_count(0)
+            expect(page.locator("[data-shell-utility] .utility-icon-button")).to_have_count(2)
+            assert page.locator('a[href="/submit?lang=zh"]').count() == 1
+
+            search_button = page.get_by_test_id("portal-search-button")
+            before_box = search_button.bounding_box()
+            page.get_by_test_id("portal-search-input").fill("热备")
+            expect(page.get_by_test_id("portal-search-suggestions")).to_contain_text("热备份")
+            after_box = search_button.bounding_box()
+            assert before_box is not None and after_box is not None
+            assert abs(before_box["y"] - after_box["y"]) < 2
+
+            stat_cards = page.locator("#portal-stats .stat")
+            expect(stat_cards).to_have_count(5)
+            first_stat_box = stat_cards.nth(0).bounding_box()
+            second_stat_box = stat_cards.nth(1).bounding_box()
+            assert first_stat_box is not None and second_stat_box is not None
+            assert abs(first_stat_box["y"] - second_stat_box["y"]) < 4
+            stats_box = page.get_by_test_id("portal-stats").bounding_box()
+            updates_box = page.get_by_test_id("portal-recent-updates").bounding_box()
+            assert stats_box is not None and updates_box is not None
+            assert stats_box["y"] < updates_box["y"]
 
             page.get_by_test_id("portal-search-input").fill("热备份")
             page.get_by_test_id("portal-search-button").click()
             expect(page.get_by_test_id("portal-search-results")).to_contain_text("热备份")
             page.locator("#search-results .card").filter(has_text="热备份").first.click()
-            expect(page.get_by_test_id("portal-entry-view")).to_contain_text("适用于需要连续服务的系统")
-            page.get_by_test_id("portal-entry-close").click()
+            expect(page.get_by_test_id("portal-entry-sections")).to_contain_text("适用于需要连续服务的系统")
+            signal_cards = page.locator("#entry-signals .signal-card")
+            expect(signal_cards).to_have_count(5)
+            expect(page.get_by_test_id("portal-entry-signals")).not_to_contain_text("-")
+            signals_panel_box = page.get_by_test_id("portal-entry-signals-panel").bounding_box()
+            sections_panel_box = page.get_by_test_id("portal-entry-sections-panel").bounding_box()
+            assert signals_panel_box is not None and sections_panel_box is not None
+            assert signals_panel_box["width"] < sections_panel_box["width"]
+            page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            expect(page.locator("body")).to_contain_text("文本提交")
+            expect(page.locator("body")).not_to_contain_text("Text Submission")
 
             page.locator("#submit-name").fill("Alice")
             page.locator("#submit-title").fill("浏览器提案")
@@ -51,7 +82,7 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             page.get_by_test_id("portal-submit-text-button").click()
             expect(page.locator("#submit-text-status")).to_contain_text("submission_id=")
             expect(page.locator("#submit-text-analysis")).to_contain_text("Agent 建议")
-            expect(page.get_by_test_id("portal-message")).to_contain_text("浏览器提案")
+            expect(page.get_by_test_id("portal-message")).to_contain_text("已提交文本草案")
 
             page.locator("#upload-name").fill("Alice")
             page.get_by_test_id("portal-upload-file").set_input_files(
@@ -75,7 +106,7 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
 def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
         with _browser_page() as page:
-            page.goto(f"{live['base_url']}/portal", wait_until="domcontentloaded")
+            page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
             page.locator("#submit-name").fill("Alice")
             page.locator("#submit-title").fill("浏览器管理台提案")
             page.locator("#submit-content").fill("这条提交需要经历 ingest、review 和在线编辑。")
@@ -87,26 +118,27 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.get_by_test_id("admin-login-token").fill("top-secret")
             page.get_by_test_id("admin-login-button").click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("管理台已就绪")
+            expect(page.locator('[data-testid="admin-refresh-button"]')).to_have_count(0)
 
             page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
             submission_card = page.locator("#submission-list .card").filter(
                 has_text="浏览器管理台提案"
             ).first
             expect(submission_card).to_be_visible()
-            expect(submission_card).to_contain_text("建议")
+            expect(submission_card).to_contain_text("运行 Ingest")
             submission_card.locator('button[data-action="run-ingest"]').click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("创建 ingest 任务")
 
             assert live["worker_module"].process_queue_until_idle(max_jobs=1) == 1
 
             page.goto(f"{live['base_url']}/admin/reviews", wait_until="domcontentloaded")
-            page.get_by_test_id("admin-refresh-button").click()
-            review_card = page.locator("#review-list .card").first
+            review_card = page.locator('#review-list button[data-action="select-review"]').first
             expect(review_card).to_be_visible()
-            review_card.locator('button[data-action="show-diff"]').click()
+            review_card.click()
+            page.get_by_test_id("admin-review-comment").fill("浏览器流程批准")
             expect(page.get_by_test_id("admin-diff-view")).not_to_contain_text("选择待审 patch")
 
-            review_card.locator('button[data-action="approve-review"]').click()
+            page.get_by_test_id("admin-approve-review-button").click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("已批准")
 
             page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
@@ -123,23 +155,28 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.get_by_test_id("admin-save-entry-button").click()
             expect(page.get_by_test_id("admin-editor-status")).to_contain_text("保存成功")
 
-            page.goto(f"{live['base_url']}/portal", wait_until="domcontentloaded")
+            page.goto(f"{live['base_url']}/search", wait_until="domcontentloaded")
             page.get_by_test_id("portal-search-input").fill("薄弱条目")
             page.get_by_test_id("portal-search-button").click()
             page.locator("#search-results .card").filter(has_text="薄弱条目").first.click()
-            expect(page.get_by_test_id("portal-entry-view")).to_contain_text(
+            expect(page.get_by_test_id("portal-entry-sections")).to_contain_text(
                 "适用于浏览器 E2E 编辑"
             )
+
+            page.goto(f"{live['base_url']}/admin/users", wait_until="domcontentloaded")
+            expect(page.locator('[data-testid="admin-user-token-view"]')).to_have_count(0)
+            user_card = page.locator("#user-list .card").first
+            user_card.locator('button[data-action="show-token"]').click()
+            expect(user_card.locator(".inline-token")).to_contain_text("top-secret")
 
 
 def test_portal_quartz_page_shows_optional_state(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
-            expect(page).to_have_title(re.compile("Quartz Graph"))
-            expect(page.locator("body")).to_contain_text("Quartz 4 图谱")
-            expect(page.locator("body")).to_contain_text("--quartz-only")
-            expect(page.locator("body")).to_contain_text("npm i")
+            expect(page).to_have_title(re.compile("Quartz"))
+            expect(page.locator("body")).to_contain_text("Quartz")
+            expect(page.locator("body")).to_contain_text("打开 Quartz")
 
 
 def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypatch) -> None:
@@ -153,10 +190,5 @@ def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypat
 
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
-            expect(page.get_by_test_id("portal-open-quartz")).to_be_visible()
-            with page.expect_popup() as popup_info:
-                page.get_by_test_id("portal-open-quartz").click()
-            popup = popup_info.value
-            popup.wait_for_load_state("domcontentloaded")
-            expect(popup).to_have_url(re.compile(".*/quartz/?$"))
-            expect(popup.locator("body")).to_contain_text("Quartz Ready")
+            expect(page).to_have_url(re.compile(".*/quartz/.*"))
+            expect(page.locator("body")).to_contain_text("Quartz Ready")

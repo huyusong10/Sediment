@@ -11,6 +11,18 @@
 
   const shellData = readJsonScript("sediment-shell-data") || {};
 
+  function nextThemeInfo() {
+    return document.documentElement.classList.contains("dark")
+      ? {
+          icon: shellData.themeLightIcon || "\u2600",
+          label: shellData.themeLightLabel || "Light",
+        }
+      : {
+          icon: shellData.themeDarkIcon || "\u25d0",
+          label: shellData.themeDarkLabel || "Dark",
+        };
+  }
+
   function applyInitialTheme() {
     const savedTheme = localStorage.getItem("theme");
     if (savedTheme === "dark") {
@@ -28,23 +40,42 @@
 
   function attachShellNav() {
     document.querySelectorAll("[data-shell-nav]").forEach((nav) => {
+      let utility = nav.parentElement?.querySelector("[data-shell-utility]") || null;
+      if (!utility && nav.parentElement) {
+        utility = document.createElement("div");
+        utility.className = "nav";
+        utility.setAttribute("data-shell-utility", "");
+        nav.parentElement.appendChild(utility);
+      }
+      if (!utility || utility.dataset.enhanced === "true") {
+        return;
+      }
+      const iconGroup = document.createElement("div");
+      iconGroup.className = "utility-icons";
+
       const themeBtn = document.createElement("button");
-      themeBtn.className = "chip";
+      themeBtn.className = "utility-icon-button";
       themeBtn.type = "button";
-      themeBtn.textContent = document.documentElement.classList.contains("dark")
-        ? "\u2600 Light"
-        : "\u25d0 Dark";
+      const applyThemeButton = () => {
+        const next = nextThemeInfo();
+        themeBtn.innerHTML = `<span aria-hidden="true">${next.icon}</span>`;
+        themeBtn.title = next.label;
+        themeBtn.setAttribute("aria-label", next.label);
+      };
+      applyThemeButton();
       themeBtn.addEventListener("click", () => {
         document.documentElement.classList.toggle("dark");
         const isDark = document.documentElement.classList.contains("dark");
         localStorage.setItem("theme", isDark ? "dark" : "light");
-        themeBtn.textContent = isDark ? "\u2600 Light" : "\u25d0 Dark";
+        applyThemeButton();
       });
 
       const langBtn = document.createElement("button");
-      langBtn.className = "chip";
+      langBtn.className = "utility-icon-button";
       langBtn.type = "button";
-      langBtn.textContent = shellData.toggleLabel || "EN";
+      langBtn.innerHTML = `<span aria-hidden="true">${shellData.toggleLabel || "EN"}</span>`;
+      langBtn.title = shellData.toggleAriaLabel || "Switch language";
+      langBtn.setAttribute("aria-label", shellData.toggleAriaLabel || "Switch language");
       langBtn.addEventListener("click", () => {
         const currentUrl = new URL(window.location.href);
         currentUrl.searchParams.set(
@@ -54,7 +85,9 @@
         window.location.href = currentUrl.toString();
       });
 
-      nav.append(themeBtn, langBtn);
+      iconGroup.append(themeBtn, langBtn);
+      utility.append(iconGroup);
+      utility.dataset.enhanced = "true";
     });
   }
 

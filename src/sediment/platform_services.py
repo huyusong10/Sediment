@@ -18,6 +18,7 @@ from typing import Any
 
 from sediment.kb import (
     audit_kb,
+    extract_wikilinks,
     index_config,
     inventory,
     resolve_kb_document_path,
@@ -877,6 +878,7 @@ def search_kb(kb_path: str | Path, query: str, *, limit: int = 20) -> list[dict[
         results.append(
             {
                 "name": name,
+                "title": doc["title"],
                 "kind": doc["kind"],
                 "entry_type": doc["entry_type"],
                 "status": doc["status"],
@@ -886,6 +888,55 @@ def search_kb(kb_path: str | Path, query: str, *, limit: int = 20) -> list[dict[
             }
         )
     return sorted(results, key=lambda item: (-item["score"], item["name"]))[:limit]
+
+
+def search_kb_suggestions(
+    kb_path: str | Path,
+    query: str,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    raw_query = query.strip()
+    if not raw_query:
+        return []
+    data = inventory(kb_path)
+    terms = [term for term in re.split(r"\s+", raw_query) if term]
+    suggestions: list[dict[str, Any]] = []
+    for name, doc in data["docs"].items():
+        score = 0
+        matched_field = ""
+        for term in terms:
+            lowered = term.casefold()
+            if doc["title"].casefold().startswith(lowered) or name.casefold().startswith(lowered):
+                score += 16
+                matched_field = matched_field or "title"
+            elif lowered in doc["title"].casefold():
+                score += 12
+                matched_field = matched_field or "title"
+            elif any(alias.casefold().startswith(lowered) for alias in doc["aliases"]):
+                score += 10
+                matched_field = matched_field or "aliases"
+            elif lowered in " ".join(doc["aliases"]).casefold():
+                score += 8
+                matched_field = matched_field or "aliases"
+            elif lowered in doc["summary"].casefold():
+                score += 4
+                matched_field = matched_field or "summary"
+        if score <= 0:
+            continue
+        suggestions.append(
+            {
+                "name": name,
+                "title": doc["title"],
+                "kind": doc["kind"],
+                "entry_type": doc["entry_type"],
+                "status": doc["status"],
+                "summary": doc["summary"],
+                "matched_field": matched_field or "summary",
+                "score": score + min(int(doc["inbound_count"]), 5),
+            }
+        )
+    return sorted(suggestions, key=lambda item: (-item["score"], item["name"]))[:limit]
 
 
 def build_search_snippet(body: str, terms: list[str]) -> str:
@@ -920,6 +971,28 @@ def get_entry_detail(kb_path: str | Path, name: str) -> dict[str, Any]:
     elif path:
         kind = "placeholder" if "/placeholders/" in str(path) else "formal"
         validation = validate_entry(path=path, kind=kind)
+    sections_map = dict(doc.get("sections_map") or {})
+    canonical_section_order = ("Scope", "Trigger", "Why", "Risks", "Related")
+    canonical_sections = [
+        {"name": section_name, "content": str(sections_map.get(section_name, "")).strip()}
+        for section_name in canonical_section_order
+        if str(sections_map.get(section_name, "")).strip()
+    ]
+    residual_sections = [
+        {"name": section_name, "content": str(section_body).strip()}
+        for section_name, section_body in sections_map.items()
+        if section_name not in canonical_section_order and str(section_body).strip()
+    ]
+    residual_parts: list[str] = []
+    preamble = str(doc.get("preamble", "")).strip()
+    if preamble:
+        residual_parts.append(preamble)
+    for section in residual_sections:
+        residual_parts.append(f"## {section['name']}\n{section['content']}")
+    residual_markdown = "\n\n".join(part for part in residual_parts if part).strip()
+    related_links = extract_wikilinks(sections_map.get("Related", "")) or list(
+        doc.get("graph_links") or []
+    )
     return {
         "name": name,
         "path": str(path) if path else None,
@@ -927,6 +1000,25 @@ def get_entry_detail(kb_path: str | Path, name: str) -> dict[str, Any]:
         "content_hash": content_hash(content),
         "metadata": doc,
         "validation": validation,
+        "structured": {
+            "title": doc.get("title") or name,
+            "kind": doc.get("kind"),
+            "entry_type": doc.get("entry_type"),
+            "status": doc.get("status"),
+            "summary": doc.get("summary"),
+            "aliases": list(doc.get("aliases") or []),
+            "sources": list(doc.get("sources") or []),
+            "related_links": related_links,
+            "canonical_sections": canonical_sections,
+            "residual_markdown": residual_markdown,
+            "validation_cues": {
+                "valid": bool(validation.get("valid")) if isinstance(validation, dict) else None,
+                "warnings": list(validation.get("warnings") or []) if isinstance(validation, dict) else [],
+                "hard_failures": list(validation.get("hard_failures") or [])
+                if isinstance(validation, dict)
+                else [],
+            },
+        },
     }
 
 
@@ -1268,6 +1360,7 @@ def apply_operations(
     operations: list[dict[str, Any]],
     *,
     actor_name: str,
+    actor_id: str | None = None,
     actor_role: str,
     store: PlatformStore,
 ) -> dict[str, Any]:
@@ -1377,6 +1470,7 @@ def apply_operations(
 
     store.add_audit_log(
         actor_name=actor_name,
+        actor_id=actor_id,
         actor_role=actor_role,
         action="kb.apply_operations",
         target_type="knowledge_base",
@@ -1393,6 +1487,8 @@ def save_entry(
     content: str,
     expected_hash: str | None,
     actor_name: str,
+    actor_id: str | None = None,
+    actor_role: str = "committer",
     store: PlatformStore,
 ) -> dict[str, Any]:
     root = Path(kb_path).resolve()
@@ -1415,11 +1511,17 @@ def save_entry(
             }
         ],
         actor_name=actor_name,
-        actor_role="committer",
+        actor_id=actor_id,
+        actor_role=actor_role,
         store=store,
     )
     detail = get_entry_detail(root, name)
     detail["write_result"] = result
+    detail["write_result"]["actor"] = {
+        "id": actor_id,
+        "name": actor_name,
+        "role": actor_role,
+    }
     return detail
 
 

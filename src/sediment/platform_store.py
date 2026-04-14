@@ -119,6 +119,10 @@ class PlatformStore:
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
+                    user_id TEXT,
+                    user_name TEXT,
+                    user_role TEXT,
+                    token_fingerprint TEXT,
                     revoked_at TEXT,
                     last_seen_at TEXT
                 );
@@ -155,6 +159,30 @@ class PlatformStore:
                 conn,
                 table="jobs",
                 column="cancel_requested_at",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="admin_sessions",
+                column="user_id",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="admin_sessions",
+                column="user_name",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="admin_sessions",
+                column="user_role",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="admin_sessions",
+                column="token_fingerprint",
                 definition="TEXT",
             )
 
@@ -939,7 +967,15 @@ class PlatformStore:
             ).fetchall()
         return [self._decode_row(row) for row in rows]
 
-    def create_admin_session(self, *, expires_at: str) -> dict[str, Any]:
+    def create_admin_session(
+        self,
+        *,
+        expires_at: str,
+        user_id: str | None = None,
+        user_name: str | None = None,
+        user_role: str | None = None,
+        token_fingerprint: str | None = None,
+    ) -> dict[str, Any]:
         session_id = uuid.uuid4().hex
         now = utc_now()
         with self._connect() as conn:
@@ -949,11 +985,25 @@ class PlatformStore:
                     id,
                     created_at,
                     expires_at,
+                    user_id,
+                    user_name,
+                    user_role,
+                    token_fingerprint,
                     revoked_at,
                     last_seen_at
-                ) VALUES (?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, now, expires_at, None, now),
+                (
+                    session_id,
+                    now,
+                    expires_at,
+                    user_id,
+                    user_name,
+                    user_role,
+                    token_fingerprint,
+                    None,
+                    now,
+                ),
             )
         session = self.get_admin_session(session_id)
         assert session is not None
@@ -967,14 +1017,19 @@ class PlatformStore:
             ).fetchone()
         return self._decode_row(row)
 
-    def verify_admin_session(self, session_id: str) -> bool:
+    def get_active_admin_session(
+        self,
+        session_id: str,
+        *,
+        touch: bool = True,
+    ) -> dict[str, Any] | None:
         if not session_id:
-            return False
+            return None
         now = utc_now()
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id
+                SELECT *
                 FROM admin_sessions
                 WHERE id = ?
                   AND revoked_at IS NULL
@@ -983,16 +1038,20 @@ class PlatformStore:
                 (session_id, now),
             ).fetchone()
             if row is None:
-                return False
-            conn.execute(
-                """
-                UPDATE admin_sessions
-                SET last_seen_at = ?
-                WHERE id = ?
-                """,
-                (now, session_id),
-            )
-        return True
+                return None
+            if touch:
+                conn.execute(
+                    """
+                    UPDATE admin_sessions
+                    SET last_seen_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, session_id),
+                )
+        return self._decode_row(row)
+
+    def verify_admin_session(self, session_id: str) -> bool:
+        return self.get_active_admin_session(session_id) is not None
 
     def revoke_admin_session(self, session_id: str) -> bool:
         if not session_id:

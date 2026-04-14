@@ -251,9 +251,23 @@ def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, mon
 
     def _fake_quartz_build(**kwargs):
         site_dir = Path(kwargs["site_dir"])
+        static_dir = site_dir / "static"
+        entry_dir = site_dir / "entries"
         site_dir.mkdir(parents=True, exist_ok=True)
+        static_dir.mkdir(parents=True, exist_ok=True)
+        entry_dir.mkdir(parents=True, exist_ok=True)
         (site_dir / "index.html").write_text(
             "<html><body>Built Quartz</body></html>",
+            encoding="utf-8",
+        )
+        (site_dir / "postscript.js").write_text("console.log('graph-ready')", encoding="utf-8")
+        (site_dir / "prescript.js").write_text("window.__quartz = true", encoding="utf-8")
+        (static_dir / "contentIndex.json").write_text(
+            '{"entries/test-entry":{"title":"Built Quartz"}}',
+            encoding="utf-8",
+        )
+        (entry_dir / "test-entry.html").write_text(
+            "<html><body>Test Entry</body></html>",
             encoding="utf-8",
         )
         return server_module.quartz_status(
@@ -275,12 +289,25 @@ def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, mon
     quartz_page = client.get("/quartz/")
     assert quartz_page.status_code == 200
     assert "Built Quartz" in quartz_page.text
+    assert "worker-src 'self' blob:" in quartz_page.headers["content-security-policy"]
+    assert "script-src 'self' 'unsafe-inline' https: blob:" in quartz_page.headers["content-security-policy"]
+
+    quartz_postscript = client.get("/quartz/postscript.js")
+    assert quartz_postscript.status_code == 200
+    assert "graph-ready" in quartz_postscript.text
+
+    quartz_index = client.get("/quartz/static/contentIndex.json")
+    assert quartz_index.status_code == 200
+    assert quartz_index.json()["entries/test-entry"]["title"] == "Built Quartz"
+
+    quartz_entry = client.get("/quartz/entries/test-entry")
+    assert quartz_entry.status_code == 200
+    assert "Test Entry" in quartz_entry.text
 
     graph_page = client.get("/portal/graph-view")
     assert graph_page.status_code == 200
-    assert 'data-testid="portal-open-quartz"' in graph_page.text
-    assert 'href="/quartz/"' in graph_page.text
-    assert "<iframe" not in graph_page.text
+    assert "Built Quartz" in graph_page.text
+    assert "/quartz/" in str(graph_page.url)
 
 
 def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -> None:
@@ -295,7 +322,8 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
 
     page = client.get("/admin")
     assert page.status_code == 200
-    assert "Sediment Admin Sign-in" in page.text
+    assert 'data-testid="admin-login-token"' in page.text
+    assert 'data-testid="admin-login-button"' in page.text
     assert 'rel="icon"' in page.text
     assert 'class="brand-mark"' in page.text
     assert page.headers["cache-control"] == "no-store"
@@ -315,7 +343,8 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
     assert overview.json()["queued_jobs"] == 0
 
     authed_page = client.get("/admin")
-    assert "Sediment Control Room" in authed_page.text
+    assert 'data-testid="admin-message"' in authed_page.text
+    assert 'data-testid="admin-refresh-button"' not in authed_page.text
     assert 'class="brand-mark"' in authed_page.text
 
 

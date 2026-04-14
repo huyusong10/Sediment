@@ -117,7 +117,7 @@ def render_help(topic: str | None) -> str:
                 "sediment server",
                 "",
                 "Manage the per-instance daemon lifecycle.",
-                "Each foreground/background start prints a one-time admin login token.",
+                "Server startup relies on configured owner / committer users in config.",
                 "",
                 "Commands:",
                 "  sediment server start",
@@ -135,7 +135,20 @@ def render_help(topic: str | None) -> str:
                 "Commands:",
                 "  sediment kb list",
                 "  sediment kb explore \"什么是热备份\"",
-                "  sediment kb tidy \"薄弱条目\"",
+                "  sediment kb tidy --scope graph --reason \"repair dangling links\"",
+            ]
+        ),
+        "user": "\n".join(
+            [
+                "sediment user",
+                "",
+                "Manage configured owner / committer identities for the admin console.",
+                "",
+                "Commands:",
+                "  sediment user list",
+                "  sediment user create --name \"Ops Committer\"",
+                "  sediment user show-token owner",
+                "  sediment user disable user-1234",
             ]
         ),
         "doctor": "\n".join(

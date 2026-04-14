@@ -8,6 +8,8 @@ from typing import Any, Sequence
 
 import yaml
 
+from sediment.auth import normalize_auth_config
+
 DEFAULT_CONFIG = {
     "version": 1,
     "locale": "en",
@@ -29,6 +31,7 @@ DEFAULT_CONFIG = {
         "run_jobs_in_process": False,
     },
     "auth": {
+        "users": [],
         "admin_token": "",
         "session_secret": "",
         "admin_session_cookie_name": "sediment_admin_session",
@@ -159,6 +162,7 @@ def load_settings_for_path(
         _deep_merge(merged, loaded)
 
     _apply_environment_overrides(merged)
+    merged["auth"] = normalize_auth_config(merged.get("auth"))
 
     instance_root = instance_root_from_config(resolved_config_path)
     workspace_root = _resolve_path(

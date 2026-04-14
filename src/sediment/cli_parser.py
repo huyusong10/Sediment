@@ -116,13 +116,53 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     read_parser.add_argument("name")
     read_parser.set_defaults(func=handlers["kb_read"], needs_runtime_context=True)
 
-    tidy_parser = kb_subparsers.add_parser("tidy", help="Queue a tidy job for a KB target.")
-    tidy_parser.add_argument("target")
+    tidy_parser = kb_subparsers.add_parser("tidy", help="Queue a KB-level tidy job.")
+    tidy_parser.add_argument("target", nargs="?")
+    tidy_parser.add_argument(
+        "--scope",
+        choices=["full", "graph", "indexes", "health_blocking"],
+        default="health_blocking",
+    )
+    tidy_parser.add_argument("--reason")
     tidy_parser.add_argument("--issue-type")
     tidy_parser.add_argument("--actor-name")
     tidy_parser.add_argument("--process-once", action="store_true")
     tidy_parser.add_argument("--json", action="store_true")
     tidy_parser.set_defaults(func=handlers["kb_tidy"], needs_runtime_context=True)
+
+    user_parser = subparsers.add_parser("user", help="Manage configured admin users.")
+    user_subparsers = user_parser.add_subparsers(dest="user_command", required=True)
+
+    user_list_parser = user_subparsers.add_parser("list", help="List configured users.")
+    user_list_parser.add_argument("--json", action="store_true")
+    user_list_parser.set_defaults(
+        func=handlers["user_list_command"],
+        needs_runtime_context=True,
+    )
+
+    user_create_parser = user_subparsers.add_parser("create", help="Create a configured user.")
+    user_create_parser.add_argument("--name", required=True)
+    user_create_parser.add_argument("--json", action="store_true")
+    user_create_parser.set_defaults(
+        func=handlers["user_create_command"],
+        needs_runtime_context=True,
+    )
+
+    user_disable_parser = user_subparsers.add_parser("disable", help="Disable a configured user.")
+    user_disable_parser.add_argument("user_id")
+    user_disable_parser.add_argument("--json", action="store_true")
+    user_disable_parser.set_defaults(
+        func=handlers["user_disable_command"],
+        needs_runtime_context=True,
+    )
+
+    user_token_parser = user_subparsers.add_parser("show-token", help="Show a user's token.")
+    user_token_parser.add_argument("user_id")
+    user_token_parser.add_argument("--json", action="store_true")
+    user_token_parser.set_defaults(
+        func=handlers["user_show_token_command"],
+        needs_runtime_context=True,
+    )
 
     review_parser = subparsers.add_parser("review", help="Inspect and resolve pending reviews.")
     review_subparsers = review_parser.add_subparsers(dest="review_command", required=True)

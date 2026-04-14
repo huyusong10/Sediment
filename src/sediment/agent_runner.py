@@ -338,16 +338,18 @@ class AgentRunner:
             [
                 "You are the Sediment tidy runner.",
                 "You are running on the knowledge-base host and may inspect local files if your CLI supports it.",
-                "Return JSON only. Do not write files directly. Touch only files needed to address the requested issue.",
+                "Return JSON only. Do not write files directly. Touch only files needed to address the requested maintenance scope.",
                 "Keep changes conservative and human-reviewable.",
                 self._load_skill_body("tidy"),
                 "## Requested Tidy Task",
                 json.dumps(
                     {
-                        "target_entry_name": job.get("target_entry_name"),
+                        "scope": request_payload.get("scope"),
+                        "reason": request_payload.get("reason"),
                         "request_payload": request_payload,
                         "health_report": request_payload.get("health_report"),
                         "issue": request_payload.get("issue"),
+                        "issues": request_payload.get("issues"),
                     },
                     ensure_ascii=False,
                     indent=2,

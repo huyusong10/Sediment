@@ -21,6 +21,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sediment import launcher, worker
+from sediment.auth import (
+    auth_users_from_settings,
+    create_config_user,
+    disable_config_user,
+    find_user_by_id,
+)
 from sediment.cli_help import render_help as render_help_topic
 from sediment.cli_parser import build_cli_parser
 from sediment.control import (
@@ -29,6 +35,7 @@ from sediment.control import (
     platform_status_payload,
     resolve_tidy_issue,
     review_detail_payload,
+    scope_from_issue,
     submit_document_request,
     submit_text_request,
 )
@@ -713,6 +720,7 @@ def _write_instance_scaffold(
     import yaml
 
     config_target.parent.mkdir(parents=True, exist_ok=True)
+    owner_token = secrets.token_urlsafe(16)
     payload = {
         "version": 1,
         "locale": "en",
@@ -731,7 +739,17 @@ def _write_instance_scaffold(
             "run_jobs_in_process": False,
         },
         "auth": {
-            "admin_token": secrets.token_urlsafe(16),
+            "users": [
+                {
+                    "id": "owner",
+                    "name": "Owner",
+                    "role": "owner",
+                    "token": owner_token,
+                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "disabled": False,
+                }
+            ],
+            "admin_token": owner_token,
             "session_secret": secrets.token_urlsafe(24),
             "admin_session_cookie_name": "sediment_admin_session",
             "admin_session_ttl_seconds": 43_200,
@@ -922,8 +940,7 @@ def daemon_status() -> dict[str, Any]:
 
 
 def effective_admin_auth_required() -> bool:
-    metadata = read_daemon_metadata()
-    return bool(admin_token() or metadata.get("startup_admin_token"))
+    return bool(admin_token())
 
 
 def wait_for_health(*, timeout_seconds: float) -> bool:
@@ -1029,7 +1046,6 @@ def start_daemon(args) -> int:
 
     paths = daemon_paths()
     cli_progress(f"Launching background services. Logs: {paths['log']}", enabled=enabled)
-    startup_admin_token = secrets.token_urlsafe(18)
     command = [
         sys.executable,
         "-m",
@@ -1055,7 +1071,6 @@ def start_daemon(args) -> int:
             cwd=str(project_root()),
             env={
                 **os.environ,
-                "SEDIMENT_STARTUP_ADMIN_TOKEN": startup_admin_token,
                 "PYTHONUNBUFFERED": "1",
                 "PYTHONPATH": (
                     f"{source_root()}{os.pathsep}{os.environ.get('PYTHONPATH', '').strip()}"
@@ -1078,7 +1093,6 @@ def start_daemon(args) -> int:
             "port": port(),
             "host": host(),
             "log_path": str(paths["log"]),
-            "startup_admin_token": startup_admin_token,
         }
     )
 
@@ -1095,14 +1109,13 @@ def start_daemon(args) -> int:
             time.sleep(0.2)
         if process.poll() is None:
             print(f"Sediment daemon started (pid={process.pid}).")
-            print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
-            print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
-            print(f"Token:  {startup_admin_token}")
+            print(f"Portal: {local_health_url().removesuffix('/healthz')}/")
+            print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin/overview")
             print(f"Logs:   {paths['log']}")
             print_next_steps(
-                f"Open the portal: {local_health_url().removesuffix('/healthz')}/portal",
-                f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin",
-                f"Use this login token: {startup_admin_token}",
+                f"Open the portal: {local_health_url().removesuffix('/healthz')}/",
+                f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin/overview",
+                f"Use the owner token stored in {current_config_path()}",
                 f"Inspect status: {scoped_command('status')}",
             )
             return 0
@@ -1113,14 +1126,13 @@ def start_daemon(args) -> int:
         grace_seconds=1.0,
     ):
         print(f"Sediment daemon started (pid={process.pid}).")
-        print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
-        print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
-        print(f"Token:  {startup_admin_token}")
+        print(f"Portal: {local_health_url().removesuffix('/healthz')}/")
+        print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin/overview")
         print(f"Logs:   {paths['log']}")
         print_next_steps(
-            f"Open the portal: {local_health_url().removesuffix('/healthz')}/portal",
-            f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin",
-            f"Use this login token: {startup_admin_token}",
+            f"Open the portal: {local_health_url().removesuffix('/healthz')}/",
+            f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin/overview",
+            f"Use the owner token stored in {current_config_path()}",
             f"Inspect status: {scoped_command('status')}",
         )
         return 0
@@ -1288,17 +1300,28 @@ def kb_read(args) -> int:
 
 def kb_tidy(args) -> int:
     enabled = progress_enabled(args)
-    cli_progress(f"Resolving tidy issue for `{args.target}`.", enabled=enabled)
     store = build_store()
-    issue = resolve_tidy_issue(
-        kb_path=kb_path(),
-        target=args.target,
-        issue_type=args.issue_type,
-    )
-    cli_progress(f"Queueing tidy job for issue type `{issue['type']}`.", enabled=enabled)
+    issue = None
+    scope = str(getattr(args, "scope", "") or "health_blocking").strip()
+    reason = str(getattr(args, "reason", "") or "").strip()
+    if getattr(args, "target", None):
+        cli_progress(f"Resolving tidy issue for `{args.target}`.", enabled=enabled)
+        issue = resolve_tidy_issue(
+            kb_path=kb_path(),
+            target=args.target,
+            issue_type=args.issue_type,
+        )
+        scope = scope_from_issue(issue)
+        reason = reason or str(issue.get("summary", "")).strip() or f"tidy {issue['type']}"
+        cli_progress(f"Queueing tidy job for issue type `{issue['type']}`.", enabled=enabled)
+    else:
+        reason = reason or f"CLI KB tidy ({scope})"
+        cli_progress(f"Queueing KB tidy for scope `{scope}`.", enabled=enabled)
     job = enqueue_tidy_job(
         store=store,
         kb_path=kb_path(),
+        scope=scope,
+        reason=reason,
         issue=issue,
         actor_name=args.actor_name or current_actor_name(),
         max_attempts=job_max_attempts(),
@@ -1309,17 +1332,118 @@ def kb_tidy(args) -> int:
         job = store.get_job(job["id"]) or job
 
     if args.json:
-        print(json.dumps({"job": job, "issue": issue}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"job": job, "issue": issue, "scope": scope, "reason": reason},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(f"Created tidy job: {job['id']}")
-        print(f"target: {issue['target']}")
-        print(f"type: {issue['type']}")
+        print(f"scope: {scope}")
+        print(f"reason: {reason}")
+        if issue is not None:
+            print(f"target: {issue['target']}")
+            print(f"type: {issue['type']}")
         print(f"status: {job['status']}")
         if not args.process_once:
             print(
                 "The job is queued. Start the daemon or run "
                 "`sediment server run` to process it."
             )
+    return 0
+
+
+def _cli_users() -> list[dict[str, Any]]:
+    return auth_users_from_settings(load_settings())
+
+
+def user_list_command(args) -> int:
+    users = _cli_users()
+    if args.json:
+        print(json.dumps({"users": users}, ensure_ascii=False, indent=2))
+        return 0
+    for user in users:
+        status = "disabled" if user.get("disabled") else "active"
+        print(
+            " · ".join(
+                [
+                    str(user.get("id", "")).strip(),
+                    str(user.get("name", "")).strip(),
+                    str(user.get("role", "")).strip(),
+                    status,
+                ]
+            )
+        )
+    return 0
+
+
+def user_create_command(args) -> int:
+    try:
+        _payload, user = create_config_user(
+            current_config_path(),
+            name=args.name,
+            role="committer",
+            created_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if args.json:
+        print(
+            json.dumps(
+                {"user": user, "token": str(user.get("token", "")).strip()},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(f"Created user: {user['id']}")
+    print(f"role: {user['role']}")
+    print(f"token: {user['token']}")
+    return 0
+
+
+def user_disable_command(args) -> int:
+    target_user = find_user_by_id(load_settings(), args.user_id)
+    if target_user is None:
+        print(f"User not found: {args.user_id}", file=sys.stderr)
+        return 1
+    active_owner_count = sum(
+        1 for item in _cli_users() if item.get("role") == "owner" and not item.get("disabled")
+    )
+    if (
+        target_user.get("role") == "owner"
+        and not target_user.get("disabled")
+        and active_owner_count <= 1
+    ):
+        print("Cannot disable the last active owner.", file=sys.stderr)
+        return 1
+    _payload, user = disable_config_user(current_config_path(), args.user_id)
+    if args.json:
+        print(json.dumps({"user": user}, ensure_ascii=False, indent=2))
+        return 0
+    print(f"Disabled user: {user['id']}")
+    return 0
+
+
+def user_show_token_command(args) -> int:
+    user = find_user_by_id(load_settings(), args.user_id)
+    if user is None:
+        print(f"User not found: {args.user_id}", file=sys.stderr)
+        return 1
+    token = str(user.get("token", "")).strip()
+    if args.json:
+        print(
+            json.dumps(
+                {"user": user, "token": token},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    print(token)
     return 0
 
 
@@ -2028,7 +2152,8 @@ def init_command(args) -> int:
         "knowledge_base_created": create_kb,
         "knowledge_base_path": str((target_root / kb_relative_path).resolve()),
         "registry_path": str(instance_registry_path()),
-        "admin_token": scaffold["auth"]["admin_token"],
+        "owner_user_id": "owner",
+        "owner_token": scaffold["auth"]["admin_token"],
     }
 
     if args.json:
@@ -2045,7 +2170,8 @@ def init_command(args) -> int:
     print(f"- port: {port_value}")
     print(f"- kb_path: {(target_root / kb_relative_path).resolve()}")
     print(f"- registry: {instance_registry_path()}")
-    print(f"- admin_token: {scaffold['auth']['admin_token']}")
+    print("- owner_user_id: owner")
+    print(f"- owner_token: {scaffold['auth']['admin_token']}")
     print("- doctor: skipped during init")
     print(
         "Tip: if the agent backend, permissions, or port look suspicious, run "
@@ -2559,7 +2685,7 @@ def quartz_build_command(args) -> int:
         print("Quartz site build completed.")
         print(f"- site path: {payload['site_path']}")
         print(f"- index:     {payload['site_index_path']}")
-        print_next_steps(f"Open graph view: {local_health_url().removesuffix('/healthz')}/portal/graph-view")
+        print_next_steps(f"Open Quartz: {local_health_url().removesuffix('/healthz')}/quartz/")
     return 0
 
 
@@ -2652,6 +2778,10 @@ def build_parser() -> argparse.ArgumentParser:
             "kb_list": kb_list,
             "kb_read": kb_read,
             "kb_tidy": kb_tidy,
+            "user_list_command": user_list_command,
+            "user_create_command": user_create_command,
+            "user_disable_command": user_disable_command,
+            "user_show_token_command": user_show_token_command,
             "review_list_command": review_list_command,
             "review_show_command": review_show_command,
             "review_approve_command": review_approve_command,

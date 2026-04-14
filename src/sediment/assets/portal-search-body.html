@@ -1,0 +1,54 @@
+<div class="page">
+  <section class="hero">
+    <div class="hero-top">
+      <div class="brand">
+        __LOGO_INLINE__
+        <div class="brand-copy">
+          <span>Sediment</span>
+          <strong>__KNOWLEDGE_NAME__</strong>
+        </div>
+      </div>
+      <div data-shell-header-actions>
+        <div class="nav" data-shell-nav>
+          __HOME_LINK__
+          __SEARCH_LINK__
+          __SUBMIT_LINK__
+          __QUARTZ_LINK__
+        </div>
+        <div class="nav" data-shell-utility></div>
+      </div>
+    </div>
+    <h1>__KNOWLEDGE_NAME__</h1>
+  </section>
+
+  <section class="panel">
+    <div class="row spread">
+      <h2>__PAGE_KICKER__</h2>
+      <span class="subtle" id="search-status"></span>
+    </div>
+    <div class="search-stage">
+      <div class="search-field" data-search-popover-root>
+        <input
+          id="search-input"
+          data-testid="portal-search-input"
+          placeholder="__SEARCH_PLACEHOLDER__"
+          autocomplete="off"
+          aria-autocomplete="list"
+          aria-haspopup="listbox"
+        />
+        <div
+          id="search-suggestions"
+          class="search-suggestions-popover"
+          data-testid="portal-search-suggestions"
+          role="listbox"
+          hidden
+        ></div>
+      </div>
+      <div class="search-actions">
+        <button class="primary" id="search-button" data-testid="portal-search-button">__SEARCH_BUTTON_LABEL__</button>
+      </div>
+    </div>
+    <div id="search-results" class="list" data-testid="portal-search-results" style="margin-top:18px;"></div>
+    <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite"></div>
+  </section>
+</div>

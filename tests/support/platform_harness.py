@@ -127,17 +127,29 @@ def configure_server(
     submission_rate_limit_count: int | None = None,
 ) -> tuple[TestClient, object, object]:
     cli_path = Path(__file__).resolve().parent.parent / "fixtures" / "mock_workflow_cli.py"
+    auth_users = None
+    if admin_token:
+        auth_users = [
+            {
+                "id": "owner",
+                "name": "Owner",
+                "role": "owner",
+                "token": admin_token,
+                "created_at": "2026-04-15T00:00:00+00:00",
+                "disabled": False,
+            }
+        ]
     write_test_config(
         project_root,
         kb_path=kb_path,
         state_dir=state_dir,
         agent_backend="claude-code",
         agent_command=[sys.executable, str(cli_path)],
+        auth_users=auth_users,
+        session_secret="test-session-secret",
     )
     server_module = importlib.reload(server)
     worker_module = importlib.reload(worker)
-    monkeypatch.setattr(server_module, "ADMIN_TOKEN", admin_token)
-    monkeypatch.setattr(server_module, "STARTUP_ADMIN_TOKEN", startup_admin_token)
     monkeypatch.setattr(server_module, "SESSION_SECRET", "test-session-secret")
     monkeypatch.setattr(server_module, "RUN_JOBS_IN_PROCESS", False)
     monkeypatch.setattr(server_module, "TRUST_PROXY_HEADERS", False)
@@ -150,8 +162,6 @@ def configure_server(
             "SUBMISSION_RATE_LIMIT_COUNT",
             submission_rate_limit_count,
         )
-    monkeypatch.setattr(server_module, "_quartz_runtime_available", lambda: False)
-    monkeypatch.setattr(server_module, "_quartz_site_available", lambda: False)
     app = server_module.create_starlette_app()
     return TestClient(app), server_module, worker_module
 
@@ -162,6 +172,18 @@ def live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
     port = free_port()
     state_dir = tmp_path / "state"
     cli_path = Path(__file__).resolve().parent.parent / "fixtures" / "mock_workflow_cli.py"
+    auth_users = None
+    if admin_token:
+        auth_users = [
+            {
+                "id": "owner",
+                "name": "Owner",
+                "role": "owner",
+                "token": admin_token,
+                "created_at": "2026-04-15T00:00:00+00:00",
+                "disabled": False,
+            }
+        ]
     write_test_config(
         project_root,
         kb_path=kb_path,
@@ -170,12 +192,12 @@ def live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
         agent_command=[sys.executable, str(cli_path)],
         host="127.0.0.1",
         port=port,
+        auth_users=auth_users,
+        session_secret="browser-e2e-session",
     )
 
     server_module = importlib.reload(server)
     worker_module = importlib.reload(worker)
-    monkeypatch.setattr(server_module, "ADMIN_TOKEN", "")
-    monkeypatch.setattr(server_module, "STARTUP_ADMIN_TOKEN", admin_token)
     monkeypatch.setattr(server_module, "SESSION_SECRET", "browser-e2e-session")
     monkeypatch.setattr(server_module, "RUN_JOBS_IN_PROCESS", False)
     monkeypatch.setattr(server_module, "TRUST_PROXY_HEADERS", False)
@@ -183,9 +205,6 @@ def live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
     monkeypatch.setattr(server_module, "JOB_STALE_AFTER_SECONDS", 1)
     monkeypatch.setattr(server_module, "JOB_MAX_ATTEMPTS", 2)
     monkeypatch.setattr(server_module, "SUBMISSION_RATE_LIMIT_COUNT", 3)
-    monkeypatch.setattr(server_module, "_quartz_runtime_available", lambda: False)
-    monkeypatch.setattr(server_module, "_quartz_site_available", lambda: False)
-
     app = server_module.create_starlette_app()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
     live_app = uvicorn.Server(config)

@@ -21,11 +21,18 @@
     <h1>__KNOWLEDGE_NAME__</h1>
   </section>
 
-  <section class="panel" style="margin-top:20px; max-width:560px;">
-    <div class="grid">
-      <label>__TOKEN_LABEL__<input id="admin-session-token" data-testid="admin-login-token" type="password" placeholder="__TOKEN_PLACEHOLDER__" /></label>
-      <button class="primary" id="login-button" data-testid="admin-login-button">__OPEN_ADMIN_LABEL__</button>
-      <div id="login-status" data-testid="admin-login-status" class="subtle" role="status" aria-live="polite">__LOGIN_STATUS__</div>
+  <section class="grid cols-2">
+    <div class="panel">
+      <h2>Quartz</h2>
+      <p>__STATUS_LABEL__</p>
+      <pre class="mono">__DETAIL_TEXT__</pre>
+    </div>
+    <div class="panel">
+      <h2>__ACTIONS_TITLE__</h2>
+      <div class="row">
+        __OPEN_QUARTZ_LINK__
+        __ADMIN_KB_LINK__
+      </div>
     </div>
   </section>
 </div>

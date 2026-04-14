@@ -26,6 +26,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import re
 import subprocess
@@ -34,20 +35,34 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import yaml
 from mcp import types
 from mcp.server import Server
 
 from sediment.agent_runner import get_agent_runner
+from sediment.auth import (
+    active_users,
+    auth_required as auth_model_required,
+    auth_users_from_settings,
+    create_config_user,
+    disable_config_user,
+    find_user_by_id,
+    find_user_by_token,
+    token_fingerprint,
+)
 from sediment.benchmark_materials import answer_from_materials
 from sediment.control import (
     admin_overview_payload,
     apply_review_decision,
+    build_tidy_request,
     enqueue_ingest_job,
     enqueue_tidy_job,
+    normalize_tidy_scope,
     resolve_tidy_issue,
     review_detail_payload,
+    scope_from_issue,
     submit_document_request,
     submit_text_request,
     system_status_payload,
@@ -67,6 +82,7 @@ from sediment.platform_services import (
     list_reviews_with_jobs,
     save_entry,
     search_kb,
+    search_kb_suggestions,
 )
 from sediment.platform_store import PlatformStore, utc_now
 from sediment.quartz_runtime import (
@@ -150,7 +166,7 @@ from sediment.runtime import (
 from sediment.runtime import (
     trusted_proxy_cidrs as runtime_trusted_proxy_cidrs,
 )
-from sediment.settings import load_settings
+from sediment.settings import clear_settings_cache, load_settings
 from sediment.skills.explore.scripts.kb_query import (
     inventory,
     prepare_explore_context,
@@ -214,7 +230,7 @@ def refresh_runtime_state() -> None:
     PORT = runtime_port()
     SSE_ENDPOINT = runtime_sse_endpoint()
     ADMIN_TOKEN = runtime_admin_token()
-    STARTUP_ADMIN_TOKEN = os.environ.get("SEDIMENT_STARTUP_ADMIN_TOKEN", "").strip()
+    STARTUP_ADMIN_TOKEN = ""
     SESSION_SECRET = runtime_session_secret()
     ADMIN_SESSION_COOKIE_NAME = runtime_admin_session_cookie_name()
     ADMIN_SESSION_TTL_SECONDS = runtime_admin_session_ttl_seconds()
@@ -326,23 +342,92 @@ def _path_with_locale(path: str, locale: str) -> str:
     return f"{path}{joiner}lang={locale}"
 
 
+def _settings() -> dict[str, Any]:
+    return load_settings()
+
+
+def _active_auth_users() -> list[dict[str, Any]]:
+    return active_users(_settings())
+
+
+def _synthetic_local_admin_user() -> dict[str, Any]:
+    return {
+        "id": "local-admin",
+        "name": "Local Admin",
+        "role": "owner",
+        "disabled": False,
+    }
+
+
 def _session_secret_bytes() -> bytes | None:
-    secret = SESSION_SECRET or STARTUP_ADMIN_TOKEN or ADMIN_TOKEN
+    secret = SESSION_SECRET or ADMIN_TOKEN
     if not secret:
         return None
     return hashlib.sha256(secret.encode("utf-8")).digest()
 
 
 def _admin_auth_required() -> bool:
-    return bool(ADMIN_TOKEN or STARTUP_ADMIN_TOKEN)
+    return auth_model_required(_settings())
 
 
-def _token_matches(candidate: str) -> bool:
-    token = candidate.strip()
-    return bool(token) and token in {ADMIN_TOKEN, STARTUP_ADMIN_TOKEN}
+def _user_from_token(candidate: str) -> dict[str, Any] | None:
+    return find_user_by_token(_settings(), candidate.strip())
 
 
-def _build_admin_session_cookie() -> str:
+def _extract_bearer_token(request) -> str:
+    auth_header = str(request.headers.get("authorization", ""))
+    if not auth_header.startswith("Bearer "):
+        return ""
+    return auth_header.removeprefix("Bearer ").strip()
+
+
+def _session_user(request) -> dict[str, Any] | None:
+    session_id = _extract_admin_session_id(request.cookies.get(ADMIN_SESSION_COOKIE_NAME))
+    if session_id is None:
+        return None
+    session = _platform_store().get_active_admin_session(session_id)
+    if session is None:
+        return None
+    user_id = str(session.get("user_id", "")).strip()
+    user_name = str(session.get("user_name", "")).strip()
+    user_role = str(session.get("user_role", "")).strip()
+    if not user_id or not user_role:
+        return None
+    return {
+        "id": user_id,
+        "name": user_name or user_id,
+        "role": user_role,
+        "disabled": False,
+        "token_fingerprint": session.get("token_fingerprint"),
+    }
+
+
+def _current_user(request) -> dict[str, Any] | None:
+    bearer_token = _extract_bearer_token(request)
+    if bearer_token:
+        return _user_from_token(bearer_token)
+    return _session_user(request)
+
+
+def _current_optional_user(request) -> dict[str, Any] | None:
+    return _current_user(request)
+
+
+def _require_user(request) -> dict[str, Any] | None:
+    if not _admin_auth_required():
+        return _synthetic_local_admin_user()
+    return _current_user(request)
+
+
+def _user_role_allowed(user: dict[str, Any] | None, allowed_roles: tuple[str, ...]) -> bool:
+    if user is None:
+        return False
+    if not allowed_roles:
+        return True
+    return str(user.get("role", "")).strip() in allowed_roles
+
+
+def _build_admin_session_cookie(user: dict[str, Any]) -> str:
     secret = _session_secret_bytes()
     if secret is None:
         raise RuntimeError("admin session secret is unavailable")
@@ -351,7 +436,11 @@ def _build_admin_session_cookie() -> str:
             datetime.now(timezone.utc) + timedelta(seconds=ADMIN_SESSION_TTL_SECONDS)
         )
         .replace(microsecond=0)
-        .isoformat()
+        .isoformat(),
+        user_id=str(user.get("id", "")).strip() or None,
+        user_name=str(user.get("name", "")).strip() or None,
+        user_role=str(user.get("role", "")).strip() or None,
+        token_fingerprint=str(user.get("token_fingerprint", "")).strip() or None,
     )
     payload = f"admin-session:{session['id']}"
     signature = hmac.new(secret, payload.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -382,17 +471,11 @@ def _verify_admin_session_cookie(cookie_value: str | None) -> bool:
 
 
 def _is_admin_authorized(request) -> bool:
-    if not _admin_auth_required():
-        return True
-    headers = dict(request.headers)
-    auth_header = headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return _verify_admin_session_cookie(request.cookies.get(ADMIN_SESSION_COOKIE_NAME))
-    return _token_matches(auth_header.removeprefix("Bearer "))
+    return _require_user(request) is not None
 
 
-def _set_admin_session_cookie(response) -> str:
-    cookie_value = _build_admin_session_cookie()
+def _set_admin_session_cookie(response, user: dict[str, Any]) -> str:
+    cookie_value = _build_admin_session_cookie(user)
     response.set_cookie(
         key=ADMIN_SESSION_COOKIE_NAME,
         value=cookie_value,
@@ -544,10 +627,12 @@ def _tool_definitions() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "target": {"type": "string"},
+                    "scope": {"type": "string"},
+                    "reason": {"type": "string"},
                     "issue_type": {"type": "string"},
                     "actor_name": {"type": "string"},
                 },
-                "required": ["target"],
+                "required": [],
             },
         ),
         types.Tool(
@@ -610,6 +695,8 @@ async def _dispatch_tool(name: str, arguments: dict):
     if name == "knowledge_tidy_request":
         return await _knowledge_tidy_request(
             target=arguments.get("target", ""),
+            scope=arguments.get("scope"),
+            reason=arguments.get("reason"),
             issue_type=arguments.get("issue_type"),
             actor_name=arguments.get("actor_name", "mcp"),
         )
@@ -759,29 +846,42 @@ async def _knowledge_job_status(job_id: str) -> str:
 
 async def _knowledge_tidy_request(
     *,
-    target: str,
+    target: str = "",
+    scope: str | None = None,
+    reason: str | None = None,
     issue_type: str | None = None,
     actor_name: str = "mcp",
 ) -> str:
     target = str(target).strip()
-    if not target:
-        return json.dumps({"error": "target must not be empty"}, ensure_ascii=False)
     store = _platform_store()
-    issue = resolve_tidy_issue(
-        kb_path=KB_PATH,
-        target=target,
-        issue_type=issue_type,
-    )
+    issue = None
+    tidy_scope = normalize_tidy_scope(scope)
+    tidy_reason = str(reason or "").strip()
+    if target:
+        issue = resolve_tidy_issue(
+            kb_path=KB_PATH,
+            target=target,
+            issue_type=issue_type,
+        )
+        tidy_scope = scope_from_issue(issue)
+        tidy_reason = tidy_reason or str(issue.get("summary", "")).strip() or f"tidy {issue['type']}"
+    else:
+        tidy_reason = tidy_reason or f"MCP KB tidy ({tidy_scope})"
     job = enqueue_tidy_job(
         store=store,
         kb_path=KB_PATH,
+        scope=tidy_scope,
+        reason=tidy_reason,
         issue=issue,
         actor_name=actor_name,
         max_attempts=JOB_MAX_ATTEMPTS,
     )
     if RUN_JOBS_IN_PROCESS:
         _agent_runner().submit(job["id"])
-    return json.dumps({"job": job, "issue": issue}, ensure_ascii=False)
+    return json.dumps(
+        {"job": job, "issue": issue, "scope": tidy_scope, "reason": tidy_reason},
+        ensure_ascii=False,
+    )
 
 
 async def _knowledge_review_decide(
@@ -1552,12 +1652,62 @@ def _decode_uploaded_files(raw_files: list[dict[str, Any]]) -> list[dict[str, An
     return decoded
 
 
+def _forbidden_html(*, locale: str, message: str):
+    title = "禁止访问" if locale == "zh" else "Forbidden"
+    description = message or (
+        "当前登录角色无权访问这个管理页面。"
+        if locale == "zh"
+        else "Your current role cannot access this admin page."
+    )
+    return _html_response(
+        (
+            "<!doctype html><html><head>"
+            f"<meta charset='utf-8'><title>{title}</title>"
+            "</head><body>"
+            f"<h1>{title}</h1><p>{description}</p>"
+            "</body></html>"
+        ),
+        status=403,
+    )
+
+
+def _config_user_payload(user: dict[str, Any], *, include_token: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": str(user.get("id", "")).strip(),
+        "name": str(user.get("name", "")).strip(),
+        "role": str(user.get("role", "")).strip(),
+        "created_at": str(user.get("created_at", "")).strip(),
+        "disabled": bool(user.get("disabled", False)),
+        "token_fingerprint": token_fingerprint(str(user.get("token", "")).strip()),
+    }
+    if include_token:
+        payload["token"] = str(user.get("token", "")).strip()
+    return payload
+
+
+def _configured_users() -> list[dict[str, Any]]:
+    return auth_users_from_settings(_settings())
+
+
+def _reload_runtime_settings() -> None:
+    clear_settings_cache()
+    refresh_runtime_state()
+
+
 async def _portal_page(request):
+    locale = _request_locale(request)
+    return _redirect(_path_with_locale("/", locale))
+
+
+async def _portal_home_page(request):
     return _html_response(
         portal_html(
             knowledge_name=KNOWLEDGE_NAME,
             instance_name=INSTANCE_NAME,
             locale=_request_locale(request),
+            page="home",
+            initial_query=str(request.query_params.get("q", "")).strip(),
+            current_user=_current_optional_user(request),
         )
     )
 
@@ -1576,6 +1726,8 @@ async def _ui_asset(request):
 
 async def _portal_graph_page(request):
     locale = _request_locale(request)
+    if _quartz_site_available():
+        return _redirect(_path_with_locale("/quartz/", locale))
     return _html_response(
         portal_graph_html(
             knowledge_name=KNOWLEDGE_NAME,
@@ -1585,86 +1737,118 @@ async def _portal_graph_page(request):
                 runtime_dir=QUARTZ_RUNTIME_DIR,
                 site_dir=QUARTZ_SITE_DIR,
             ),
-            admin_kb_path=_path_with_locale("/admin/kb", locale),
+            admin_kb_path=_path_with_locale("/admin/system", locale),
         )
     )
 
 
 async def _admin_page(request):
-    return await _admin_overview_page(request)
+    locale = _request_locale(request)
+    return _redirect(_path_with_locale("/admin/overview", locale))
+
+
+async def _portal_search_page(request):
+    locale = _request_locale(request)
+    return _html_response(
+        portal_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            page="search",
+            initial_query=str(request.query_params.get("q", "")).strip(),
+            current_user=_current_optional_user(request),
+        )
+    )
+
+
+async def _portal_entry_page(request):
+    locale = _request_locale(request)
+    return _html_response(
+        portal_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            page="entry",
+            entry_name=request.path_params["name"],
+            current_user=_current_optional_user(request),
+        )
+    )
+
+
+async def _portal_submit_page(request):
+    locale = _request_locale(request)
+    return _html_response(
+        portal_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            page="submit",
+            current_user=_current_optional_user(request),
+        )
+    )
+
+
+async def _admin_section_page(
+    request,
+    *,
+    section: str,
+    allowed_roles: tuple[str, ...] = ("owner", "committer"),
+):
+    locale = _request_locale(request)
+    user = _require_user(request)
+    if user is None:
+        return _html_response(
+            admin_login_html(
+                knowledge_name=KNOWLEDGE_NAME,
+                instance_name=INSTANCE_NAME,
+                locale=locale,
+                next_path=_path_with_locale(request.url.path, locale),
+            ),
+            status=200,
+        )
+    if not _user_role_allowed(user, allowed_roles):
+        return _forbidden_html(
+            locale=locale,
+            message=(
+                "只有 owner 可以访问这个区域。"
+                if locale == "zh"
+                else "Only owners can access this section."
+            ),
+        )
+    return _html_response(
+        admin_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            section=section,
+            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
+            current_user=_user_payload(user),
+        )
+    )
 
 
 async def _admin_overview_page(request):
-    locale = _request_locale(request)
-    if not _is_admin_authorized(request):
-        return _html_response(
-            admin_login_html(
-                knowledge_name=KNOWLEDGE_NAME,
-                instance_name=INSTANCE_NAME,
-                locale=locale,
-                next_path=_path_with_locale("/admin", locale),
-            ),
-            status=200,
-        )
-    return _html_response(
-        admin_html(
-            knowledge_name=KNOWLEDGE_NAME,
-            instance_name=INSTANCE_NAME,
-            locale=locale,
-            section="overview",
-            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
-        )
-    )
+    return await _admin_section_page(request, section="overview")
 
 
 async def _admin_kb_page(request):
-    locale = _request_locale(request)
-    if not _is_admin_authorized(request):
-        return _html_response(
-            admin_login_html(
-                knowledge_name=KNOWLEDGE_NAME,
-                instance_name=INSTANCE_NAME,
-                locale=locale,
-                next_path=_path_with_locale("/admin/kb", locale),
-            ),
-            status=200,
-        )
-    return _html_response(
-        admin_html(
-            knowledge_name=KNOWLEDGE_NAME,
-            instance_name=INSTANCE_NAME,
-            locale=locale,
-            section="kb",
-            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
-        )
-    )
+    return await _admin_section_page(request, section="kb")
 
 
 async def _admin_reviews_page(request):
-    locale = _request_locale(request)
-    if not _is_admin_authorized(request):
-        return _html_response(
-            admin_login_html(
-                knowledge_name=KNOWLEDGE_NAME,
-                instance_name=INSTANCE_NAME,
-                locale=locale,
-                next_path=_path_with_locale("/admin/reviews", locale),
-            ),
-            status=200,
-        )
-    return _html_response(
-        admin_html(
-            knowledge_name=KNOWLEDGE_NAME,
-            instance_name=INSTANCE_NAME,
-            locale=locale,
-            section="reviews",
-            quartz=quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR),
-        )
-    )
+    return await _admin_section_page(request, section="reviews")
+
+
+async def _admin_users_page(request):
+    return await _admin_section_page(request, section="users", allowed_roles=("owner",))
+
+
+async def _admin_system_page(request):
+    return await _admin_section_page(request, section="system", allowed_roles=("owner",))
 
 
 async def _root_page(request):
-    return _redirect("/portal")
+    return await _portal_home_page(request)
 
 
 async def _healthz(request):
@@ -1685,6 +1869,16 @@ async def _api_portal_home(request):
 async def _api_portal_search(request):
     query = request.query_params.get("q", "")
     return _json_response(search_kb(KB_PATH, query))
+
+
+async def _api_portal_search_suggest(request):
+    query = request.query_params.get("q", "")
+    return _json_response(
+        {
+            "query": query,
+            "suggestions": search_kb_suggestions(KB_PATH, query),
+        }
+    )
 
 
 async def _api_portal_entry(request):
@@ -1709,13 +1903,17 @@ def _quartz_runtime_available() -> bool:
 
 async def _api_portal_submit_text(request):
     body = await request.json()
+    user = _current_optional_user(request)
+    submitter_name = str(body.get("submitter_name", "")).strip() or str(
+        (user or {}).get("name", "")
+    ).strip()
     try:
         record = submit_text_request(
             store=_platform_store(),
             kb_path=KB_PATH,
             title=str(body.get("title", "")),
             content=str(body.get("content", "")),
-            submitter_name=str(body.get("submitter_name", "")),
+            submitter_name=submitter_name,
             submitter_ip=detect_submitter_ip(
                 dict(request.headers),
                 request.client.host if request.client else None,
@@ -1723,7 +1921,7 @@ async def _api_portal_submit_text(request):
                 trusted_proxy_cidrs=TRUSTED_PROXY_CIDRS,
             ),
             submission_type=str(body.get("submission_type", "text")),
-            submitter_user_id=None,
+            submitter_user_id=str((user or {}).get("id", "")).strip() or None,
             rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
             rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
             max_text_chars=MAX_TEXT_SUBMISSION_CHARS,
@@ -1740,6 +1938,10 @@ async def _api_portal_submit_text(request):
 
 async def _api_portal_submit_document(request):
     body = await request.json()
+    user = _current_optional_user(request)
+    submitter_name = str(body.get("submitter_name", "")).strip() or str(
+        (user or {}).get("name", "")
+    ).strip()
     try:
         file_bytes = (
             base64.b64decode(str(body.get("content_base64", "")), validate=True)
@@ -1754,14 +1956,14 @@ async def _api_portal_submit_document(request):
             mime_type=str(body.get("mime_type", "")),
             file_bytes=file_bytes,
             uploads=decoded_files,
-            submitter_name=str(body.get("submitter_name", "")),
+            submitter_name=submitter_name,
             submitter_ip=detect_submitter_ip(
                 dict(request.headers),
                 request.client.host if request.client else None,
                 trust_proxy_headers=TRUST_PROXY_HEADERS,
                 trusted_proxy_cidrs=TRUSTED_PROXY_CIDRS,
             ),
-            submitter_user_id=None,
+            submitter_user_id=str((user or {}).get("id", "")).strip() or None,
             rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
             rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
             max_upload_bytes=MAX_UPLOAD_BYTES,
@@ -1778,8 +1980,25 @@ async def _api_portal_submit_document(request):
     return _json_response(record, status=201)
 
 
-async def _admin_guard(request):
-    if not _is_admin_authorized(request):
+def _user_payload(user: dict[str, Any] | None) -> dict[str, Any] | None:
+    if user is None:
+        return None
+    return {
+        "id": str(user.get("id", "")).strip(),
+        "name": str(user.get("name", "")).strip(),
+        "role": str(user.get("role", "")).strip(),
+        "token_fingerprint": str(user.get("token_fingerprint", "")).strip(),
+    }
+
+
+def _actor_from_request(request) -> dict[str, Any]:
+    user = _require_user(request)
+    return user or _synthetic_local_admin_user()
+
+
+async def _admin_guard(request, *, allowed_roles: tuple[str, ...] = ("owner", "committer")):
+    user = _require_user(request)
+    if user is None:
         return _json_response(
             {
                 "error": "admin authentication is required",
@@ -1787,6 +2006,15 @@ async def _admin_guard(request):
                 "login_path": "/admin",
             },
             status=401,
+        )
+    if not _user_role_allowed(user, allowed_roles):
+        return _json_response(
+            {
+                "error": "forbidden",
+                "required_roles": list(allowed_roles),
+                "user": _user_payload(user),
+            },
+            status=403,
         )
     return None
 
@@ -1819,12 +2047,14 @@ def _system_status_payload(store: PlatformStore) -> dict[str, Any]:
 
 
 async def _api_admin_session_status(request):
+    user = _require_user(request) if _is_admin_authorized(request) else None
     return _json_response(
         {
-            "authenticated": _is_admin_authorized(request),
+            "authenticated": user is not None,
             "auth_required": _admin_auth_required(),
             "cookie_name": ADMIN_SESSION_COOKIE_NAME,
             "session_ttl_seconds": ADMIN_SESSION_TTL_SECONDS,
+            "user": _user_payload(user),
         }
     )
 
@@ -1832,33 +2062,38 @@ async def _api_admin_session_status(request):
 async def _api_admin_session_create(request):
     body = await _request_json_or_empty(request)
     token = str(body.get("token", ""))
-    if _admin_auth_required() and not _token_matches(token):
+    user = _user_from_token(token) if _admin_auth_required() else _synthetic_local_admin_user()
+    if _admin_auth_required() and user is None:
         return _json_response({"error": "invalid admin token"}, status=401)
     response = _json_response(
         {
             "authenticated": True,
             "auth_required": _admin_auth_required(),
             "session_ttl_seconds": ADMIN_SESSION_TTL_SECONDS,
+            "user": _user_payload(user),
         }
     )
     session_id: str | None = None
-    if _admin_auth_required():
-        session_id = _set_admin_session_cookie(response)
+    if _admin_auth_required() and user is not None:
+        session_id = _set_admin_session_cookie(response, user)
     _platform_store().add_audit_log(
-        actor_name="admin-session",
-        actor_role="platform_admin",
+        actor_name=str((user or {}).get("name", "admin-session")),
+        actor_id=str((user or {}).get("id", "")).strip() or None,
+        actor_role=str((user or {}).get("role", "owner")),
         action="admin.session.create",
         target_type="session",
         target_id=session_id or (request.client.host if request.client else "unknown"),
         details={
             "auth_required": _admin_auth_required(),
             "session_id": session_id,
+            "user": _user_payload(user),
         },
     )
     return response
 
 
 async def _api_admin_session_delete(request):
+    user = _current_user(request)
     session_id = _extract_admin_session_id(
         request.cookies.get(ADMIN_SESSION_COOKIE_NAME)
     )
@@ -1869,14 +2104,16 @@ async def _api_admin_session_delete(request):
     )
     _clear_admin_session_cookie(response)
     _platform_store().add_audit_log(
-        actor_name="admin-session",
-        actor_role="platform_admin",
+        actor_name=str((user or {}).get("name", "admin-session")),
+        actor_id=str((user or {}).get("id", "")).strip() or None,
+        actor_role=str((user or {}).get("role", "owner")),
         action="admin.session.delete",
         target_type="session",
         target_id=session_id or (request.client.host if request.client else "unknown"),
         details={
             "auth_required": _admin_auth_required(),
             "session_id": session_id,
+            "user": _user_payload(user),
         },
     )
     return response
@@ -1938,6 +2175,7 @@ async def _api_admin_submission_triage(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     store = _platform_store()
     submission_id = request.path_params["submission_id"]
     body = await request.json()
@@ -1951,8 +2189,9 @@ async def _api_admin_submission_triage(request):
     if submission is None:
         return _json_response({"error": "submission not found"}, status=404)
     store.add_audit_log(
-        actor_name=str(body.get("actor_name", "admin")),
-        actor_role="committer",
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
         action="submission.triage",
         target_type="submission",
         target_id=submission_id,
@@ -1965,14 +2204,16 @@ async def _api_admin_run_ingest(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
     submission_id = request.path_params["submission_id"]
     try:
         job = enqueue_ingest_job(
             store=store,
             submission_id=submission_id,
-            actor_name=str(body.get("actor_name", "admin")),
+            actor_name=str(actor.get("name", "")),
+            actor_id=str(actor.get("id", "")) or None,
+            actor_role=str(actor.get("role", "")),
             max_attempts=JOB_MAX_ATTEMPTS,
         )
     except FileNotFoundError:
@@ -2007,8 +2248,8 @@ async def _api_admin_job_retry(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
     try:
         job = store.retry_job(request.path_params["job_id"])
     except ValueError as exc:
@@ -2018,8 +2259,9 @@ async def _api_admin_job_retry(request):
     if job.get("source_submission_id"):
         store.update_submission(job["source_submission_id"], status="triaged")
     store.add_audit_log(
-        actor_name=str(body.get("actor_name", "admin")),
-        actor_role="platform_admin",
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
         action="job.retry",
         target_type="job",
         target_id=job["id"],
@@ -2034,6 +2276,7 @@ async def _api_admin_job_cancel(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     store = _platform_store()
     body = await _request_json_or_empty(request)
     reason = str(body.get("reason", "job cancelled by admin"))
@@ -2046,8 +2289,9 @@ async def _api_admin_job_cancel(request):
     if job.get("source_submission_id") and job["status"] == "cancelled":
         store.update_submission(job["source_submission_id"], status="triaged")
     store.add_audit_log(
-        actor_name=str(body.get("actor_name", "admin")),
-        actor_role="platform_admin",
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
         action="job.cancel",
         target_type="job",
         target_id=job["id"],
@@ -2060,14 +2304,19 @@ async def _api_admin_tidy(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     store = _platform_store()
-    body = await request.json()
-    issue = body.get("issue") or {}
+    body = await _request_json_or_empty(request)
+    issue = body.get("issue") if isinstance(body.get("issue"), dict) else None
     job = enqueue_tidy_job(
         store=store,
         kb_path=KB_PATH,
+        scope=normalize_tidy_scope(body.get("scope")),
+        reason=str(body.get("reason", "")).strip(),
         issue=issue,
-        actor_name=str(body.get("actor_name", "admin")),
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
         max_attempts=JOB_MAX_ATTEMPTS,
     )
     if RUN_JOBS_IN_PROCESS:
@@ -2098,6 +2347,7 @@ async def _api_admin_review_approve(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     body = await request.json()
     try:
         payload = apply_review_decision(
@@ -2105,7 +2355,9 @@ async def _api_admin_review_approve(request):
             kb_path=KB_PATH,
             review_id=request.path_params["review_id"],
             decision=str(body.get("decision", "approve")),
-            reviewer_name=str(body.get("reviewer_name", "admin")),
+            reviewer_name=str(actor.get("name", "")),
+            reviewer_id=str(actor.get("id", "")) or None,
+            reviewer_role=str(actor.get("role", "")),
             comment=str(body.get("comment", "")),
         )
     except FileNotFoundError as exc:
@@ -2119,6 +2371,7 @@ async def _api_admin_review_reject(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     body = await request.json()
     try:
         payload = apply_review_decision(
@@ -2126,7 +2379,9 @@ async def _api_admin_review_reject(request):
             kb_path=KB_PATH,
             review_id=request.path_params["review_id"],
             decision="reject",
-            reviewer_name=str(body.get("reviewer_name", "admin")),
+            reviewer_name=str(actor.get("name", "")),
+            reviewer_id=str(actor.get("id", "")) or None,
+            reviewer_role=str(actor.get("role", "")),
             comment=str(body.get("comment", "")),
         )
     except FileNotFoundError as exc:
@@ -2137,7 +2392,7 @@ async def _api_admin_review_reject(request):
 
 
 async def _api_admin_system_status(request):
-    guard = await _admin_guard(request)
+    guard = await _admin_guard(request, allowed_roles=("owner",))
     if guard:
         return guard
     store = _platform_store()
@@ -2171,6 +2426,7 @@ async def _api_admin_entry_save(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
+    actor = _actor_from_request(request)
     body = await request.json()
     store = _platform_store()
     try:
@@ -2179,7 +2435,9 @@ async def _api_admin_entry_save(request):
             name=request.path_params["name"],
             content=str(body.get("content", "")),
             expected_hash=body.get("expected_hash"),
-            actor_name=str(body.get("actor_name", "admin")),
+            actor_name=str(actor.get("name", "")),
+            actor_id=str(actor.get("id", "")) or None,
+            actor_role=str(actor.get("role", "")),
             store=store,
         )
     except FileNotFoundError:
@@ -2201,17 +2459,17 @@ async def _api_admin_explore(request):
 
 
 async def _api_admin_quartz_status(request):
-    guard = await _admin_guard(request)
+    guard = await _admin_guard(request, allowed_roles=("owner",))
     if guard:
         return guard
     return _json_response(quartz_status(runtime_dir=QUARTZ_RUNTIME_DIR, site_dir=QUARTZ_SITE_DIR))
 
 
 async def _api_admin_quartz_build(request):
-    guard = await _admin_guard(request)
+    guard = await _admin_guard(request, allowed_roles=("owner",))
     if guard:
         return guard
-    body = await _request_json_or_empty(request)
+    actor = _actor_from_request(request)
     try:
         payload = build_quartz_site(
             kb_path=KB_PATH,
@@ -2223,14 +2481,186 @@ async def _api_admin_quartz_build(request):
     except RuntimeError as exc:
         return _json_response({"error": str(exc)}, status=400)
     _platform_store().add_audit_log(
-        actor_name=str(body.get("actor_name", "admin")),
-        actor_role="committer",
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
         action="quartz.build",
         target_type="quartz_site",
         target_id=str(QUARTZ_SITE_DIR),
         details={"runtime_path": str(QUARTZ_RUNTIME_DIR)},
     )
     return _json_response(payload, status=202)
+
+
+async def _api_admin_users_list(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    return _json_response({"users": [_config_user_payload(user) for user in _configured_users()]})
+
+
+async def _api_admin_users_create(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    body = await _request_json_or_empty(request)
+    name = str(body.get("name", "")).strip()
+    role = str(body.get("role", "committer")).strip() or "committer"
+    if not name:
+        return _json_response({"error": "name must not be empty"}, status=400)
+    try:
+        _payload, user = create_config_user(
+            CONFIG_PATH,
+            name=name,
+            role=role,
+            created_at=utc_now(),
+        )
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    _reload_runtime_settings()
+    _platform_store().add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="user.create",
+        target_type="user",
+        target_id=str(user.get("id", "")).strip(),
+        details={"role": str(user.get("role", "")).strip()},
+    )
+    return _json_response(
+        {
+            "user": _config_user_payload(user),
+            "token": str(user.get("token", "")).strip(),
+        },
+        status=201,
+    )
+
+
+async def _api_admin_user_token(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    user = find_user_by_id(_settings(), request.path_params["user_id"])
+    if user is None:
+        return _json_response({"error": "user not found"}, status=404)
+    return _json_response(
+        {
+            "user": _config_user_payload(user),
+            "token": str(user.get("token", "")).strip(),
+        }
+    )
+
+
+async def _api_admin_user_disable(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    user_id = request.path_params["user_id"]
+    target_user = find_user_by_id(_settings(), user_id)
+    if target_user is None:
+        return _json_response({"error": "user not found"}, status=404)
+    if str(target_user.get("id", "")).strip() == str(actor.get("id", "")).strip():
+        return _json_response({"error": "cannot disable the current user"}, status=400)
+    active_owner_count = sum(
+        1
+        for item in _configured_users()
+        if item.get("role") == "owner" and not item.get("disabled")
+    )
+    if (
+        target_user.get("role") == "owner"
+        and not target_user.get("disabled")
+        and active_owner_count <= 1
+    ):
+        return _json_response({"error": "cannot disable the last active owner"}, status=400)
+    _payload, disabled_user = disable_config_user(CONFIG_PATH, user_id)
+    _reload_runtime_settings()
+    _platform_store().add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="user.disable",
+        target_type="user",
+        target_id=str(disabled_user.get("id", "")).strip(),
+        details={"role": str(disabled_user.get("role", "")).strip()},
+    )
+    return _json_response({"user": _config_user_payload(disabled_user)})
+
+
+class QuartzStaticApp:
+    def __init__(self, site_dir: str | Path):
+        self.site_dir = Path(site_dir).resolve()
+
+    def _safe_candidate(self, relative_path: str) -> Path | None:
+        candidate = (self.site_dir / relative_path).resolve()
+        if candidate == self.site_dir:
+            return None
+        if self.site_dir not in candidate.parents:
+            return None
+        return candidate
+
+    def _candidate_files(self, request_path: str) -> list[tuple[Path, int]]:
+        raw_path = unquote(str(request_path or "/"))
+        cleaned = raw_path.lstrip("/").rstrip("/")
+        candidates: list[tuple[Path, int]] = []
+        if not cleaned:
+            index_path = self._safe_candidate("index.html")
+            if index_path is not None:
+                candidates.append((index_path, 200))
+        else:
+            for relative_path in (cleaned, f"{cleaned}.html", f"{cleaned}/index.html"):
+                candidate = self._safe_candidate(relative_path)
+                if candidate is not None:
+                    candidates.append((candidate, 200))
+        not_found = self._safe_candidate("404.html")
+        if not_found is not None:
+            candidates.append((not_found, 404))
+        return candidates
+
+    async def __call__(self, scope, receive, send):
+        from starlette.requests import Request
+        from starlette.responses import FileResponse, PlainTextResponse
+
+        if scope["type"] != "http":
+            await PlainTextResponse("unsupported scope", status_code=500)(scope, receive, send)
+            return
+        request = Request(scope, receive=receive)
+        path = str(scope.get("path", "/") or "/")
+        if path == "/quartz":
+            path = "/"
+        elif path.startswith("/quartz/"):
+            path = path.removeprefix("/quartz")
+        if request.method not in {"GET", "HEAD"}:
+            await PlainTextResponse("method not allowed", status_code=405)(scope, receive, send)
+            return
+        if not _quartz_site_available():
+            if path in {"", "/"}:
+                response = _html_response(
+                    portal_graph_html(
+                        knowledge_name=KNOWLEDGE_NAME,
+                        instance_name=INSTANCE_NAME,
+                        locale=_request_locale(request),
+                        quartz=quartz_status(
+                            runtime_dir=QUARTZ_RUNTIME_DIR,
+                            site_dir=QUARTZ_SITE_DIR,
+                        ),
+                        admin_kb_path=_path_with_locale("/admin/system", _request_locale(request)),
+                    )
+                )
+                await response(scope, receive, send)
+                return
+            await PlainTextResponse("Quartz site not built", status_code=404)(scope, receive, send)
+            return
+        for candidate, status in self._candidate_files(path):
+            if candidate.is_file():
+                await FileResponse(
+                    str(candidate),
+                    status_code=status,
+                    media_type=mimetypes.guess_type(str(candidate))[0],
+                )(scope, receive, send)
+                return
+        await PlainTextResponse("not found", status_code=404)(scope, receive, send)
 
 
 # ---------------------------------------------------------------------------
@@ -2402,11 +2832,12 @@ class SecurityHeadersMiddleware:
                     headers.setdefault(
                         "Content-Security-Policy",
                         "default-src 'self'; "
-                        "img-src 'self' data: blob:; "
-                        "style-src 'self' 'unsafe-inline'; "
-                        "script-src 'self' 'unsafe-inline'; "
+                        "img-src 'self' data: blob: https:; "
+                        "style-src 'self' 'unsafe-inline' https:; "
+                        "script-src 'self' 'unsafe-inline' https: blob:; "
                         "connect-src 'self'; "
-                        "font-src 'self' data:; "
+                        "worker-src 'self' blob:; "
+                        "font-src 'self' data: https:; "
                         "base-uri 'self'; "
                         "form-action 'self'; "
                         "frame-ancestors 'self'",
@@ -2436,7 +2867,6 @@ def create_starlette_app():
     from starlette.applications import Starlette
     from starlette.middleware import Middleware
     from starlette.routing import Mount, Route
-    from starlette.staticfiles import StaticFiles
 
     _platform_store()
     sse = SseServerTransport("")
@@ -2445,15 +2875,22 @@ def create_starlette_app():
         Route("/healthz", _healthz),
         Route("/ui-assets/{asset_name:str}", _ui_asset),
         Route("/portal", _portal_page),
+        Route("/search", _portal_search_page),
+        Route("/entries/{name:str}", _portal_entry_page),
+        Route("/submit", _portal_submit_page),
         Route("/portal/graph-view", _portal_graph_page),
-        Route("/admin", _admin_overview_page),
+        Route("/admin", _admin_page),
+        Route("/admin/overview", _admin_overview_page),
         Route("/admin/kb", _admin_kb_page),
         Route("/admin/reviews", _admin_reviews_page),
+        Route("/admin/users", _admin_users_page),
+        Route("/admin/system", _admin_system_page),
         Route("/api/admin/session", _api_admin_session_status, methods=["GET"]),
         Route("/api/admin/session", _api_admin_session_create, methods=["POST"]),
         Route("/api/admin/session", _api_admin_session_delete, methods=["DELETE"]),
         Route("/api/portal/home", _api_portal_home),
         Route("/api/portal/search", _api_portal_search),
+        Route("/api/portal/search/suggest", _api_portal_search_suggest),
         Route("/api/portal/entries/{name:str}", _api_portal_entry),
         Route("/api/portal/graph", _api_portal_graph),
         Route("/api/portal/submissions/text", _api_portal_submit_text, methods=["POST"]),
@@ -2479,15 +2916,18 @@ def create_starlette_app():
         Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
         Route("/api/admin/explore", _api_admin_explore, methods=["POST"]),
+        Route("/api/admin/users", _api_admin_users_list, methods=["GET"]),
+        Route("/api/admin/users", _api_admin_users_create, methods=["POST"]),
+        Route("/api/admin/users/{user_id:str}/token", _api_admin_user_token, methods=["GET"]),
+        Route("/api/admin/users/{user_id:str}/disable", _api_admin_user_disable, methods=["POST"]),
         Route("/api/admin/quartz/status", _api_admin_quartz_status, methods=["GET"]),
         Route("/api/admin/quartz/build", _api_admin_quartz_build, methods=["POST"]),
         Mount(SSE_ENDPOINT, app=_make_router(sse), routes=False),
     ]
-    QUARTZ_SITE_DIR.mkdir(parents=True, exist_ok=True)
     routes.append(
         Mount(
             "/quartz",
-            app=StaticFiles(directory=str(QUARTZ_SITE_DIR), html=True, check_dir=False),
+            app=QuartzStaticApp(QUARTZ_SITE_DIR),
         )
     )
     return Starlette(
@@ -2502,10 +2942,11 @@ def main(argv: list[str] | None = None):
     refresh_runtime_state()
     starlette_app = create_starlette_app()
     print(f"Sediment MCP Server listening on http://{HOST}:{PORT}")
-    print(f"Portal:        http://{HOST}:{PORT}/portal")
-    print(f"Admin:         http://{HOST}:{PORT}/admin")
-    if STARTUP_ADMIN_TOKEN:
-        print(f"Startup token: {STARTUP_ADMIN_TOKEN}")
+    print(f"Portal:        http://{HOST}:{PORT}/")
+    print(f"Search:        http://{HOST}:{PORT}/search")
+    print(f"Submit:        http://{HOST}:{PORT}/submit")
+    print(f"Quartz:        http://{HOST}:{PORT}/quartz/")
+    print(f"Admin:         http://{HOST}:{PORT}/admin/overview")
     print(f"Health:        http://{HOST}:{PORT}/healthz")
     print(f"SSE endpoint:  http://{HOST}:{PORT}{SSE_ENDPOINT}")
     print(f"POST endpoint: http://{HOST}:{PORT}{SSE_ENDPOINT}")

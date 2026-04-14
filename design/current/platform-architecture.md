@@ -18,7 +18,7 @@
 
 ## 2. 平台分层
 
-推荐把企业版 Sediment 拆成六个部件：
+推荐把企业版 Sediment 拆成以下部件：
 
 - Knowledge Base Workspace：白盒 Markdown 知识库和 Git 工作区
 - API Service：统一承载 MCP 和 REST 接口
@@ -28,6 +28,7 @@
 - Agent Runner：在知识库本地执行 ingest / tidy / explore 的托管 Agent
 - Search / Graph Projection：为全文搜索、图谱浏览和后台筛选提供查询投影
 - Web Apps：前台知识门户和后台管理界面
+- Quartz Hosted Site：由 Sediment 服务层托管的静态 Quartz 站点
 
 ```mermaid
 flowchart LR
@@ -71,7 +72,8 @@ flowchart LR
 实现建议：
 
 - 继续复用当前 `Starlette` 基座，而不是切换到全新后端框架
-- 在现有 `sediment/server.py` 外拆出路由和服务模块
+- 继续使用 asset-template + page JS 的服务端渲染模式
+- 在现有 `sediment/server.py` 外逐步拆出路由和服务模块
 
 ### 3.3 Workflow Store
 
@@ -80,6 +82,7 @@ flowchart LR
 - 保存提交缓冲区
 - 保存审核状态和操作日志
 - 保存任务、锁和失败重试信息
+- 保存后台 session 快照（`user_id / user_name / user_role / token_fingerprint`）
 
 推荐存储：
 
@@ -101,6 +104,14 @@ flowchart LR
 - `opencode`
 
 并允许 `agent.command` 以字符串或 YAML 列表形式显式指定命令前缀。
+
+当前还负责管理多用户鉴权：
+
+- `auth.users[]` 为主 schema
+- `auth.admin_token` 仅作为兼容镜像字段保存 primary owner token
+- 当旧配置里只有 `auth.admin_token` 时，加载阶段会合成默认 owner user
+- 首次通过 CLI / Admin UI 做受管保存时，会把配置重写为 `auth.users[]`
+- 配置规范化阶段会把额外 owner 收敛为 committer，保证实例始终只有一个 owner
 
 ### 3.5 Instance Registry
 
@@ -157,6 +168,13 @@ flowchart LR
 
 - 前台：浏览、搜索、查看概念、提交材料和意见
 - 后台：审核、编辑、健康面板、任务管理、diff 审阅
+- 两者共享基础 shell，但在导航、权限和配色上彻底独立
+
+当前 IA：
+
+- Public Portal：`/`、`/search`、`/entries/{name}`、`/submit`、`/quartz/`
+- Admin Console：`/admin/overview`、`/admin/kb`、`/admin/reviews`、`/admin/users`、`/admin/system`
+- 兼容路径：`/portal`、`/portal/graph-view`、`/admin`
 
 ## 4. 技术选择
 
@@ -176,11 +194,11 @@ flowchart LR
 
 ### 4.2 前端
 
-推荐使用单独的 `React + TypeScript` Web 工程：
+当前继续使用 Python 服务栈内建的模板与前端脚本：
 
 - 前台门户和后台管理共享同一套 API
-- 图谱可使用 `Cytoscape.js` 或同类库
-- 在线编辑器可使用 `Monaco` 或等价 Markdown 编辑器
+- Quartz 图谱不重写到主壳中，而是作为独立只读站点挂载
+- 在线编辑继续使用受控 textarea + 后端校验路径
 
 ### 4.3 Quartz 取舍
 
@@ -195,6 +213,14 @@ flowchart LR
 可接受的后续扩展是：
 
 - 在未来增加一个 Quartz 导出器，把 canonical knowledge state 输出为只读静态镜像
+
+当前已经落地的 Quartz 托管策略：
+
+- 挂载路径固定为 `/quartz/`
+- 由 Sediment 服务层负责 `exact file -> path.html -> path/index.html -> 404.html` 解析
+- 支持 clean URL 与 percent-encoded 中文 slug
+- Quartz 页面额外放宽到其实际需要的 CSP：允许 blob worker，以及 Quartz 自带 CDN 样式/脚本资源，避免关系图谱被浏览器策略拦截
+- Quartz build/status 留在后台 `/admin/system` owner-only 区域
 
 ## 5. 工作区隔离
 
@@ -223,6 +249,7 @@ Agent Runner 不应直接在主工作区上修改文件。
 - `sediment instance ...`：列出 / 查看 / 移除实例注册
 - `sediment server run|start|stop|restart|status|logs`：控制平台守护进程与生命周期
 - `sediment kb ...`：调用知识库 explore / health / tidy 等能力
+- `sediment user ...`：管理 owner / committer 用户与 token
 - `sediment review ...`：在终端里处理待审 patch
 - `sediment logs ...`：从实例侧查看 server / worker 日志
 - `sediment status ...`：查看平台总览、daemon、queue 和 KB health
@@ -230,6 +257,12 @@ Agent Runner 不应直接在主工作区上修改文件。
 - 兼容脚本 `sediment-server`、`sediment-worker`、`sediment-up` 仅保留为低层调试别名
 
 开发环境可临时打开 server 进程内执行开关，但生产环境应保持两者分离。
+
+额外约束：
+
+- `sediment init` 生成初始 owner user/token 并写入配置
+- `sediment server start|run` 不再生成启动期临时 admin token
+- `sediment kb tidy` 采用 KB-level `scope/reason` 语义，而不是单条目 target 语义
 
 ## 6. 锁与并发
 

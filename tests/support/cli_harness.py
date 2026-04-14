@@ -19,5 +19,15 @@ def configure_cli_config(tmp_path: Path, *, port: int | None = None) -> Path:
         agent_command=[sys.executable, str(cli_path)],
         port=port or free_port(),
         host="127.0.0.1",
+        auth_users=[
+            {
+                "id": "owner",
+                "name": "Owner",
+                "role": "owner",
+                "token": "owner-secret",
+                "created_at": "2026-04-15T00:00:00+00:00",
+                "disabled": False,
+            }
+        ],
     )
     return kb_path

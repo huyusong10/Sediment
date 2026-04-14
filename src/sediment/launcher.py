@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import secrets
 import signal
 import subprocess
 import sys
@@ -94,11 +93,9 @@ def validate_environment(*, require_cli: bool = True) -> list[str]:
 def build_process_specs(
     *,
     worker_poll_interval: float,
-    startup_admin_token: str | None = None,
 ) -> list[ProcessSpec]:
     python = sys.executable
     config_path = str(current_config_path())
-    startup_admin_token = (startup_admin_token or "").strip() or secrets.token_urlsafe(18)
     worker_command = [python, "-m", "sediment.worker", "--config", config_path]
     if worker_poll_interval > 0:
         worker_command.extend(["--poll-interval", str(worker_poll_interval)])
@@ -114,7 +111,6 @@ def build_process_specs(
                 "--run-jobs-in-process",
                 "false",
             ],
-            env={"SEDIMENT_STARTUP_ADMIN_TOKEN": startup_admin_token},
         ),
         ProcessSpec(name="worker", command=worker_command),
     ]
@@ -393,20 +389,15 @@ def main(argv: list[str] | None = None) -> int:
     previous_sigint = signal.signal(signal.SIGINT, handle_signal)
     previous_sigterm = signal.signal(signal.SIGTERM, handle_signal)
     try:
-        startup_admin_token = os.environ.get("SEDIMENT_STARTUP_ADMIN_TOKEN", "").strip()
-        if not startup_admin_token:
-            startup_admin_token = secrets.token_urlsafe(18)
         specs = build_process_specs(
             worker_poll_interval=args.worker_poll_interval,
-            startup_admin_token=startup_admin_token,
         )
         _write_log_line(sys.stdout, "up", "Sediment platform launcher")
         _write_log_line(sys.stdout, "up", f"KB path:  {configured_kb_path()}")
         _write_log_line(sys.stdout, "up", f"Port:     {configured_port()}")
-        _write_log_line(sys.stdout, "up", f"Portal:   http://127.0.0.1:{configured_port()}/portal")
-        _write_log_line(sys.stdout, "up", f"Admin:    http://127.0.0.1:{configured_port()}/admin")
+        _write_log_line(sys.stdout, "up", f"Portal:   http://127.0.0.1:{configured_port()}/")
+        _write_log_line(sys.stdout, "up", f"Admin:    http://127.0.0.1:{configured_port()}/admin/overview")
         _write_log_line(sys.stdout, "up", f"Health:   http://127.0.0.1:{configured_port()}/healthz")
-        _write_log_line(sys.stdout, "up", f"Admin token: {startup_admin_token}")
         if not _ensure_quartz_site(sink=sys.stdout, force_build=args.build_quartz):
             return 1
         if args.no_health_check:

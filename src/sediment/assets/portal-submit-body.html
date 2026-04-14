@@ -1,0 +1,61 @@
+<div class="page">
+  <section class="hero">
+    <div class="hero-top">
+      <div class="brand">
+        __LOGO_INLINE__
+        <div class="brand-copy">
+          <span>Sediment</span>
+          <strong>__KNOWLEDGE_NAME__</strong>
+        </div>
+      </div>
+      <div data-shell-header-actions>
+        <div class="nav" data-shell-nav>
+          __HOME_LINK__
+          __SEARCH_LINK__
+          __SUBMIT_LINK__
+          __QUARTZ_LINK__
+        </div>
+        <div class="nav" data-shell-utility></div>
+      </div>
+    </div>
+    <h1>__KNOWLEDGE_NAME__</h1>
+    <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">__ATTRIBUTION__</div>
+  </section>
+
+  <section class="grid cols-2">
+    <div class="panel">
+      <h2>__TEXT_SUBMISSION_TITLE__</h2>
+      <div class="grid">
+        <label>__SUBMITTER_NAME_LABEL__<input id="submit-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" /></label>
+        <label>__SUBMISSION_TITLE_LABEL__<input id="submit-title" placeholder="__SUBMISSION_TITLE_PLACEHOLDER__" /></label>
+        <label>__SUBMISSION_TYPE_LABEL__
+          <select id="submit-type">
+            <option value="concept">__TYPE_CONCEPT__</option>
+            <option value="lesson">__TYPE_LESSON__</option>
+            <option value="feedback">__TYPE_FEEDBACK__</option>
+          </select>
+        </label>
+        <label>__SUBMISSION_CONTENT_LABEL__<textarea id="submit-content"></textarea></label>
+        <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_BUTTON__</button>
+        <div id="submit-text-status" class="subtle" role="status" aria-live="polite"></div>
+        <div id="submit-text-analysis" class="empty"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>__DOCUMENT_UPLOAD_TITLE__</h2>
+      <div class="grid">
+        <label>__SUBMITTER_NAME_LABEL__<input id="upload-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" /></label>
+        <div class="upload-grid">
+          <label>__UPLOAD_FILES_LABEL__
+            <input id="upload-file" data-testid="portal-upload-file" type="file" multiple accept=".txt,.md,.docx,.pptx,.zip" />
+          </label>
+          <label>__UPLOAD_FOLDER_LABEL__
+            <input id="upload-folder" data-testid="portal-upload-folder" type="file" webkitdirectory directory multiple />
+          </label>
+        </div>
+        <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_BUTTON__</button>
+        <div id="submit-file-status" class="subtle" role="status" aria-live="polite"></div>
+      </div>
+    </div>
+  </section>
+</div>

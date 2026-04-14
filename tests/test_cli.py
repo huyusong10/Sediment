@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from sediment import cli
 from sediment.instances import register_instance
@@ -73,13 +74,25 @@ def test_kb_explore_command_json_uses_existing_runtime(
 def test_kb_tidy_process_once_creates_review(monkeypatch, tmp_path: Path, capsys) -> None:
     configure_cli_config(tmp_path)
 
-    rc = cli.main(["kb", "tidy", "薄弱条目", "--process-once", "--json"])
+    rc = cli.main(
+        [
+            "kb",
+            "tidy",
+            "--scope",
+            "graph",
+            "--reason",
+            "repair dangling links",
+            "--process-once",
+            "--json",
+        ]
+    )
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     job = payload["job"]
     assert job["job_type"] == "tidy"
     assert job["status"] == "awaiting_review"
+    assert payload["scope"] == "graph"
 
     store = PlatformStore(Path(tmp_path / "state" / "platform.db"))
     store.init()
@@ -103,12 +116,12 @@ def test_mcp_status_and_tidy_tools_share_runtime(monkeypatch, tmp_path: Path) ->
         asyncio.run(
             server_module._dispatch_tool(
                 "knowledge_tidy_request",
-                {"target": "薄弱条目", "actor_name": "tester"},
+                {"scope": "graph", "reason": "repair graph", "actor_name": "tester"},
             )
         )
     )
     assert tidy_payload["job"]["job_type"] == "tidy"
-    assert tidy_payload["issue"]["target"] == "薄弱条目"
+    assert tidy_payload["scope"] == "graph"
 
 
 def test_server_module_refreshes_runtime_across_config_switches(tmp_path: Path) -> None:
@@ -118,7 +131,7 @@ def test_server_module_refreshes_runtime_across_config_switches(tmp_path: Path) 
         asyncio.run(cli._server_module()._dispatch_tool("knowledge_platform_status", {}))
     )
     assert first_status["paths"]["kb_path"] == str(first_kb.resolve())
-    assert first_status["urls"]["portal"].endswith(":8011/portal")
+    assert first_status["urls"]["portal"].endswith(":8011/")
 
     second_root = tmp_path / "second"
     second_kb = configure_cli_config(second_root, port=8012)
@@ -126,7 +139,7 @@ def test_server_module_refreshes_runtime_across_config_switches(tmp_path: Path) 
         asyncio.run(cli._server_module()._dispatch_tool("knowledge_platform_status", {}))
     )
     assert second_status["paths"]["kb_path"] == str(second_kb.resolve())
-    assert second_status["urls"]["portal"].endswith(":8012/portal")
+    assert second_status["urls"]["portal"].endswith(":8012/")
 
 
 def test_server_module_refreshes_runtime_from_env_host_port(
@@ -140,14 +153,14 @@ def test_server_module_refreshes_runtime_from_env_host_port(
     first_status = json.loads(
         asyncio.run(cli._server_module()._dispatch_tool("knowledge_platform_status", {}))
     )
-    assert first_status["urls"]["portal"] == "http://127.0.0.9:19001/portal"
+    assert first_status["urls"]["portal"] == "http://127.0.0.9:19001/"
 
     monkeypatch.setenv("SEDIMENT_HOST", "127.0.0.7")
     monkeypatch.setenv("SEDIMENT_PORT", "19002")
     second_status = json.loads(
         asyncio.run(cli._server_module()._dispatch_tool("knowledge_platform_status", {}))
     )
-    assert second_status["urls"]["portal"] == "http://127.0.0.7:19002/portal"
+    assert second_status["urls"]["portal"] == "http://127.0.0.7:19002/"
 
 
 def test_server_daemon_lifecycle(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -166,7 +179,8 @@ def test_server_daemon_lifecycle(monkeypatch, tmp_path: Path, capsys) -> None:
         )
         assert start_rc == 0
         started_output = capsys.readouterr().out
-        assert "Token:" in started_output
+        assert "Token:" not in started_output
+        assert "owner token stored" in started_output
 
         status_rc = cli.main(["server", "status", "--json"])
         assert status_rc == 0
@@ -418,6 +432,101 @@ def test_init_command_reports_progress(monkeypatch, tmp_path: Path, capsys) -> N
     assert "run `sediment doctor`" in output
 
 
+def test_init_scaffold_writes_owner_user_and_token(monkeypatch, tmp_path: Path, capsys) -> None:
+    registry = tmp_path / "registry" / "instances.yaml"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    rc = cli.main(
+        [
+            "--registry",
+            str(registry),
+            "init",
+            "--instance-name",
+            "owner-test",
+            "--knowledge-name",
+            "Owner KB",
+            "--backend",
+            "codex",
+            "--no-interactive",
+        ]
+    )
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "- owner_user_id: owner" in output
+    assert "- owner_token:" in output
+
+    config = (workspace / "config" / "sediment" / "config.yaml").read_text(encoding="utf-8")
+    assert "users:" in config
+    assert "role: owner" in config
+    assert "id: owner" in config
+
+
+def test_user_commands_manage_configured_users(tmp_path: Path, capsys) -> None:
+    configure_cli_config(tmp_path)
+
+    rc = cli.main(["user", "list", "--json"])
+    assert rc == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["users"][0]["id"] == "owner"
+
+    rc = cli.main(
+        [
+            "user",
+            "create",
+            "--name",
+            "Ops Committer",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    created = json.loads(capsys.readouterr().out)
+    user_id = created["user"]["id"]
+    assert created["user"]["role"] == "committer"
+    assert created["token"]
+
+    rc = cli.main(["user", "show-token", user_id, "--json"])
+    assert rc == 0
+    token_payload = json.loads(capsys.readouterr().out)
+    assert token_payload["token"] == created["token"]
+
+    rc = cli.main(["user", "disable", user_id, "--json"])
+    assert rc == 0
+    disabled = json.loads(capsys.readouterr().out)
+    assert disabled["user"]["disabled"] is True
+
+
+def test_auth_normalization_keeps_single_owner(monkeypatch, tmp_path: Path, capsys) -> None:
+    configure_cli_config(tmp_path)
+    config_path = current_config_path()
+    payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    payload["auth"]["users"].append(
+        {
+            "id": "owner-2",
+            "name": "Shadow Owner",
+            "role": "owner",
+            "token": "shadow-owner-token",
+            "created_at": "2026-04-15T00:00:00+0800",
+            "disabled": False,
+        }
+    )
+    config_path.write_text(
+        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["user", "list", "--json"])
+
+    assert rc == 0
+    listed = json.loads(capsys.readouterr().out)
+    owners = [item for item in listed["users"] if item["role"] == "owner"]
+    committers = [item for item in listed["users"] if item["role"] == "committer"]
+    assert len(owners) == 1
+    assert any(item["name"] == "Shadow Owner" for item in committers)
+
+
 def test_init_works_with_preexisting_standard_kb_layout(
     monkeypatch,
     tmp_path: Path,
@@ -555,7 +664,10 @@ def test_review_commands_and_instance_switching(tmp_path: Path, monkeypatch, cap
             "test-instance",
             "kb",
             "tidy",
-            "薄弱条目",
+            "--scope",
+            "graph",
+            "--reason",
+            "repair graph links",
             "--process-once",
             "--json",
         ]

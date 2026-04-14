@@ -24,6 +24,8 @@ def write_test_config(
     instance_label: str = "test-instance",
     knowledge_label: str = "Test Knowledge Base",
     registry_path: Path | None = None,
+    auth_users: list[dict[str, Any]] | None = None,
+    session_secret: str = "test-session-secret",
 ) -> Path:
     config_path = root / "config" / "sediment" / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +60,14 @@ def write_test_config(
             "name": knowledge_label,
         },
     }
+    if auth_users is not None:
+        payload["auth"] = {
+            "users": auth_users,
+            "session_secret": session_secret,
+            "admin_session_cookie_name": "sediment_admin_session",
+            "admin_session_ttl_seconds": 43_200,
+            "secure_cookies": False,
+        }
     config_path.write_text(
         yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",

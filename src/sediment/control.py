@@ -14,6 +14,75 @@ from sediment.platform_services import (
 )
 from sediment.platform_store import PlatformStore
 
+TIDY_SCOPES = {"full", "graph", "indexes", "health_blocking"}
+
+
+def normalize_tidy_scope(value: str | None) -> str:
+    scope = str(value or "health_blocking").strip().lower()
+    aliases = {
+        "health-blocking": "health_blocking",
+        "health": "health_blocking",
+        "blocking": "health_blocking",
+        "index": "indexes",
+    }
+    normalized = aliases.get(scope, scope)
+    return normalized if normalized in TIDY_SCOPES else "health_blocking"
+
+
+def scope_from_issue(issue: dict[str, Any] | None) -> str:
+    issue_type = str((issue or {}).get("type", "")).strip().lower()
+    if issue_type in {
+        "dangling_link",
+        "orphan_entry",
+        "canonical_gap",
+        "promotable_placeholder",
+    }:
+        return "graph"
+    if issue_type in {"invalid_index", "overloaded_index", "unknown_index_link"}:
+        return "indexes"
+    return "health_blocking"
+
+
+def build_tidy_request(
+    *,
+    kb_path: str | Path,
+    scope: str,
+    reason: str,
+    issue: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_scope = normalize_tidy_scope(scope)
+    issues = build_health_issue_queue(kb_path)
+    if issue:
+        selected_issues = [dict(issue)]
+    elif normalized_scope == "full":
+        selected_issues = issues[:20]
+    elif normalized_scope == "graph":
+        selected_issues = [
+            item
+            for item in issues
+            if scope_from_issue(item) == "graph"
+        ][:20]
+    elif normalized_scope == "indexes":
+        selected_issues = [
+            item
+            for item in issues
+            if scope_from_issue(item) == "indexes"
+        ][:20]
+    else:
+        selected_issues = [
+            item
+            for item in issues
+            if item.get("severity") == "blocking"
+        ][:20]
+
+    return {
+        "scope": normalized_scope,
+        "reason": str(reason or "").strip(),
+        "issue": dict(issue or {}),
+        "issues": selected_issues,
+        "health_report": get_health_payload(kb_path)["summary"],
+    }
+
 
 def submit_text_request(
     *,
@@ -89,6 +158,8 @@ def enqueue_ingest_job(
     store: PlatformStore,
     submission_id: str,
     actor_name: str,
+    actor_id: str | None = None,
+    actor_role: str = "committer",
     max_attempts: int,
 ) -> dict[str, Any]:
     submission = store.get_submission(submission_id)
@@ -102,7 +173,8 @@ def enqueue_ingest_job(
     )
     store.add_audit_log(
         actor_name=actor_name,
-        actor_role="committer",
+        actor_id=actor_id,
+        actor_role=actor_role,
         action="job.enqueue_ingest",
         target_type="job",
         target_id=job["id"],
@@ -115,28 +187,39 @@ def enqueue_tidy_job(
     *,
     store: PlatformStore,
     kb_path: str | Path,
-    issue: dict[str, Any],
+    scope: str,
+    reason: str,
     actor_name: str,
+    actor_id: str | None = None,
+    actor_role: str = "committer",
     max_attempts: int,
+    issue: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    target = str(issue.get("target", ""))
+    request_payload = build_tidy_request(
+        kb_path=kb_path,
+        scope=scope,
+        reason=reason,
+        issue=issue,
+    )
     job = store.create_job(
         job_type="tidy",
-        target_entry_name=target or None,
+        target_entry_name=None,
         status="queued",
         max_attempts=max_attempts,
-        request_payload={
-            "issue": issue,
-            "health_report": get_health_payload(kb_path)["summary"],
-        },
+        request_payload=request_payload,
     )
     store.add_audit_log(
         actor_name=actor_name,
-        actor_role="committer",
+        actor_id=actor_id,
+        actor_role=actor_role,
         action="job.enqueue_tidy",
         target_type="job",
         target_id=job["id"],
-        details={"target": target, "issue": issue},
+        details={
+            "scope": request_payload["scope"],
+            "reason": request_payload["reason"],
+            "issue": request_payload["issue"],
+        },
     )
     return job
 
@@ -199,8 +282,11 @@ def system_status_payload(
         },
         "auth_required": auth_required,
         "urls": {
-            "portal": f"http://{query_host}:{port}/portal",
-            "admin": f"http://{query_host}:{port}/admin",
+            "portal": f"http://{query_host}:{port}/",
+            "admin": f"http://{query_host}:{port}/admin/overview",
+            "search": f"http://{query_host}:{port}/search",
+            "submit": f"http://{query_host}:{port}/submit",
+            "quartz": f"http://{query_host}:{port}/quartz/",
             "health": f"http://{query_host}:{port}/healthz",
             "mcp_sse": f"http://{query_host}:{port}{sse_endpoint}",
             "bind_host": host,
@@ -245,6 +331,10 @@ def resolve_tidy_issue(
     target: str,
     issue_type: str | None = None,
 ) -> dict[str, Any]:
+    scope = normalize_tidy_scope(target)
+    if scope != "health_blocking" or target.strip().lower() in TIDY_SCOPES:
+        return build_tidy_request(kb_path=kb_path, scope=scope, reason="Manual tidy request")
+
     issues = build_health_issue_queue(kb_path)
     matches = [item for item in issues if item["target"] == target]
     if issue_type:
@@ -341,6 +431,8 @@ def apply_review_decision(
     review_id: str,
     decision: str,
     reviewer_name: str,
+    reviewer_id: str | None = None,
+    reviewer_role: str = "committer",
     comment: str,
 ) -> dict[str, Any]:
     if decision in {"approve", "approve_formal", "approve_placeholder"}:
@@ -351,7 +443,8 @@ def apply_review_decision(
                 kb_path,
                 operations,
                 actor_name=reviewer_name,
-                actor_role="committer",
+                actor_id=reviewer_id,
+                actor_role=reviewer_role,
                 store=store,
             )
         except Exception as exc:
@@ -380,7 +473,8 @@ def apply_review_decision(
             )
         store.add_audit_log(
             actor_name=reviewer_name,
-            actor_role="committer",
+            actor_id=reviewer_id,
+            actor_role=reviewer_role,
             action="review.approve",
             target_type="review",
             target_id=review_id,
@@ -408,7 +502,8 @@ def apply_review_decision(
         )
         store.add_audit_log(
             actor_name=reviewer_name,
-            actor_role="committer",
+            actor_id=reviewer_id,
+            actor_role=reviewer_role,
             action="review.reject" if decision == "reject" else "review.request_changes",
             target_type="review",
             target_id=review_id,

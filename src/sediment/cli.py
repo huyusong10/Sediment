@@ -1080,20 +1080,6 @@ def start_daemon(args) -> int:
         while time.time() < deadline:
             if process.poll() is not None:
                 break
-            status = daemon_status()
-            if status.get("running"):
-                print(f"Sediment daemon started (pid={process.pid}).")
-                print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
-                print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
-                print(f"Token:  {startup_admin_token}")
-                print(f"Logs:   {paths['log']}")
-                print_next_steps(
-                    f"Open the portal: {local_health_url().removesuffix('/healthz')}/portal",
-                    f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin",
-                    f"Use this login token: {startup_admin_token}",
-                    f"Inspect status: {scoped_command('status')}",
-                )
-                return 0
             time.sleep(0.2)
         if process.poll() is None:
             print(f"Sediment daemon started (pid={process.pid}).")

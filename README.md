@@ -90,6 +90,8 @@ sediment --help
 
 This is also the recommended path on Windows.
 
+If you are deploying in an intranet/offline environment (no access to public PyPI/GitHub), see the dedicated guide: [`docs/offline-install.md`](docs/offline-install.md).
+
 For local development:
 
 ```bash

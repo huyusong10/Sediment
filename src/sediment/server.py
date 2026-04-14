@@ -48,7 +48,6 @@ from sediment.control import (
     system_status_payload,
 )
 from sediment.i18n import tr
-from sediment.instances import user_state_root
 from sediment.kb import resolve_kb_document_path
 from sediment.llm_cli import build_cli_command, collect_output
 from sediment.package_data import read_skill_text
@@ -135,6 +134,9 @@ from sediment.runtime import (
 from sediment.runtime import (
     trusted_proxy_cidrs as runtime_trusted_proxy_cidrs,
 )
+from sediment.runtime import (
+    quartz_runtime_dir as runtime_quartz_runtime_dir,
+)
 from sediment.server_http import ServerHttpContext, build_starlette_app
 from sediment.settings import load_settings
 from sediment.skills.explore.scripts.kb_query import (
@@ -170,7 +172,7 @@ JOB_STALE_AFTER_SECONDS = runtime_job_stale_after_seconds()
 RUN_JOBS_IN_PROCESS = runtime_run_jobs_in_process()
 _PROJECT_ROOT = INSTANCE_ROOT
 QUARTZ_SITE_DIR = runtime_platform_paths()["state_dir"] / "quartz" / "site"
-QUARTZ_RUNTIME_DIR = user_state_root() / "quartz-runtime" / "quartz"
+QUARTZ_RUNTIME_DIR = runtime_quartz_runtime_dir()
 DEFAULT_LOCALE = load_settings()["locale"]
 
 DEFAULT_CONTRACT = {

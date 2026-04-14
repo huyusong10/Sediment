@@ -59,6 +59,8 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     up_parser = subparsers.add_parser("up", help="Run server + worker in the foreground.")
     up_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     up_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    up_parser.add_argument("--no-health-check", action="store_true")
+    up_parser.add_argument("--build-quartz", action="store_true")
     up_parser.add_argument("--skip-checks", action="store_true")
     up_parser.set_defaults(func=handlers["server_run"], needs_runtime_context=True)
 
@@ -68,12 +70,16 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     run_parser = server_subparsers.add_parser("run", help="Run server + worker in the foreground.")
     run_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     run_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    run_parser.add_argument("--no-health-check", action="store_true")
+    run_parser.add_argument("--build-quartz", action="store_true")
     run_parser.add_argument("--skip-checks", action="store_true")
     run_parser.set_defaults(func=handlers["server_run"], needs_runtime_context=True)
 
     start_parser = server_subparsers.add_parser("start", help="Start the platform daemon.")
     start_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     start_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    start_parser.add_argument("--no-health-check", action="store_true")
+    start_parser.add_argument("--build-quartz", action="store_true")
     start_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
     start_parser.add_argument("--skip-checks", action="store_true")
     start_parser.add_argument("--force", action="store_true")
@@ -87,6 +93,8 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     restart_parser = server_subparsers.add_parser("restart", help="Restart the platform daemon.")
     restart_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     restart_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    restart_parser.add_argument("--no-health-check", action="store_true")
+    restart_parser.add_argument("--build-quartz", action="store_true")
     restart_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
     restart_parser.add_argument("--skip-checks", action="store_true")
     restart_parser.set_defaults(func=handlers["server_restart"], needs_runtime_context=True)
@@ -204,6 +212,33 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         needs_runtime_context=True,
     )
 
+    quartz_parser = subparsers.add_parser(
+        "quartz",
+        help="Manage Quartz graph site for the current instance.",
+    )
+    quartz_subparsers = quartz_parser.add_subparsers(dest="quartz_command", required=True)
+
+    quartz_status_parser = quartz_subparsers.add_parser("status", help="Show Quartz runtime/site status.")
+    quartz_status_parser.add_argument(
+        "--build-if-missing",
+        action="store_true",
+        help="Automatically build the site when runtime is ready but site is missing.",
+    )
+    quartz_status_parser.add_argument("--timeout-seconds", type=int, default=240)
+    quartz_status_parser.add_argument("--json", action="store_true")
+    quartz_status_parser.set_defaults(
+        func=handlers["quartz_status_command"],
+        needs_runtime_context=True,
+    )
+
+    quartz_build_parser = quartz_subparsers.add_parser("build", help="Build or refresh Quartz site.")
+    quartz_build_parser.add_argument("--timeout-seconds", type=int, default=240)
+    quartz_build_parser.add_argument("--json", action="store_true")
+    quartz_build_parser.set_defaults(
+        func=handlers["quartz_build_command"],
+        needs_runtime_context=True,
+    )
+
     submit_parser = subparsers.add_parser(
         "submit",
         help="Create buffered submissions from the CLI.",
@@ -267,9 +302,61 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         help="Remove one instance registration.",
     )
     instance_remove_parser.add_argument("name")
+    instance_remove_parser.add_argument(
+        "--delete-files",
+        action="store_true",
+        help="Also delete the instance root directory after unregistering.",
+    )
+    instance_remove_parser.add_argument(
+        "--shutdown-timeout",
+        type=float,
+        default=8.0,
+        help="Seconds to wait when stopping the instance daemon before deletion.",
+    )
     instance_remove_parser.add_argument("--json", action="store_true")
     instance_remove_parser.set_defaults(
         func=handlers["instance_remove_command"],
+        needs_runtime_context=False,
+    )
+
+    instance_unlock_parser = instance_subparsers.add_parser(
+        "unlock",
+        help="Stop daemon/clear stale locks so instance files can be removed safely.",
+    )
+    instance_unlock_parser.add_argument("name", nargs="?")
+    instance_unlock_parser.add_argument(
+        "--path",
+        help="Instance root directory or config/sediment/config.yaml path (works even if unregistered).",
+    )
+    instance_unlock_parser.add_argument(
+        "--all-deleted",
+        action="store_true",
+        help="Unlock all unregistered instances found under --search-root.",
+    )
+    instance_unlock_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Unlock all discovered instances (registered + unregistered) under --search-root.",
+    )
+    instance_unlock_parser.add_argument(
+        "--search-root",
+        default=".",
+        help="Root directory used by --all-deleted to discover leftover instance folders.",
+    )
+    instance_unlock_parser.add_argument(
+        "--shutdown-timeout",
+        type=float,
+        default=8.0,
+        help="Seconds to wait for graceful daemon shutdown before returning.",
+    )
+    instance_unlock_parser.add_argument(
+        "--force-kill",
+        action="store_true",
+        help="Escalate to SIGKILL when graceful shutdown times out.",
+    )
+    instance_unlock_parser.add_argument("--json", action="store_true")
+    instance_unlock_parser.set_defaults(
+        func=handlers["instance_unlock_command"],
         needs_runtime_context=False,
     )
 
@@ -326,6 +413,8 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     )
     daemon_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     daemon_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    daemon_parser.add_argument("--no-health-check", action="store_true")
+    daemon_parser.add_argument("--build-quartz", action="store_true")
     daemon_parser.add_argument("--skip-checks", action="store_true")
     daemon_parser.set_defaults(func=handlers["run_platform_daemon"], needs_runtime_context=True)
 

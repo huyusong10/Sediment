@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
+import shutil
 import secrets
 import signal
 import socket
@@ -47,6 +49,7 @@ from sediment.llm_cli import (
     parse_json_object,
     resolve_executable,
 )
+from sediment.quartz_runtime import build_quartz_site, quartz_status
 from sediment.platform_services import get_health_payload, infer_mime_type, list_reviews_with_jobs
 from sediment.runtime import (
     admin_token,
@@ -64,6 +67,7 @@ from sediment.runtime import (
     platform_paths,
     port,
     project_root,
+    quartz_runtime_dir,
     run_jobs_in_process,
     sse_endpoint,
     submission_dedupe_window_seconds,
@@ -398,10 +402,44 @@ def daemon_paths() -> dict[str, Path]:
     }
 
 
+def _format_http_host(value: str) -> str:
+    host_value = value.strip()
+    if ":" in host_value and not host_value.startswith("["):
+        return f"[{host_value}]"
+    return host_value
+
+
+def _health_probe_urls(bind_host: str, bind_port: int) -> list[str]:
+    host_value = str(bind_host).strip()
+    candidates: list[str] = []
+    normalized_host = host_value.strip("[]")
+    is_literal_ip = False
+    if normalized_host:
+        try:
+            ipaddress.ip_address(normalized_host)
+            is_literal_ip = True
+        except ValueError:
+            is_literal_ip = False
+
+    if host_value in {"0.0.0.0", "::", "[::]"}:
+        candidates.extend(["127.0.0.1", "::1"])
+    else:
+        if is_literal_ip or normalized_host.lower() == "localhost":
+            candidates.append(host_value)
+        candidates.extend(["127.0.0.1", "::1"])
+    seen: set[str] = set()
+    urls: list[str] = []
+    for candidate in candidates:
+        candidate_key = candidate.strip().lower()
+        if not candidate_key or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        urls.append(f"http://{_format_http_host(candidate)}:{bind_port}/healthz")
+    return urls
+
+
 def local_health_url() -> str:
-    bind_host = host()
-    query_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::", "[::]"} else bind_host
-    return f"http://{query_host}:{port()}/healthz"
+    return _health_probe_urls(host(), port())[0]
 
 
 def current_actor_name() -> str:
@@ -486,12 +524,6 @@ def _daemon_paths_for_settings(settings: dict[str, Any]) -> dict[str, Path]:
     }
 
 
-def _health_url_for_settings(settings: dict[str, Any]) -> str:
-    bind_host = str(settings["server"]["host"])
-    query_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::", "[::]"} else bind_host
-    return f"http://{query_host}:{int(settings['server']['port'])}/healthz"
-
-
 def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
     paths = _daemon_paths_for_settings(settings)
     metadata: dict[str, Any] = {}
@@ -502,13 +534,20 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
             metadata = {}
     pid = int(metadata.get("pid", 0)) if str(metadata.get("pid", "")).isdigit() else None
     running = bool(pid and is_pid_running(pid))
-    health_url = _health_url_for_settings(settings)
+    health_urls = _health_probe_urls(
+        str(settings["server"]["host"]),
+        int(settings["server"]["port"]),
+    )
     health: dict[str, Any] | None = None
-    try:
-        with _urlopen_local(health_url, timeout=1.0) as response:
-            health = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        health = None
+    resolved_health_url = health_urls[0]
+    for candidate in health_urls:
+        try:
+            with _urlopen_local(candidate, timeout=0.6) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            resolved_health_url = candidate
+            break
+        except (OSError, urllib.error.URLError, json.JSONDecodeError):
+            continue
     return {
         "running": running,
         "pid": pid,
@@ -516,7 +555,7 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "log_path": str(paths["log"]),
         "meta_path": str(paths["meta"]),
         "pid_path": str(paths["pid"]),
-        "health_url": health_url,
+        "health_url": resolved_health_url,
         "health": health,
         "metadata": metadata,
     }
@@ -665,6 +704,7 @@ def _write_instance_scaffold(
     host_value: str,
     port_value: int,
     create_kb: bool,
+    kb_relative_path: str = "knowledge-base",
 ) -> dict[str, Any]:
     import yaml
 
@@ -677,7 +717,7 @@ def _write_instance_scaffold(
         },
         "paths": {
             "workspace_root": "../..",
-            "knowledge_base": "knowledge-base",
+            "knowledge_base": kb_relative_path,
             "state_dir": ".sediment_state",
         },
         "server": {
@@ -746,7 +786,7 @@ def _write_instance_scaffold(
     if not create_kb:
         return payload
 
-    kb_root = target_root / "knowledge-base"
+    kb_root = (target_root / kb_relative_path).resolve()
     (kb_root / "entries").mkdir(parents=True, exist_ok=True)
     (kb_root / "placeholders").mkdir(parents=True, exist_ok=True)
     (kb_root / "indexes").mkdir(parents=True, exist_ok=True)
@@ -785,6 +825,14 @@ def _write_instance_scaffold(
             encoding="utf-8",
         )
     return payload
+
+
+def _looks_like_kb_root(path: Path) -> bool:
+    return (
+        (path / "index.root.md").exists()
+        and (path / "entries").is_dir()
+        and (path / "indexes").is_dir()
+    )
 
 
 def is_pid_running(pid: int) -> bool:
@@ -847,11 +895,16 @@ def daemon_status() -> dict[str, Any]:
     if pid and not running:
         metadata["stale_pid"] = True
     health: dict[str, Any] | None = None
-    try:
-        with _urlopen_local(local_health_url(), timeout=1.2) as response:
-            health = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        health = None
+    health_urls = _health_probe_urls(host(), port())
+    resolved_health_url = health_urls[0]
+    for candidate in health_urls:
+        try:
+            with _urlopen_local(candidate, timeout=0.6) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            resolved_health_url = candidate
+            break
+        except (OSError, urllib.error.URLError, json.JSONDecodeError):
+            continue
     return {
         "running": running,
         "pid": pid,
@@ -859,7 +912,7 @@ def daemon_status() -> dict[str, Any]:
         "log_path": str(paths["log"]),
         "meta_path": str(paths["meta"]),
         "pid_path": str(paths["pid"]),
-        "health_url": local_health_url(),
+        "health_url": resolved_health_url,
         "health": health,
         "metadata": metadata,
     }
@@ -897,7 +950,15 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
 
     pid = int(status["pid"])
     print(f"Stopping Sediment daemon (pid={pid})...")
-    os.kill(pid, signal.SIGTERM)
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        os.kill(pid, signal.SIGTERM)
     deadline = time.time() + max(timeout_seconds, 0.5)
     while time.time() < deadline:
         if not is_pid_running(pid):
@@ -907,8 +968,16 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
         time.sleep(0.2)
 
     if force_kill:
-        print("Graceful stop timed out; sending SIGKILL.")
-        os.kill(pid, signal.SIGKILL)
+        print("Graceful stop timed out; forcing process tree termination.")
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            os.kill(pid, signal.SIGKILL)
         time.sleep(0.3)
         clear_daemon_metadata()
         return 0
@@ -919,6 +988,8 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
 
 def start_daemon(args) -> int:
     enabled = progress_enabled(args)
+    no_health_check = bool(getattr(args, "no_health_check", False))
+    build_quartz = bool(getattr(args, "build_quartz", False))
     cli_progress(
         f"Starting Sediment daemon for instance `{instance_name()}`.",
         enabled=enabled,
@@ -959,6 +1030,10 @@ def start_daemon(args) -> int:
         "--startup-timeout",
         str(args.startup_timeout),
     ]
+    if no_health_check:
+        command.append("--no-health-check")
+    if build_quartz:
+        command.append("--build-quartz")
     if args.skip_checks:
         command.append("--skip-checks")
 
@@ -995,8 +1070,33 @@ def start_daemon(args) -> int:
         }
     )
 
-    cli_progress("Waiting for the health endpoint to become ready.", enabled=enabled)
-    if wait_for_health(timeout_seconds=args.startup_timeout):
+    if no_health_check:
+        cli_progress(
+            "Skipping startup health checks (--no-health-check).",
+            enabled=enabled,
+        )
+        stabilize_seconds = max(1.5, min(float(args.startup_timeout), 4.0))
+        deadline = time.time() + stabilize_seconds
+        while time.time() < deadline:
+            if process.poll() is not None:
+                break
+            time.sleep(0.2)
+        if process.poll() is None:
+            print(f"Sediment daemon started (pid={process.pid}).")
+            print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
+            print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
+            print(f"Token:  {startup_admin_token}")
+            print(f"Logs:   {paths['log']}")
+            print_next_steps(
+                f"Open the portal: {local_health_url().removesuffix('/healthz')}/portal",
+                f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin",
+                f"Use this login token: {startup_admin_token}",
+                f"Inspect status: {scoped_command('status')}",
+            )
+            return 0
+    else:
+        cli_progress("Waiting for the health endpoint to become ready.", enabled=enabled)
+    if not no_health_check and wait_for_health(timeout_seconds=args.startup_timeout):
         print(f"Sediment daemon started (pid={process.pid}).")
         print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
         print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
@@ -1013,16 +1113,39 @@ def start_daemon(args) -> int:
     if process.poll() is not None:
         print("Sediment daemon exited during startup.", file=sys.stderr)
     else:
-        print("Sediment daemon did not become healthy before timeout.", file=sys.stderr)
+        if no_health_check:
+            print(
+                "Sediment daemon failed to stay running after startup "
+                "(health checks were skipped).",
+                file=sys.stderr,
+            )
+        else:
+            print("Sediment daemon did not become healthy before timeout.", file=sys.stderr)
         try:
-            os.kill(process.pid, signal.SIGTERM)
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            else:
+                os.kill(process.pid, signal.SIGTERM)
         except OSError:
             pass
         try:
             process.wait(timeout=max(args.shutdown_timeout, 1.0))
         except subprocess.TimeoutExpired:
             try:
-                os.kill(process.pid, signal.SIGKILL)
+                if os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                else:
+                    os.kill(process.pid, signal.SIGKILL)
             except OSError:
                 pass
             process.wait(timeout=1.0)
@@ -1045,6 +1168,10 @@ def server_run(args) -> int:
         "--startup-timeout",
         str(args.startup_timeout),
     ]
+    if bool(getattr(args, "no_health_check", False)):
+        argv.append("--no-health-check")
+    if bool(getattr(args, "build_quartz", False)):
+        argv.append("--build-quartz")
     if args.skip_checks:
         argv.append("--skip-checks")
     return launcher.main(argv)
@@ -1758,7 +1885,15 @@ def doctor_command(args) -> int:
 
 def init_command(args) -> int:
     enabled = progress_enabled(args)
-    target_root = Path.cwd().resolve()
+    cwd = Path.cwd().resolve()
+    target_root = cwd
+    if cwd.name.lower() in {"knowledge-base", "knowledge_base"} and _looks_like_kb_root(cwd):
+        target_root = cwd.parent
+        cli_progress(
+            "Detected that the current directory is an existing knowledge-base root; "
+            f"initializing the instance at parent directory {target_root} instead.",
+            enabled=enabled,
+        )
     config_target = target_root / CONFIG_RELATIVE_PATH
     cli_progress(f"Initializing Sediment instance in {target_root}.", enabled=enabled)
 
@@ -1803,7 +1938,17 @@ def init_command(args) -> int:
         )
     host_value = args.host or "127.0.0.1"
     port_value = args.port or _pick_free_port()
+    kb_relative_path = "knowledge-base"
+    if _looks_like_kb_root(target_root):
+        kb_relative_path = "."
+        cli_progress(
+            "Detected existing KB files at instance root; using this directory as "
+            "paths.knowledge_base instead of creating ./knowledge-base.",
+            enabled=enabled,
+        )
     create_kb = not args.no_kb
+    if kb_relative_path == ".":
+        create_kb = False
 
     defaults = {
         "instance_name": args.instance_name or _slugify_instance_name(target_root.name),
@@ -1812,6 +1957,7 @@ def init_command(args) -> int:
         "host": host_value,
         "port": port_value,
         "create_kb": create_kb,
+        "kb_relative_path": kb_relative_path,
     }
 
     if _should_run_init_wizard(args):
@@ -1826,6 +1972,8 @@ def init_command(args) -> int:
         host_value = wizard["host"]
         port_value = int(wizard["port"])
         create_kb = bool(wizard["create_kb"])
+        if kb_relative_path == ".":
+            create_kb = False
     else:
         instance_label = str(defaults["instance_name"])
         knowledge_label = str(defaults["knowledge_name"])
@@ -1853,6 +2001,7 @@ def init_command(args) -> int:
         host_value=host_value,
         port_value=port_value,
         create_kb=create_kb,
+        kb_relative_path=kb_relative_path,
     )
     cli_progress("Registering instance in the local registry.", enabled=enabled)
     register_instance(
@@ -1871,6 +2020,7 @@ def init_command(args) -> int:
         "host": host_value,
         "port": port_value,
         "knowledge_base_created": create_kb,
+        "knowledge_base_path": str((target_root / kb_relative_path).resolve()),
         "registry_path": str(instance_registry_path()),
         "admin_token": scaffold["auth"]["admin_token"],
     }
@@ -1887,6 +2037,7 @@ def init_command(args) -> int:
     print(f"- backend: {backend}")
     print(f"- host: {host_value}")
     print(f"- port: {port_value}")
+    print(f"- kb_path: {(target_root / kb_relative_path).resolve()}")
     print(f"- registry: {instance_registry_path()}")
     print(f"- admin_token: {scaffold['auth']['admin_token']}")
     print("- doctor: skipped during init")
@@ -1970,16 +2121,220 @@ def instance_show_command(args) -> int:
     return 0
 
 
+def _stop_instance_daemon_for_entry(
+    entry: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    force_kill: bool = False,
+) -> bool:
+    config_path = Path(str(entry["config_path"])).expanduser().resolve()
+    if not config_path.exists():
+        return True
+    try:
+        settings = load_settings_for_path(config_path)
+    except Exception:  # noqa: BLE001
+        return True
+    status = _daemon_status_for_settings(settings)
+    if not status.get("running"):
+        paths = _daemon_paths_for_settings(settings)
+        paths["pid"].unlink(missing_ok=True)
+        paths["meta"].unlink(missing_ok=True)
+        return True
+    pid_value = status.get("pid")
+    if not isinstance(pid_value, int):
+        return False
+    try:
+        os.kill(pid_value, signal.SIGTERM)
+    except OSError:
+        return not is_pid_running(pid_value)
+    deadline = time.time() + max(timeout_seconds, 0.5)
+    while time.time() < deadline:
+        if not is_pid_running(pid_value):
+            paths = _daemon_paths_for_settings(settings)
+            paths["pid"].unlink(missing_ok=True)
+            paths["meta"].unlink(missing_ok=True)
+            return True
+        time.sleep(0.2)
+    if force_kill:
+        try:
+            os.kill(pid_value, signal.SIGKILL)
+            time.sleep(0.3)
+        except OSError:
+            pass
+        if not is_pid_running(pid_value):
+            paths = _daemon_paths_for_settings(settings)
+            paths["pid"].unlink(missing_ok=True)
+            paths["meta"].unlink(missing_ok=True)
+            return True
+    return False
+
+
+def instance_unlock_command(args) -> int:
+    if bool(getattr(args, "all_deleted", False)) or bool(getattr(args, "all", False)):
+        search_root = Path(str(getattr(args, "search_root", ".") or ".")).expanduser().resolve()
+        include_registered = bool(getattr(args, "all", False))
+        candidates: list[dict[str, Any]] = []
+        registered_items = list_registered_instances()
+        registered_configs = {
+            str(Path(item["config_path"]).expanduser().resolve()) for item in registered_items
+        }
+        if include_registered:
+            for item in registered_items:
+                candidates.append(
+                    {
+                        "instance_name": item["instance_name"],
+                        "instance_root": item["instance_root"],
+                        "config_path": str(Path(item["config_path"]).expanduser().resolve()),
+                    }
+                )
+        for config_path in search_root.rglob(CONFIG_RELATIVE_PATH):
+            resolved_config = config_path.expanduser().resolve()
+            is_registered = str(resolved_config) in registered_configs
+            if is_registered and not include_registered:
+                continue
+            instance_root_path = resolved_config.parent.parent.parent
+            candidates.append(
+                {
+                    "instance_name": instance_root_path.name,
+                    "instance_root": str(instance_root_path),
+                    "config_path": str(resolved_config),
+                }
+            )
+        deduped: dict[str, dict[str, Any]] = {}
+        for entry in candidates:
+            deduped[str(entry["config_path"])] = entry
+        candidates = list(deduped.values())
+        results: list[dict[str, Any]] = []
+        for entry in candidates:
+            unlocked = _stop_instance_daemon_for_entry(
+                entry,
+                timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+                force_kill=bool(getattr(args, "force_kill", False)),
+            )
+            results.append(
+                {
+                    "instance_name": entry["instance_name"],
+                    "config_path": entry["config_path"],
+                    "unlocked": unlocked,
+                }
+            )
+        payload = {
+            "search_root": str(search_root),
+            "count": len(results),
+            "results": results,
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Scanned: {search_root}")
+            if not results:
+                print("No unregistered instances were found.")
+            for item in results:
+                marker = "OK" if item["unlocked"] else "FAIL"
+                print(f"- [{marker}] {item['instance_name']} ({item['config_path']})")
+        return 0 if all(item["unlocked"] for item in results) else 1
+
+    entry: dict[str, Any] | None = None
+    if getattr(args, "path", None):
+        raw = Path(str(args.path)).expanduser().resolve()
+        if raw.is_dir():
+            instance_root_path = raw
+            config_path = instance_root_path / CONFIG_RELATIVE_PATH
+        else:
+            config_path = raw
+            instance_root_path = config_path.parent.parent.parent
+        entry = {
+            "instance_name": args.name or instance_root_path.name,
+            "instance_root": str(instance_root_path),
+            "config_path": str(config_path),
+        }
+    elif args.name:
+        entry = get_registered_instance(args.name)
+    if entry is None:
+        print(
+            "Instance was not found in registry. "
+            "Provide `--path <instance-root-or-config>` to unlock an already-unregistered instance.",
+            file=sys.stderr,
+        )
+        return 1
+    instance_label = str(entry.get("instance_name", args.name or "instance"))
+    unlocked = _stop_instance_daemon_for_entry(
+        entry,
+        timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+        force_kill=bool(getattr(args, "force_kill", False)),
+    )
+    payload = {
+        "instance_name": instance_label,
+        "unlocked": unlocked,
+        "force_kill": bool(getattr(args, "force_kill", False)),
+        "config_path": str(entry.get("config_path", "")),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        if unlocked:
+            print(f"Instance '{instance_label}' is unlocked (daemon stopped / stale locks cleared).")
+        else:
+            print(
+                f"Failed to unlock instance '{instance_label}'. "
+                "Try again with --force-kill.",
+                file=sys.stderr,
+            )
+    return 0 if unlocked else 1
+
+
 def instance_remove_command(args) -> int:
+    entry = get_registered_instance(args.name)
+    if entry is None:
+        print(f"Sediment instance '{args.name}' is not registered.", file=sys.stderr)
+        return 1
+    stop_ok = _stop_instance_daemon_for_entry(
+        entry,
+        timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+        force_kill=True,
+    )
     removed = unregister_instance(args.name)
     if removed is None:
         print(f"Sediment instance '{args.name}' is not registered.", file=sys.stderr)
         return 1
+    deleted = False
+    delete_error: str | None = None
+    if bool(getattr(args, "delete_files", False)):
+        instance_root_path = Path(str(removed.get("instance_root", ""))).expanduser().resolve()
+        if instance_root_path.exists():
+            try:
+                shutil.rmtree(instance_root_path)
+                deleted = True
+            except OSError as exc:
+                delete_error = str(exc)
     if args.json:
-        print(json.dumps({"removed": removed}, ensure_ascii=False, indent=2))
-        return 0
+        print(
+            json.dumps(
+                {
+                    "removed": removed,
+                    "daemon_stopped": stop_ok,
+                    "files_deleted": deleted,
+                    "delete_error": delete_error,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0 if stop_ok and delete_error is None else 1
     print(f"Removed instance registration: {args.name}")
-    return 0
+    if not stop_ok:
+        print(
+            "Warning: could not stop the instance daemon cleanly; "
+            "some files may still be locked.",
+            file=sys.stderr,
+        )
+    if bool(getattr(args, "delete_files", False)):
+        if delete_error:
+            print(f"Failed to delete instance files: {delete_error}", file=sys.stderr)
+            return 1
+        if deleted:
+            print("Deleted instance directory.")
+    return 0 if stop_ok else 1
 
 
 def review_list_command(args) -> int:
@@ -2110,6 +2465,98 @@ def logs_follow_command(args) -> int:
             return 0
 
 
+def _quartz_paths() -> tuple[Path, Path]:
+    runtime_dir = quartz_runtime_dir()
+    site_dir = platform_paths()["state_dir"] / "quartz" / "site"
+    return runtime_dir, site_dir
+
+
+def quartz_status_command(args) -> int:
+    runtime_dir, site_dir = _quartz_paths()
+    payload = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
+    if (
+        bool(getattr(args, "build_if_missing", False))
+        and payload["runtime_available"]
+        and not payload["site_available"]
+    ):
+        try:
+            build_quartz_site(
+                kb_path=kb_path(),
+                runtime_dir=runtime_dir,
+                site_dir=site_dir,
+                knowledge_name=knowledge_name(),
+                locale=str(load_settings().get("locale", "en")),
+                timeout_seconds=max(int(getattr(args, "timeout_seconds", 240)), 30),
+            )
+            payload = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
+            payload["built_via_status"] = True
+        except RuntimeError as exc:
+            payload["built_via_status"] = False
+            payload["build_error"] = str(exc)
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    print("Quartz status")
+    print(f"- runtime available: {payload['runtime_available']}")
+    print(f"- runtime path:      {payload['runtime_path']}")
+    print(f"- site available:    {payload['site_available']}")
+    print(f"- site path:         {payload['site_path']}")
+    print(f"- site index:        {payload['site_index_path']}")
+    if payload.get("site_last_built_at"):
+        built_at = time.strftime(
+            "%Y-%m-%d %H:%M:%S",
+            time.localtime(float(payload["site_last_built_at"])),
+        )
+        print(f"- last built:        {built_at}")
+    if payload["runtime_available"] and not payload["site_available"]:
+        print("")
+        print("Tip: build the instance graph site with:")
+        print(f"- {scoped_command('quartz build')}")
+        print(f"- {scoped_command('quartz status --build-if-missing')}")
+    if payload.get("build_error"):
+        print(f"Build error: {payload['build_error']}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def quartz_build_command(args) -> int:
+    runtime_dir, site_dir = _quartz_paths()
+    settings = load_settings()
+    locale = str(settings.get("locale", "en"))
+    timeout_seconds = max(int(getattr(args, "timeout_seconds", 240)), 30)
+    try:
+        payload = build_quartz_site(
+            kb_path=kb_path(),
+            runtime_dir=runtime_dir,
+            site_dir=site_dir,
+            knowledge_name=knowledge_name(),
+            locale=locale,
+            timeout_seconds=timeout_seconds,
+        )
+    except RuntimeError as exc:
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {"ok": False, "error": str(exc), "runtime_path": str(runtime_dir)},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(f"Quartz build failed: {exc}", file=sys.stderr)
+            print(f"Runtime path: {runtime_dir}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print("Quartz site build completed.")
+        print(f"- site path: {payload['site_path']}")
+        print(f"- index:     {payload['site_index_path']}")
+        print_next_steps(f"Open graph view: {local_health_url().removesuffix('/healthz')}/portal/graph-view")
+    return 0
+
+
 def render_help(topic: str | None) -> str:
     return render_help_topic(topic)
 
@@ -2120,12 +2567,18 @@ def cli_help_command(args) -> int:
 
 
 def run_platform_daemon(args) -> int:
+    no_health_check = bool(getattr(args, "no_health_check", False))
+    build_quartz = bool(getattr(args, "build_quartz", False))
     argv = [
         "--worker-poll-interval",
         str(args.worker_poll_interval),
         "--startup-timeout",
         str(args.startup_timeout),
     ]
+    if no_health_check:
+        argv.append("--no-health-check")
+    if build_quartz:
+        argv.append("--build-quartz")
     if args.skip_checks:
         argv.append("--skip-checks")
     return launcher.main(argv)
@@ -2172,11 +2625,14 @@ def build_parser() -> argparse.ArgumentParser:
             "review_reject_command": review_reject_command,
             "logs_show_command": logs_show_command,
             "logs_follow_command": logs_follow_command,
+            "quartz_status_command": quartz_status_command,
+            "quartz_build_command": quartz_build_command,
             "submit_text_command": submit_text_command,
             "submit_file_command": submit_file_command,
             "instance_list_command": instance_list_command,
             "instance_show_command": instance_show_command,
             "instance_remove_command": instance_remove_command,
+            "instance_unlock_command": instance_unlock_command,
             "status_command": status_command,
             "status_queue_command": status_queue_command,
             "status_health_command": status_health_command,

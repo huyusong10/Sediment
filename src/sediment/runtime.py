@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from sediment.instances import user_state_root
 from sediment.settings import load_settings
 
 if TYPE_CHECKING:
@@ -127,6 +129,18 @@ def platform_paths() -> dict[str, Path]:
         "run_dir": state_dir / "run",
         "log_dir": state_dir / "logs",
     }
+
+
+def quartz_runtime_dir() -> Path:
+    override = os.environ.get("SEDIMENT_QUARTZ_RUNTIME_PATH", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    local_candidate = project_root() / "quartz-runtime" / "quartz"
+    shared_candidate = user_state_root() / "quartz-runtime" / "quartz"
+    for candidate in (local_candidate, shared_candidate):
+        if (candidate / "package.json").exists():
+            return candidate
+    return shared_candidate
 
 
 def build_store() -> PlatformStore:

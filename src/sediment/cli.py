@@ -2133,16 +2133,27 @@ def _stop_instance_daemon_for_entry(
 
 
 def instance_unlock_command(args) -> int:
-    if bool(getattr(args, "all_deleted", False)):
+    if bool(getattr(args, "all_deleted", False)) or bool(getattr(args, "all", False)):
         search_root = Path(str(getattr(args, "search_root", ".") or ".")).expanduser().resolve()
-        registered_configs = {
-            str(Path(item["config_path"]).expanduser().resolve())
-            for item in list_registered_instances()
-        }
+        include_registered = bool(getattr(args, "all", False))
         candidates: list[dict[str, Any]] = []
+        registered_items = list_registered_instances()
+        registered_configs = {
+            str(Path(item["config_path"]).expanduser().resolve()) for item in registered_items
+        }
+        if include_registered:
+            for item in registered_items:
+                candidates.append(
+                    {
+                        "instance_name": item["instance_name"],
+                        "instance_root": item["instance_root"],
+                        "config_path": str(Path(item["config_path"]).expanduser().resolve()),
+                    }
+                )
         for config_path in search_root.rglob(CONFIG_RELATIVE_PATH):
             resolved_config = config_path.expanduser().resolve()
-            if str(resolved_config) in registered_configs:
+            is_registered = str(resolved_config) in registered_configs
+            if is_registered and not include_registered:
                 continue
             instance_root_path = resolved_config.parent.parent.parent
             candidates.append(
@@ -2152,6 +2163,10 @@ def instance_unlock_command(args) -> int:
                     "config_path": str(resolved_config),
                 }
             )
+        deduped: dict[str, dict[str, Any]] = {}
+        for entry in candidates:
+            deduped[str(entry["config_path"])] = entry
+        candidates = list(deduped.values())
         results: list[dict[str, Any]] = []
         for entry in candidates:
             unlocked = _stop_instance_daemon_for_entry(

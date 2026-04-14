@@ -328,6 +328,11 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         help="Unlock all unregistered instances found under --search-root.",
     )
     instance_unlock_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Unlock all discovered instances (registered + unregistered) under --search-root.",
+    )
+    instance_unlock_parser.add_argument(
         "--search-root",
         default=".",
         help="Root directory used by --all-deleted to discover leftover instance folders.",

@@ -950,7 +950,15 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
 
     pid = int(status["pid"])
     print(f"Stopping Sediment daemon (pid={pid})...")
-    os.kill(pid, signal.SIGTERM)
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        os.kill(pid, signal.SIGTERM)
     deadline = time.time() + max(timeout_seconds, 0.5)
     while time.time() < deadline:
         if not is_pid_running(pid):
@@ -960,8 +968,16 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
         time.sleep(0.2)
 
     if force_kill:
-        print("Graceful stop timed out; sending SIGKILL.")
-        os.kill(pid, signal.SIGKILL)
+        print("Graceful stop timed out; forcing process tree termination.")
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            os.kill(pid, signal.SIGKILL)
         time.sleep(0.3)
         clear_daemon_metadata()
         return 0
@@ -1120,14 +1136,30 @@ def start_daemon(args) -> int:
         else:
             print("Sediment daemon did not become healthy before timeout.", file=sys.stderr)
         try:
-            os.kill(process.pid, signal.SIGTERM)
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T"],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+            else:
+                os.kill(process.pid, signal.SIGTERM)
         except OSError:
             pass
         try:
             process.wait(timeout=max(args.shutdown_timeout, 1.0))
         except subprocess.TimeoutExpired:
             try:
-                os.kill(process.pid, signal.SIGKILL)
+                if os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                else:
+                    os.kill(process.pid, signal.SIGKILL)
             except OSError:
                 pass
             process.wait(timeout=1.0)

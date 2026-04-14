@@ -703,6 +703,7 @@ def _write_instance_scaffold(
     host_value: str,
     port_value: int,
     create_kb: bool,
+    kb_relative_path: str = "knowledge-base",
 ) -> dict[str, Any]:
     import yaml
 
@@ -715,7 +716,7 @@ def _write_instance_scaffold(
         },
         "paths": {
             "workspace_root": "../..",
-            "knowledge_base": "knowledge-base",
+            "knowledge_base": kb_relative_path,
             "state_dir": ".sediment_state",
         },
         "server": {
@@ -784,7 +785,7 @@ def _write_instance_scaffold(
     if not create_kb:
         return payload
 
-    kb_root = target_root / "knowledge-base"
+    kb_root = (target_root / kb_relative_path).resolve()
     (kb_root / "entries").mkdir(parents=True, exist_ok=True)
     (kb_root / "placeholders").mkdir(parents=True, exist_ok=True)
     (kb_root / "indexes").mkdir(parents=True, exist_ok=True)
@@ -1899,7 +1900,17 @@ def init_command(args) -> int:
         )
     host_value = args.host or "127.0.0.1"
     port_value = args.port or _pick_free_port()
+    kb_relative_path = "knowledge-base"
+    if _looks_like_kb_root(target_root):
+        kb_relative_path = "."
+        cli_progress(
+            "Detected existing KB files at instance root; using this directory as "
+            "paths.knowledge_base instead of creating ./knowledge-base.",
+            enabled=enabled,
+        )
     create_kb = not args.no_kb
+    if kb_relative_path == ".":
+        create_kb = False
 
     defaults = {
         "instance_name": args.instance_name or _slugify_instance_name(target_root.name),
@@ -1908,6 +1919,7 @@ def init_command(args) -> int:
         "host": host_value,
         "port": port_value,
         "create_kb": create_kb,
+        "kb_relative_path": kb_relative_path,
     }
 
     if _should_run_init_wizard(args):
@@ -1922,6 +1934,8 @@ def init_command(args) -> int:
         host_value = wizard["host"]
         port_value = int(wizard["port"])
         create_kb = bool(wizard["create_kb"])
+        if kb_relative_path == ".":
+            create_kb = False
     else:
         instance_label = str(defaults["instance_name"])
         knowledge_label = str(defaults["knowledge_name"])
@@ -1949,6 +1963,7 @@ def init_command(args) -> int:
         host_value=host_value,
         port_value=port_value,
         create_kb=create_kb,
+        kb_relative_path=kb_relative_path,
     )
     cli_progress("Registering instance in the local registry.", enabled=enabled)
     register_instance(
@@ -1967,6 +1982,7 @@ def init_command(args) -> int:
         "host": host_value,
         "port": port_value,
         "knowledge_base_created": create_kb,
+        "knowledge_base_path": str((target_root / kb_relative_path).resolve()),
         "registry_path": str(instance_registry_path()),
         "admin_token": scaffold["auth"]["admin_token"],
     }
@@ -1983,6 +1999,7 @@ def init_command(args) -> int:
     print(f"- backend: {backend}")
     print(f"- host: {host_value}")
     print(f"- port: {port_value}")
+    print(f"- kb_path: {(target_root / kb_relative_path).resolve()}")
     print(f"- registry: {instance_registry_path()}")
     print(f"- admin_token: {scaffold['auth']['admin_token']}")
     print("- doctor: skipped during init")

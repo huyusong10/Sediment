@@ -212,6 +212,27 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         needs_runtime_context=True,
     )
 
+    quartz_parser = subparsers.add_parser(
+        "quartz",
+        help="Manage Quartz graph site for the current instance.",
+    )
+    quartz_subparsers = quartz_parser.add_subparsers(dest="quartz_command", required=True)
+
+    quartz_status_parser = quartz_subparsers.add_parser("status", help="Show Quartz runtime/site status.")
+    quartz_status_parser.add_argument("--json", action="store_true")
+    quartz_status_parser.set_defaults(
+        func=handlers["quartz_status_command"],
+        needs_runtime_context=True,
+    )
+
+    quartz_build_parser = quartz_subparsers.add_parser("build", help="Build or refresh Quartz site.")
+    quartz_build_parser.add_argument("--timeout-seconds", type=int, default=240)
+    quartz_build_parser.add_argument("--json", action="store_true")
+    quartz_build_parser.set_defaults(
+        func=handlers["quartz_build_command"],
+        needs_runtime_context=True,
+    )
+
     submit_parser = subparsers.add_parser(
         "submit",
         help="Create buffered submissions from the CLI.",

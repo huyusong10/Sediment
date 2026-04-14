@@ -39,6 +39,7 @@ from sediment.instances import (
     resolve_registered_instance_config,
     set_active_registry_path,
     unregister_instance,
+    user_state_root,
 )
 from sediment.kb import inventory, resolve_kb_document_path
 from sediment.llm_cli import (
@@ -48,6 +49,7 @@ from sediment.llm_cli import (
     parse_json_object,
     resolve_executable,
 )
+from sediment.quartz_runtime import build_quartz_site, quartz_status
 from sediment.platform_services import get_health_payload, infer_mime_type, list_reviews_with_jobs
 from sediment.runtime import (
     admin_token,
@@ -2188,6 +2190,75 @@ def logs_follow_command(args) -> int:
             return 0
 
 
+def _quartz_paths() -> tuple[Path, Path]:
+    runtime_dir = user_state_root() / "quartz-runtime" / "quartz"
+    site_dir = platform_paths()["state_dir"] / "quartz" / "site"
+    return runtime_dir, site_dir
+
+
+def quartz_status_command(args) -> int:
+    runtime_dir, site_dir = _quartz_paths()
+    payload = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    print("Quartz status")
+    print(f"- runtime available: {payload['runtime_available']}")
+    print(f"- runtime path:      {payload['runtime_path']}")
+    print(f"- site available:    {payload['site_available']}")
+    print(f"- site path:         {payload['site_path']}")
+    print(f"- site index:        {payload['site_index_path']}")
+    if payload.get("site_last_built_at"):
+        built_at = time.strftime(
+            "%Y-%m-%d %H:%M:%S",
+            time.localtime(float(payload["site_last_built_at"])),
+        )
+        print(f"- last built:        {built_at}")
+    if payload["runtime_available"] and not payload["site_available"]:
+        print("")
+        print("Tip: build the instance graph site with:")
+        print(f"- {scoped_command('quartz build')}")
+    return 0
+
+
+def quartz_build_command(args) -> int:
+    runtime_dir, site_dir = _quartz_paths()
+    settings = load_settings()
+    locale = str(settings.get("locale", "en"))
+    timeout_seconds = max(int(getattr(args, "timeout_seconds", 240)), 30)
+    try:
+        payload = build_quartz_site(
+            kb_path=kb_path(),
+            runtime_dir=runtime_dir,
+            site_dir=site_dir,
+            knowledge_name=knowledge_name(),
+            locale=locale,
+            timeout_seconds=timeout_seconds,
+        )
+    except RuntimeError as exc:
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {"ok": False, "error": str(exc), "runtime_path": str(runtime_dir)},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        else:
+            print(f"Quartz build failed: {exc}", file=sys.stderr)
+            print(f"Runtime path: {runtime_dir}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print("Quartz site build completed.")
+        print(f"- site path: {payload['site_path']}")
+        print(f"- index:     {payload['site_index_path']}")
+        print_next_steps(f"Open graph view: {local_health_url().removesuffix('/healthz')}/portal/graph-view")
+    return 0
+
+
 def render_help(topic: str | None) -> str:
     return render_help_topic(topic)
 
@@ -2256,6 +2327,8 @@ def build_parser() -> argparse.ArgumentParser:
             "review_reject_command": review_reject_command,
             "logs_show_command": logs_show_command,
             "logs_follow_command": logs_follow_command,
+            "quartz_status_command": quartz_status_command,
+            "quartz_build_command": quartz_build_command,
             "submit_text_command": submit_text_command,
             "submit_file_command": submit_file_command,
             "instance_list_command": instance_list_command,

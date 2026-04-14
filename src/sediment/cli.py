@@ -40,7 +40,6 @@ from sediment.instances import (
     resolve_registered_instance_config,
     set_active_registry_path,
     unregister_instance,
-    user_state_root,
 )
 from sediment.kb import inventory, resolve_kb_document_path
 from sediment.llm_cli import (
@@ -68,6 +67,7 @@ from sediment.runtime import (
     platform_paths,
     port,
     project_root,
+    quartz_runtime_dir,
     run_jobs_in_process,
     sse_endpoint,
     submission_dedupe_window_seconds,
@@ -2429,7 +2429,7 @@ def logs_follow_command(args) -> int:
 
 
 def _quartz_paths() -> tuple[Path, Path]:
-    runtime_dir = user_state_root() / "quartz-runtime" / "quartz"
+    runtime_dir = quartz_runtime_dir()
     site_dir = platform_paths()["state_dir"] / "quartz" / "site"
     return runtime_dir, site_dir
 

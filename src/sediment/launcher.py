@@ -22,7 +22,7 @@ from sediment.runtime import kb_path as runtime_kb_path
 from sediment.runtime import knowledge_name as runtime_knowledge_name
 from sediment.runtime import port as runtime_port
 from sediment.runtime import platform_paths as runtime_platform_paths
-from sediment.instances import user_state_root
+from sediment.runtime import quartz_runtime_dir as runtime_quartz_runtime_dir
 from sediment.settings import (
     current_config_path,
     load_settings,
@@ -203,7 +203,7 @@ def terminate_all(processes: list[ManagedProcess], *, timeout_seconds: float, si
 
 def _ensure_quartz_site(*, sink: TextIO, force_build: bool) -> bool:
     site_dir = runtime_platform_paths()["state_dir"] / "quartz" / "site"
-    runtime_dir = user_state_root() / "quartz-runtime" / "quartz"
+    runtime_dir = runtime_quartz_runtime_dir()
     status = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
     if not force_build:
         if status["runtime_available"] and not status["site_available"]:

@@ -92,8 +92,6 @@ sediment --help
 
 如果你处于企业内网（无法访问公网 PyPI/GitHub），请参考专用手工部署文档：[`docs/offline-install-zh.md`](docs/offline-install-zh.md)。
 
-对应英文版文档请见：[`docs/offline-install.md`](docs/offline-install.md)。
-
 本地开发可直接运行：
 
 ```bash

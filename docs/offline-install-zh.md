@@ -2,7 +2,7 @@
 
 > 适用场景：机器不能访问公网（例如无法访问 `pypi.org` / `github.com`），但可以访问企业内部的 PyPI / npm / Git 仓库。
 
-在内网环境中，若未显式指定索引，`uv tool install --from . sediment ...` 可能仍会尝试访问默认索引 `https://pypi.org/simple`，从而导致安装失败。
+你遇到的报错本质上是：`uv tool install --from . sediment ...` 在解析依赖时仍然走了默认索引 `https://pypi.org/simple`，所以在内网被阻断。
 
 ---
 
@@ -105,32 +105,24 @@ uv tool install \
 
 ## 3) 固化到 uv 配置（避免每次手动 export）
 
-为了避免每次手动设置环境变量，建议一次性配置 `uv.toml`。
+可以把内网索引写进 uv 配置文件，避免每次设置环境变量。
 
-> 重要：`uv tool` 是用户级命令，主要读取**用户级/系统级**配置，通常不会读取项目内的 `./uv.toml`。
-
-推荐用户级路径：
-
-- Linux/macOS：`~/.config/uv/uv.toml`
-- Windows：`%APPDATA%\uv\uv.toml`
-
-示例内容：
+示例（请按你环境修改）：
 
 ```toml
 # uv.toml
 default-index = "https://<your-internal-pypi>/simple"
 ```
 
-然后重新执行安装：
+可放在：
+
+- 用户级配置目录（推荐）
+- 或项目根目录（仅对当前项目生效）
+
+然后重新执行：
 
 ```bash
 uv tool install --from . sediment --force --reinstall --compile-bytecode
-```
-
-如果你必须把配置放在自定义位置，可用 `--config-file` 显式指定：
-
-```bash
-uv --config-file /path/to/uv.toml tool install --from . sediment --force --reinstall --compile-bytecode
 ```
 
 ---
@@ -144,20 +136,11 @@ Sediment 核心 CLI 不依赖 Node/npm；只有 `/portal/graph-view` 的 Quartz 
 ```bash
 # 示例
 npm config set registry https://<your-internal-npm>/
-cd "<SEDIMENT_STATE_DIR>/quartz-runtime/quartz"
+cd <sediment-state>/quartz-runtime/quartz
 npm i
 ```
 
 如果你不需要图谱页，可以先跳过 Quartz，不影响 CLI 与主流程。
-
-`<SEDIMENT_STATE_DIR>` 表示 Sediment 的用户状态目录（共享 Quartz runtime 的存放位置）。
-
-常见默认值：
-
-- Linux：`${XDG_STATE_HOME:-$HOME/.local/state}/sediment`
-- macOS：`$HOME/Library/Application Support/Sediment`
-
-如果你的环境做了自定义，请替换为实际状态目录路径。
 
 ---
 
@@ -208,12 +191,6 @@ sediment --help
 3. **`sediment` 命令找不到**
    - 先 `uv tool list` 确认确实安装了 `sediment`。
    - 再修复 PATH，重开终端。
-
-4. **`sediment server start` 卡在 health 检查或超时**
-   - 先查看日志：`<state-dir>/logs/platform.log`（Windows 示例：`.sediment_state\logs\platform.log`）。
-   - 检查端口是否被占用：实例配置端口（默认 8000）若冲突会导致服务起不来。
-   - 检查本机代理变量（`HTTP_PROXY`/`HTTPS_PROXY`）是否误拦截了 `127.0.0.1`。
-   - 必要时加长启动超时：`sediment server start --startup-timeout 30`。
 
 ---
 

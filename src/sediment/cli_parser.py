@@ -59,6 +59,7 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     up_parser = subparsers.add_parser("up", help="Run server + worker in the foreground.")
     up_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     up_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    up_parser.add_argument("--no-health-check", action="store_true")
     up_parser.add_argument("--skip-checks", action="store_true")
     up_parser.set_defaults(func=handlers["server_run"], needs_runtime_context=True)
 
@@ -68,12 +69,14 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     run_parser = server_subparsers.add_parser("run", help="Run server + worker in the foreground.")
     run_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     run_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    run_parser.add_argument("--no-health-check", action="store_true")
     run_parser.add_argument("--skip-checks", action="store_true")
     run_parser.set_defaults(func=handlers["server_run"], needs_runtime_context=True)
 
     start_parser = server_subparsers.add_parser("start", help="Start the platform daemon.")
     start_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     start_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    start_parser.add_argument("--no-health-check", action="store_true")
     start_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
     start_parser.add_argument("--skip-checks", action="store_true")
     start_parser.add_argument("--force", action="store_true")
@@ -87,6 +90,7 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     restart_parser = server_subparsers.add_parser("restart", help="Restart the platform daemon.")
     restart_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     restart_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    restart_parser.add_argument("--no-health-check", action="store_true")
     restart_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
     restart_parser.add_argument("--skip-checks", action="store_true")
     restart_parser.set_defaults(func=handlers["server_restart"], needs_runtime_context=True)
@@ -326,6 +330,7 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     )
     daemon_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
     daemon_parser.add_argument("--startup-timeout", type=float, default=10.0)
+    daemon_parser.add_argument("--no-health-check", action="store_true")
     daemon_parser.add_argument("--skip-checks", action="store_true")
     daemon_parser.set_defaults(func=handlers["run_platform_daemon"], needs_runtime_context=True)
 

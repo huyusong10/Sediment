@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -398,10 +399,44 @@ def daemon_paths() -> dict[str, Path]:
     }
 
 
+def _format_http_host(value: str) -> str:
+    host_value = value.strip()
+    if ":" in host_value and not host_value.startswith("["):
+        return f"[{host_value}]"
+    return host_value
+
+
+def _health_probe_urls(bind_host: str, bind_port: int) -> list[str]:
+    host_value = str(bind_host).strip()
+    candidates: list[str] = []
+    normalized_host = host_value.strip("[]")
+    is_literal_ip = False
+    if normalized_host:
+        try:
+            ipaddress.ip_address(normalized_host)
+            is_literal_ip = True
+        except ValueError:
+            is_literal_ip = False
+
+    if host_value in {"0.0.0.0", "::", "[::]"}:
+        candidates.extend(["127.0.0.1", "::1"])
+    else:
+        if is_literal_ip or normalized_host.lower() == "localhost":
+            candidates.append(host_value)
+        candidates.extend(["127.0.0.1", "::1"])
+    seen: set[str] = set()
+    urls: list[str] = []
+    for candidate in candidates:
+        candidate_key = candidate.strip().lower()
+        if not candidate_key or candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        urls.append(f"http://{_format_http_host(candidate)}:{bind_port}/healthz")
+    return urls
+
+
 def local_health_url() -> str:
-    bind_host = host()
-    query_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::", "[::]"} else bind_host
-    return f"http://{query_host}:{port()}/healthz"
+    return _health_probe_urls(host(), port())[0]
 
 
 def current_actor_name() -> str:
@@ -486,12 +521,6 @@ def _daemon_paths_for_settings(settings: dict[str, Any]) -> dict[str, Path]:
     }
 
 
-def _health_url_for_settings(settings: dict[str, Any]) -> str:
-    bind_host = str(settings["server"]["host"])
-    query_host = "127.0.0.1" if bind_host in {"0.0.0.0", "::", "[::]"} else bind_host
-    return f"http://{query_host}:{int(settings['server']['port'])}/healthz"
-
-
 def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
     paths = _daemon_paths_for_settings(settings)
     metadata: dict[str, Any] = {}
@@ -502,13 +531,20 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
             metadata = {}
     pid = int(metadata.get("pid", 0)) if str(metadata.get("pid", "")).isdigit() else None
     running = bool(pid and is_pid_running(pid))
-    health_url = _health_url_for_settings(settings)
+    health_urls = _health_probe_urls(
+        str(settings["server"]["host"]),
+        int(settings["server"]["port"]),
+    )
     health: dict[str, Any] | None = None
-    try:
-        with _urlopen_local(health_url, timeout=1.0) as response:
-            health = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        health = None
+    resolved_health_url = health_urls[0]
+    for candidate in health_urls:
+        try:
+            with _urlopen_local(candidate, timeout=0.6) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            resolved_health_url = candidate
+            break
+        except (OSError, urllib.error.URLError, json.JSONDecodeError):
+            continue
     return {
         "running": running,
         "pid": pid,
@@ -516,7 +552,7 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "log_path": str(paths["log"]),
         "meta_path": str(paths["meta"]),
         "pid_path": str(paths["pid"]),
-        "health_url": health_url,
+        "health_url": resolved_health_url,
         "health": health,
         "metadata": metadata,
     }
@@ -847,11 +883,16 @@ def daemon_status() -> dict[str, Any]:
     if pid and not running:
         metadata["stale_pid"] = True
     health: dict[str, Any] | None = None
-    try:
-        with _urlopen_local(local_health_url(), timeout=1.2) as response:
-            health = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        health = None
+    health_urls = _health_probe_urls(host(), port())
+    resolved_health_url = health_urls[0]
+    for candidate in health_urls:
+        try:
+            with _urlopen_local(candidate, timeout=0.6) as response:
+                health = json.loads(response.read().decode("utf-8"))
+            resolved_health_url = candidate
+            break
+        except (OSError, urllib.error.URLError, json.JSONDecodeError):
+            continue
     return {
         "running": running,
         "pid": pid,
@@ -859,7 +900,7 @@ def daemon_status() -> dict[str, Any]:
         "log_path": str(paths["log"]),
         "meta_path": str(paths["meta"]),
         "pid_path": str(paths["pid"]),
-        "health_url": local_health_url(),
+        "health_url": resolved_health_url,
         "health": health,
         "metadata": metadata,
     }
@@ -919,6 +960,7 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
 
 def start_daemon(args) -> int:
     enabled = progress_enabled(args)
+    no_health_check = bool(getattr(args, "no_health_check", False))
     cli_progress(
         f"Starting Sediment daemon for instance `{instance_name()}`.",
         enabled=enabled,
@@ -959,6 +1001,8 @@ def start_daemon(args) -> int:
         "--startup-timeout",
         str(args.startup_timeout),
     ]
+    if no_health_check:
+        command.append("--no-health-check")
     if args.skip_checks:
         command.append("--skip-checks")
 
@@ -995,8 +1039,28 @@ def start_daemon(args) -> int:
         }
     )
 
-    cli_progress("Waiting for the health endpoint to become ready.", enabled=enabled)
-    if wait_for_health(timeout_seconds=args.startup_timeout):
+    if no_health_check:
+        cli_progress(
+            "Skipping startup health checks (--no-health-check).",
+            enabled=enabled,
+        )
+        time.sleep(0.4)
+        if process.poll() is None:
+            print(f"Sediment daemon started (pid={process.pid}).")
+            print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
+            print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
+            print(f"Token:  {startup_admin_token}")
+            print(f"Logs:   {paths['log']}")
+            print_next_steps(
+                f"Open the portal: {local_health_url().removesuffix('/healthz')}/portal",
+                f"Open the admin UI: {local_health_url().removesuffix('/healthz')}/admin",
+                f"Use this login token: {startup_admin_token}",
+                f"Inspect status: {scoped_command('status')}",
+            )
+            return 0
+    else:
+        cli_progress("Waiting for the health endpoint to become ready.", enabled=enabled)
+    if not no_health_check and wait_for_health(timeout_seconds=args.startup_timeout):
         print(f"Sediment daemon started (pid={process.pid}).")
         print(f"Portal: {local_health_url().removesuffix('/healthz')}/portal")
         print(f"Admin:  {local_health_url().removesuffix('/healthz')}/admin")
@@ -1013,7 +1077,14 @@ def start_daemon(args) -> int:
     if process.poll() is not None:
         print("Sediment daemon exited during startup.", file=sys.stderr)
     else:
-        print("Sediment daemon did not become healthy before timeout.", file=sys.stderr)
+        if no_health_check:
+            print(
+                "Sediment daemon failed to stay running after startup "
+                "(health checks were skipped).",
+                file=sys.stderr,
+            )
+        else:
+            print("Sediment daemon did not become healthy before timeout.", file=sys.stderr)
         try:
             os.kill(process.pid, signal.SIGTERM)
         except OSError:
@@ -1045,6 +1116,8 @@ def server_run(args) -> int:
         "--startup-timeout",
         str(args.startup_timeout),
     ]
+    if bool(getattr(args, "no_health_check", False)):
+        argv.append("--no-health-check")
     if args.skip_checks:
         argv.append("--skip-checks")
     return launcher.main(argv)
@@ -2120,12 +2193,15 @@ def cli_help_command(args) -> int:
 
 
 def run_platform_daemon(args) -> int:
+    no_health_check = bool(getattr(args, "no_health_check", False))
     argv = [
         "--worker-poll-interval",
         str(args.worker_poll_interval),
         "--startup-timeout",
         str(args.startup_timeout),
     ]
+    if no_health_check:
+        argv.append("--no-health-check")
     if args.skip_checks:
         argv.append("--skip-checks")
     return launcher.main(argv)

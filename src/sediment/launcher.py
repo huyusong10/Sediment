@@ -121,10 +121,15 @@ def _forward_output(prefix: str, stream, sink: TextIO) -> None:
         for line in iter(stream.readline, ""):
             if not line:
                 break
-            sink.write(f"[{prefix}] {line}")
-            sink.flush()
+            _write_log_line(sink, prefix, line.rstrip("\n"))
     finally:
         stream.close()
+
+
+def _write_log_line(sink: TextIO, prefix: str, message: str) -> None:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    sink.write(f"{timestamp} [{prefix}] {message}\n")
+    sink.flush()
 
 
 def spawn_process(spec: ProcessSpec, *, sink: TextIO) -> ManagedProcess:
@@ -165,13 +170,11 @@ def wait_for_server_ready(*, timeout_seconds: float, sink: TextIO) -> bool:
         try:
             with _LOCAL_HTTP_OPENER.open(url, timeout=1.5) as response:
                 if response.status == 200:
-                    sink.write(f"[up] Server ready at {url}\n")
-                    sink.flush()
+                    _write_log_line(sink, "up", f"Server ready at {url}")
                     return True
         except (OSError, urllib.error.URLError):
             time.sleep(0.2)
-    sink.write(f"[up] Timed out waiting for server health endpoint: {url}\n")
-    sink.flush()
+    _write_log_line(sink, "up", f"Timed out waiting for server health endpoint: {url}")
     return False
 
 
@@ -189,8 +192,7 @@ def _terminate_process(process: subprocess.Popen[str], *, timeout_seconds: float
 def terminate_all(processes: list[ManagedProcess], *, timeout_seconds: float, sink: TextIO) -> None:
     for managed in processes:
         if managed.process.poll() is None:
-            sink.write(f"[up] Stopping {managed.spec.name}...\n")
-            sink.flush()
+            _write_log_line(sink, "up", f"Stopping {managed.spec.name}...")
     for managed in processes:
         _terminate_process(managed.process, timeout_seconds=timeout_seconds)
 
@@ -210,17 +212,16 @@ def run_managed_processes(
 
     try:
         for spec in specs:
-            sink.write(f"[up] Starting {spec.name}: {' '.join(spec.command)}\n")
-            sink.flush()
+            _write_log_line(sink, "up", f"Starting {spec.name}: {' '.join(spec.command)}")
             managed = spawn_process(spec, sink=sink)
             processes.append(managed)
             time.sleep(0.15)
             if managed.process.poll() is not None:
-                sink.write(
-                    f"[up] {spec.name} exited during startup "
-                    f"with code {managed.process.returncode}\n"
+                _write_log_line(
+                    sink,
+                    "up",
+                    f"{spec.name} exited during startup with code {managed.process.returncode}",
                 )
-                sink.flush()
                 return managed.process.returncode or 1
 
         if ready_probe is not None and not ready_probe():
@@ -231,11 +232,12 @@ def run_managed_processes(
             exited = [managed for managed in processes if managed.process.poll() is not None]
             if exited:
                 first = exited[0]
-                sink.write(
-                    f"[up] {first.spec.name} exited with code {first.process.returncode}; "
-                    "stopping remaining services.\n"
+                _write_log_line(
+                    sink,
+                    "up",
+                    f"{first.spec.name} exited with code {first.process.returncode}; "
+                    "stopping remaining services.",
                 )
-                sink.flush()
                 terminate_all(processes, timeout_seconds=shutdown_timeout, sink=sink)
                 return first.process.returncode or 0
             time.sleep(0.2)
@@ -264,6 +266,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Seconds to wait for the server health endpoint.",
     )
     parser.add_argument(
+        "--no-health-check",
+        action="store_true",
+        help="Skip startup health checks and keep services running in background.",
+    )
+    parser.add_argument(
         "--skip-checks",
         action="store_true",
         help="Skip environment validation before starting child services.",
@@ -284,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def handle_signal(signum, _frame) -> None:
         signal_name = signal.Signals(signum).name
-        print(f"[up] Received {signal_name}, shutting down...")
+        _write_log_line(sys.stdout, "up", f"Received {signal_name}, shutting down...")
         stop_event.set()
 
     previous_sigint = signal.signal(signal.SIGINT, handle_signal)
@@ -297,21 +304,31 @@ def main(argv: list[str] | None = None) -> int:
             worker_poll_interval=args.worker_poll_interval,
             startup_admin_token=startup_admin_token,
         )
-        print("[up] Sediment platform launcher")
-        print(f"[up] KB path:  {configured_kb_path()}")
-        print(f"[up] Port:     {configured_port()}")
-        print(f"[up] Portal:   http://127.0.0.1:{configured_port()}/portal")
-        print(f"[up] Admin:    http://127.0.0.1:{configured_port()}/admin")
-        print(f"[up] Health:   http://127.0.0.1:{configured_port()}/healthz")
-        print(f"[up] Admin token: {startup_admin_token}")
+        _write_log_line(sys.stdout, "up", "Sediment platform launcher")
+        _write_log_line(sys.stdout, "up", f"KB path:  {configured_kb_path()}")
+        _write_log_line(sys.stdout, "up", f"Port:     {configured_port()}")
+        _write_log_line(sys.stdout, "up", f"Portal:   http://127.0.0.1:{configured_port()}/portal")
+        _write_log_line(sys.stdout, "up", f"Admin:    http://127.0.0.1:{configured_port()}/admin")
+        _write_log_line(sys.stdout, "up", f"Health:   http://127.0.0.1:{configured_port()}/healthz")
+        _write_log_line(sys.stdout, "up", f"Admin token: {startup_admin_token}")
+        if args.no_health_check:
+            _write_log_line(
+                sys.stdout,
+                "up",
+                "Startup health check is disabled (--no-health-check).",
+            )
         return run_managed_processes(
             specs,
             sink=sys.stdout,
             startup_timeout=args.startup_timeout,
             stop_event=stop_event,
-            ready_probe=lambda: wait_for_server_ready(
-                timeout_seconds=args.startup_timeout,
-                sink=sys.stdout,
+            ready_probe=(
+                None
+                if args.no_health_check
+                else lambda: wait_for_server_ready(
+                    timeout_seconds=args.startup_timeout,
+                    sink=sys.stdout,
+                )
             ),
         )
     finally:

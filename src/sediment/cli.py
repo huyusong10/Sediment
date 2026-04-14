@@ -2133,6 +2133,55 @@ def _stop_instance_daemon_for_entry(
 
 
 def instance_unlock_command(args) -> int:
+    if bool(getattr(args, "all_deleted", False)):
+        search_root = Path(str(getattr(args, "search_root", ".") or ".")).expanduser().resolve()
+        registered_configs = {
+            str(Path(item["config_path"]).expanduser().resolve())
+            for item in list_registered_instances()
+        }
+        candidates: list[dict[str, Any]] = []
+        for config_path in search_root.rglob(CONFIG_RELATIVE_PATH):
+            resolved_config = config_path.expanduser().resolve()
+            if str(resolved_config) in registered_configs:
+                continue
+            instance_root_path = resolved_config.parent.parent.parent
+            candidates.append(
+                {
+                    "instance_name": instance_root_path.name,
+                    "instance_root": str(instance_root_path),
+                    "config_path": str(resolved_config),
+                }
+            )
+        results: list[dict[str, Any]] = []
+        for entry in candidates:
+            unlocked = _stop_instance_daemon_for_entry(
+                entry,
+                timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+                force_kill=bool(getattr(args, "force_kill", False)),
+            )
+            results.append(
+                {
+                    "instance_name": entry["instance_name"],
+                    "config_path": entry["config_path"],
+                    "unlocked": unlocked,
+                }
+            )
+        payload = {
+            "search_root": str(search_root),
+            "count": len(results),
+            "results": results,
+        }
+        if getattr(args, "json", False):
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(f"Scanned: {search_root}")
+            if not results:
+                print("No unregistered instances were found.")
+            for item in results:
+                marker = "OK" if item["unlocked"] else "FAIL"
+                print(f"- [{marker}] {item['instance_name']} ({item['config_path']})")
+        return 0 if all(item["unlocked"] for item in results) else 1
+
     entry: dict[str, Any] | None = None
     if getattr(args, "path", None):
         raw = Path(str(args.path)).expanduser().resolve()

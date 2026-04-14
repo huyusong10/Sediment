@@ -323,6 +323,16 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         help="Instance root directory or config/sediment/config.yaml path (works even if unregistered).",
     )
     instance_unlock_parser.add_argument(
+        "--all-deleted",
+        action="store_true",
+        help="Unlock all unregistered instances found under --search-root.",
+    )
+    instance_unlock_parser.add_argument(
+        "--search-root",
+        default=".",
+        help="Root directory used by --all-deleted to discover leftover instance folders.",
+    )
+    instance_unlock_parser.add_argument(
         "--shutdown-timeout",
         type=float,
         default=8.0,

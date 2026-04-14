@@ -825,6 +825,14 @@ def _write_instance_scaffold(
     return payload
 
 
+def _looks_like_kb_root(path: Path) -> bool:
+    return (
+        (path / "index.root.md").exists()
+        and (path / "entries").is_dir()
+        and (path / "indexes").is_dir()
+    )
+
+
 def is_pid_running(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -1838,7 +1846,15 @@ def doctor_command(args) -> int:
 
 def init_command(args) -> int:
     enabled = progress_enabled(args)
-    target_root = Path.cwd().resolve()
+    cwd = Path.cwd().resolve()
+    target_root = cwd
+    if cwd.name.lower() in {"knowledge-base", "knowledge_base"} and _looks_like_kb_root(cwd):
+        target_root = cwd.parent
+        cli_progress(
+            "Detected that the current directory is an existing knowledge-base root; "
+            f"initializing the instance at parent directory {target_root} instead.",
+            enabled=enabled,
+        )
     config_target = target_root / CONFIG_RELATIVE_PATH
     cli_progress(f"Initializing Sediment instance in {target_root}.", enabled=enabled)
 

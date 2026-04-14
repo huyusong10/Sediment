@@ -21,6 +21,8 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert 'data-testid="portal-submit-text-button"' in page.text
     assert '/portal/graph-view' in page.text
     assert 'data-testid="portal-message"' in page.text
+    assert 'id="search-clear-button"' in page.text
+    assert 'id="upload-selection"' in page.text
 
     home = client.get("/api/portal/home").json()
     assert home["counts"]["formal_entries"] >= 2
@@ -73,6 +75,7 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert admin_page.status_code == 200
     assert 'data-testid="admin-message"' in admin_page.text
     assert 'data-testid="admin-stats"' in admin_page.text
+    assert 'id="admin-refresh-status"' in admin_page.text
 
     kb_page = client.get("/admin/kb", headers={"accept-language": "en-US"})
     assert kb_page.status_code == 200

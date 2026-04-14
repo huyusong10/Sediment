@@ -30,18 +30,25 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
+
+from harness_contract import load_benchmark_paths
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-BENCHMARKS_DIR = PROJECT_ROOT / 'benchmarks'
+PATHS = load_benchmark_paths()
+PROJECT_ROOT = PATHS.project_root
+BENCHMARKS_DIR = PATHS.benchmarks_dir
 MATERIAL_DIR = BENCHMARKS_DIR / 'material'
-SKILLS_DIR = PROJECT_ROOT / 'src' / 'sediment' / 'skills'
+SKILLS_DIR = PATHS.skills_dir
 
 MCP_HOST = '127.0.0.1'
 FULL_BUILD_INGEST_BATCHES = 3
+CODEX_FULL_BUILD_INGEST_BATCHES = 6
+INGEST_INITIAL_WRITE_DEADLINE_SECONDS = 240
+INGEST_WATCHDOG_POLL_SECONDS = 5
 
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
@@ -70,6 +77,50 @@ def load_prompt_template(path: Path, **format_kwargs) -> str:
 def configured_llm_cli() -> str:
     """Return the CLI contract used by both runtime and benchmark workflows."""
     return os.environ.get("SEDIMENT_CLI", "claude").strip()
+
+
+def normalized_agent_backend(cli_value: str | None = None) -> str:
+    normalized = (cli_value or configured_llm_cli()).strip() or "claude"
+    return {
+        "claude": "claude-code",
+        "claude-code": "claude-code",
+        "codex": "codex",
+        "opencode": "opencode",
+    }.get(normalized, "claude-code")
+
+
+def build_benchmark_agent_settings(cli_value: str) -> dict[str, Any]:
+    normalized = cli_value.strip() or "claude"
+    backend = normalized_agent_backend(normalized)
+    extra_args: list[str] = []
+    if backend == "codex":
+        extra_args.extend(["--full-auto", "--ephemeral"])
+    return {
+        "agent": {
+            "backend": backend,
+            "command": normalized,
+            "model": None,
+            "profile": None,
+            "reasoning_effort": "medium" if backend == "codex" else None,
+            "sandbox": "workspace-write",
+            "permission_mode": "auto" if backend == "claude-code" else None,
+            "variant": None,
+            "agent_name": None,
+            "dangerously_skip_permissions": False,
+            "extra_args": extra_args,
+        }
+    }
+
+
+def full_build_ingest_batches(cli_value: str | None = None) -> int:
+    backend = normalized_agent_backend(cli_value)
+    if backend == "codex":
+        return CODEX_FULL_BUILD_INGEST_BATCHES
+    return FULL_BUILD_INGEST_BATCHES
+
+
+def prompt_uses_inlined_materials(cli_value: str | None = None) -> bool:
+    return normalized_agent_backend(cli_value) == "claude-code"
 
 
 def chunk_list(lst: list, n: int) -> list[list]:
@@ -402,12 +453,19 @@ def _extract_json_docs(file_path: Path) -> str:
 # Ingest Prompt Builder
 # ---------------------------------------------------------------------------
 
-def build_ingest_prompt(materials: list[Path], isolated_dir: Path) -> str:
-    """Build the ingest prompt for Claude."""
+def build_ingest_prompt(
+    materials: list[Path],
+    isolated_dir: Path,
+    *,
+    cli_value: str | None = None,
+) -> str:
+    """Build the ingest prompt for the configured benchmark agent."""
     kb_dir = isolated_dir / 'knowledge-base'
     entry_names = sorted(p.stem for p in (kb_dir / 'entries').glob('*.md'))
     placeholder_names = sorted(p.stem for p in (kb_dir / 'placeholders').glob('*.md'))
     has_existing_kb = bool(entry_names or placeholder_names)
+    formal_entry_target = max(5, min(12, len(materials) * 2))
+    inline_materials = prompt_uses_inlined_materials(cli_value)
 
     parts = [
         load_prompt_template(SKILLS_DIR / 'ingest' / 'SKILL.md'),
@@ -423,6 +481,24 @@ def build_ingest_prompt(materials: list[Path], isolated_dir: Path) -> str:
   as a first-class domain concept.
 - Preserve exact source term spellings for first-class concepts. Do not invent near-synonym titles.
 - Benchmark priority: produce a KB that answers direct `什么是X` queries from canonical bare-term entries.
+        """.strip(),
+        f"""
+## Execution Contract
+
+- This batch must produce real KB files, not just analysis. The run is considered failed if no formal entries are written.
+- Start writing into `$SEDIMENT_KB_PATH` within your first work cycle. Do not spend the whole run on repo exploration.
+- Create at least {formal_entry_target} formal entries from the strongest repeated concepts in this batch before doing any broad cleanup.
+- Prefer direct shell writes or file edits under `$SEDIMENT_KB_PATH/entries` and `$SEDIMENT_KB_PATH/placeholders`.
+- Limit extra code inspection to the minimum needed for validation and KB format. Do not do repo-wide searches outside the active batch unless validation forces it.
+- Before finishing, validate several newly written files and run one final KB health check.
+
+Recommended validation commands:
+
+```bash
+mkdir -p "$SEDIMENT_KB_PATH/entries" "$SEDIMENT_KB_PATH/placeholders"
+PYTHONPATH=src python -m sediment.skills.explore.scripts.kb_query validate-entry "$SEDIMENT_KB_PATH/entries/<entry>.md"
+PYTHONPATH=src python -m sediment kb health --json
+```
         """.strip(),
     ]
 
@@ -452,11 +528,31 @@ def build_ingest_prompt(materials: list[Path], isolated_dir: Path) -> str:
             """.strip()
         )
 
-    for f in materials:
-        content = extract_material_text(f)
-        if len(content) > 12000:
-            content = content[:6000] + "\n...[中间部分省略]...\n" + content[-6000:]
-        parts.append(f"\n{'='*60}\n文件: {f.relative_to(MATERIAL_DIR)}\n{'='*60}\n{content}\n")
+    if inline_materials:
+        for f in materials:
+            content = extract_material_text(f)
+            if len(content) > 12000:
+                content = content[:6000] + "\n...[中间部分省略]...\n" + content[-6000:]
+            parts.append(f"\n{'='*60}\n文件: {f.relative_to(MATERIAL_DIR)}\n{'='*60}\n{content}\n")
+    else:
+        material_listing = []
+        for f in materials:
+            relative_path = Path("benchmarks") / "material" / f.relative_to(MATERIAL_DIR)
+            size_kb = max(1, round(f.stat().st_size / 1024))
+            material_listing.append(f"- `{relative_path}` ({size_kb}KB)")
+        parts.append(
+            "\n".join(
+                [
+                    "## Active Batch Files",
+                    "",
+                    "Read only these files from disk for this ingest batch:",
+                    *material_listing,
+                    "",
+                    "The file contents already exist in the workspace. Open the files you need directly instead of",
+                    "expanding the entire repository or restating long source passages in your reply.",
+                ]
+            )
+        )
 
     return '\n'.join(parts)
 
@@ -538,6 +634,31 @@ async def _stream_subprocess(proc: asyncio.subprocess.Process, label: str):
         await asyncio.gather(*tasks)
 
 
+def _kb_markdown_file_count(kb_dir: Path) -> int:
+    return sum(
+        1
+        for path in kb_dir.rglob('*.md')
+        if path.name != '.gitkeep'
+    )
+
+
+async def _watch_for_initial_kb_activity(
+    *,
+    wait_task: asyncio.Task[int],
+    kb_dir: Path,
+    timeout_seconds: int,
+) -> bool:
+    started = time.monotonic()
+    while True:
+        if _kb_markdown_file_count(kb_dir) > 0:
+            return True
+        if wait_task.done():
+            return _kb_markdown_file_count(kb_dir) > 0
+        if time.monotonic() - started >= timeout_seconds:
+            return False
+        await asyncio.sleep(INGEST_WATCHDOG_POLL_SECONDS)
+
+
 async def _spawn_agent_process(
     *,
     prompt: str,
@@ -546,33 +667,29 @@ async def _spawn_agent_process(
     max_budget_usd: str,
 ) -> asyncio.subprocess.Process:
     cli_value = configured_llm_cli()
-    command, stdin_data = build_cli_command(
-        cli_value,
+    settings = build_benchmark_agent_settings(cli_value)
+    prompt_file = cwd / ".sediment-benchmark-prompt.txt"
+    prompt_file.write_text(prompt, encoding="utf-8")
+    invocation = build_cli_command(
+        settings,
         prompt,
-        extra_args=[
-            "--permission-mode",
-            "auto",
-            "--allowed-tools",
-            "Write",
-            "Edit",
-            "Bash",
-            "Read",
-            "Glob",
-            "--max-budget-usd",
-            max_budget_usd,
-            "--no-session-persistence",
-        ],
+        prompt_file=prompt_file,
+        cwd=cwd,
     )
     proc = await asyncio.create_subprocess_exec(
-        *command,
+        *invocation.command,
         cwd=str(cwd),
         env=env,
-        stdin=asyncio.subprocess.PIPE if stdin_data is not None else asyncio.subprocess.DEVNULL,
+        stdin=(
+            asyncio.subprocess.PIPE
+            if invocation.stdin_data is not None
+            else asyncio.subprocess.DEVNULL
+        ),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    if stdin_data is not None and proc.stdin is not None:
-        proc.stdin.write(stdin_data.encode("utf-8"))
+    if invocation.stdin_data is not None and proc.stdin is not None:
+        proc.stdin.write(invocation.stdin_data.encode("utf-8"))
         await proc.stdin.drain()
         proc.stdin.close()
     return proc
@@ -580,13 +697,18 @@ async def _spawn_agent_process(
 
 async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
     """Run ingest through the shared Sediment CLI contract."""
-    kb_entries = isolated_dir / 'knowledge-base' / 'entries'
+    kb_root = isolated_dir / 'knowledge-base'
+    kb_entries = kb_root / 'entries'
     kb_entries.mkdir(parents=True, exist_ok=True)
 
     MAX_RETRIES = 2
 
     for attempt in range(1, MAX_RETRIES + 1):
-        prompt = build_ingest_prompt(materials, isolated_dir)
+        prompt = build_ingest_prompt(
+            materials,
+            isolated_dir,
+            cli_value=configured_llm_cli(),
+        )
 
         env = os.environ.copy()
         env['SEDIMENT_KB_PATH'] = str(isolated_dir / 'knowledge-base')
@@ -603,22 +725,46 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
                 max_budget_usd='15',
             )
 
-            await _stream_subprocess(proc, 'ingest')
+            wait_task = asyncio.create_task(proc.wait())
+            stream_task = asyncio.create_task(_stream_subprocess(proc, 'ingest'))
+            activity_seen = await _watch_for_initial_kb_activity(
+                wait_task=wait_task,
+                kb_dir=kb_root,
+                timeout_seconds=INGEST_INITIAL_WRITE_DEADLINE_SECONDS,
+            )
+            stalled_before_write = False
+            if not activity_seen and not wait_task.done():
+                stalled_before_write = True
+                log(
+                    "  Ingest produced no KB files after "
+                    f"{INGEST_INITIAL_WRITE_DEADLINE_SECONDS}s, killing process..."
+                )
+                proc.kill()
             try:
-                await asyncio.wait_for(proc.wait(), timeout=3600)
+                await asyncio.wait_for(wait_task, timeout=3600)
             except asyncio.TimeoutError:
                 log(f"  Ingest timed out after 60 minutes, killing process...")
                 proc.kill()
-                await proc.wait()
+                await wait_task
+                await stream_task
                 if attempt < MAX_RETRIES:
                     log("Retrying in 5 seconds...")
                     await asyncio.sleep(5)
                     continue
                 return False
+            await stream_task
 
             elapsed = time.time() - start
             entry_count = len(list(kb_entries.glob('*.md')))
             log(f"  Ingest complete in {elapsed:.1f}s ({elapsed/60:.1f}min). Created {entry_count} entries.")
+
+            if stalled_before_write and entry_count == 0:
+                log("Warning: ingest stalled before writing any KB artifacts")
+                if attempt < MAX_RETRIES:
+                    log("Retrying in 5 seconds...")
+                    await asyncio.sleep(5)
+                    continue
+                return False
 
             if proc.returncode != 0:
                 log(f"Warning: ingest agent exited with code {proc.returncode}")
@@ -750,8 +896,15 @@ class MCPServer:
         env['SEDIMENT_PORT'] = str(self.port)
         env['SEDIMENT_HOST'] = MCP_HOST
         env['SEDIMENT_RUNTIME_ALLOW_MATERIAL_FALLBACK'] = '0'
+        env['SEDIMENT_EXPLORE_FAST_ONLY'] = '1'
         # Ensure Python can find sediment module from the isolated directory
-        env['PYTHONPATH'] = str(self.isolated_dir)
+        source_root = self.isolated_dir / 'src'
+        existing_pythonpath = env.get('PYTHONPATH', '').strip()
+        env['PYTHONPATH'] = (
+            f"{source_root}{os.pathsep}{existing_pythonpath}"
+            if existing_pythonpath
+            else str(source_root)
+        )
 
         venv_python = self.isolated_dir / '.venv' / 'bin' / 'python'
         if venv_python.exists():
@@ -759,6 +912,11 @@ class MCPServer:
                 str(venv_python), '-m', 'sediment.server',
             ]
             log(f"  Using venv python: {venv_python}")
+        elif Path(sys.executable).exists():
+            cmd = [
+                sys.executable, '-m', 'sediment.server',
+            ]
+            log(f"  Using current python: {sys.executable}")
         else:
             # Use 'uv run' directly with the uv binary
             cmd = [
@@ -926,7 +1084,8 @@ class IsolatedBuilder:
     async def build_full(self):
         """Full build: ingest all files in a few large chunks, tidy once at end."""
         materials = get_material_files()
-        batches = [batch for batch in chunk_list(materials, FULL_BUILD_INGEST_BATCHES) if batch]
+        ingest_batch_count = full_build_ingest_batches()
+        batches = [batch for batch in chunk_list(materials, ingest_batch_count) if batch]
         total_size = sum(f.stat().st_size for f in materials) / 1024  # KB
 
         log(f"\n{'─'*60}")

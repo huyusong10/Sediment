@@ -26,6 +26,8 @@ from sediment.settings import (
     source_root,
 )
 
+_LOCAL_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
 
 @dataclass
 class ProcessSpec:
@@ -161,7 +163,7 @@ def wait_for_server_ready(*, timeout_seconds: float, sink: TextIO) -> bool:
     deadline = time.time() + max(timeout_seconds, 0.2)
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(url, timeout=1.5) as response:
+            with _LOCAL_HTTP_OPENER.open(url, timeout=1.5) as response:
                 if response.status == 200:
                     sink.write(f"[up] Server ready at {url}\n")
                     sink.flush()

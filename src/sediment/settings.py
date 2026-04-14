@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import sys
 from pathlib import Path
 from typing import Any, Sequence
@@ -79,8 +80,16 @@ DEFAULT_CONFIG = {
 
 _ACTIVE_CONFIG_PATH: Path | None = None
 _SETTINGS_CACHE: dict[str, Any] | None = None
-_SETTINGS_CACHE_KEY: tuple[str, float | None, str | None] | None = None
+_SETTINGS_CACHE_KEY: tuple[str, float | None, str | None, tuple[str | None, ...]] | None = None
 CONFIG_RELATIVE_PATH = Path("config") / "sediment" / "config.yaml"
+ENV_OVERRIDE_KEYS = (
+    "SEDIMENT_KB_PATH",
+    "SEDIMENT_WORKSPACE_ROOT",
+    "SEDIMENT_HOST",
+    "SEDIMENT_PORT",
+    "SEDIMENT_SSE_PATH",
+    "SEDIMENT_RUN_JOBS_IN_PROCESS",
+)
 
 
 def package_root() -> Path:
@@ -133,6 +142,7 @@ def load_settings_for_path(
         str(resolved_config_path),
         resolved_config_path.stat().st_mtime if resolved_config_path.exists() else None,
         _argv_run_jobs_override(argv),
+        _env_override_signature(),
     )
     if _SETTINGS_CACHE is not None and _SETTINGS_CACHE_KEY == cache_key:
         return copy.deepcopy(_SETTINGS_CACHE)
@@ -146,6 +156,8 @@ def load_settings_for_path(
             raise RuntimeError(f"Sediment config must be a mapping: {resolved_config_path}")
         file_payload = loaded
         _deep_merge(merged, loaded)
+
+    _apply_environment_overrides(merged)
 
     instance_root = instance_root_from_config(resolved_config_path)
     workspace_root = _resolve_path(
@@ -401,3 +413,22 @@ def _deep_merge(target: dict[str, Any], source: dict[str, Any]) -> None:
             _deep_merge(target[key], value)
             continue
         target[key] = copy.deepcopy(value)
+
+
+def _env_override_signature() -> tuple[str | None, ...]:
+    return tuple(os.environ.get(key) for key in ENV_OVERRIDE_KEYS)
+
+
+def _apply_environment_overrides(target: dict[str, Any]) -> None:
+    if kb_path := os.environ.get("SEDIMENT_KB_PATH", "").strip():
+        target["paths"]["knowledge_base"] = kb_path
+    if workspace_root := os.environ.get("SEDIMENT_WORKSPACE_ROOT", "").strip():
+        target["paths"]["workspace_root"] = workspace_root
+    if host := os.environ.get("SEDIMENT_HOST", "").strip():
+        target["server"]["host"] = host
+    if port := os.environ.get("SEDIMENT_PORT", "").strip():
+        target["server"]["port"] = port
+    if sse_path := os.environ.get("SEDIMENT_SSE_PATH", "").strip():
+        target["server"]["sse_path"] = sse_path
+    if run_jobs := os.environ.get("SEDIMENT_RUN_JOBS_IN_PROCESS", "").strip():
+        target["server"]["run_jobs_in_process"] = run_jobs

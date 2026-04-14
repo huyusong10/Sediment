@@ -2084,7 +2084,12 @@ def instance_show_command(args) -> int:
     return 0
 
 
-def _stop_instance_daemon_for_entry(entry: dict[str, Any], *, timeout_seconds: float) -> bool:
+def _stop_instance_daemon_for_entry(
+    entry: dict[str, Any],
+    *,
+    timeout_seconds: float,
+    force_kill: bool = False,
+) -> bool:
     config_path = Path(str(entry["config_path"])).expanduser().resolve()
     if not config_path.exists():
         return True
@@ -2094,6 +2099,9 @@ def _stop_instance_daemon_for_entry(entry: dict[str, Any], *, timeout_seconds: f
         return True
     status = _daemon_status_for_settings(settings)
     if not status.get("running"):
+        paths = _daemon_paths_for_settings(settings)
+        paths["pid"].unlink(missing_ok=True)
+        paths["meta"].unlink(missing_ok=True)
         return True
     pid_value = status.get("pid")
     if not isinstance(pid_value, int):
@@ -2110,7 +2118,47 @@ def _stop_instance_daemon_for_entry(entry: dict[str, Any], *, timeout_seconds: f
             paths["meta"].unlink(missing_ok=True)
             return True
         time.sleep(0.2)
+    if force_kill:
+        try:
+            os.kill(pid_value, signal.SIGKILL)
+            time.sleep(0.3)
+        except OSError:
+            pass
+        if not is_pid_running(pid_value):
+            paths = _daemon_paths_for_settings(settings)
+            paths["pid"].unlink(missing_ok=True)
+            paths["meta"].unlink(missing_ok=True)
+            return True
     return False
+
+
+def instance_unlock_command(args) -> int:
+    entry = get_registered_instance(args.name)
+    if entry is None:
+        print(f"Sediment instance '{args.name}' is not registered.", file=sys.stderr)
+        return 1
+    unlocked = _stop_instance_daemon_for_entry(
+        entry,
+        timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+        force_kill=bool(getattr(args, "force_kill", False)),
+    )
+    payload = {
+        "instance_name": args.name,
+        "unlocked": unlocked,
+        "force_kill": bool(getattr(args, "force_kill", False)),
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        if unlocked:
+            print(f"Instance '{args.name}' is unlocked (daemon stopped / stale locks cleared).")
+        else:
+            print(
+                f"Failed to unlock instance '{args.name}'. "
+                "Try again with --force-kill.",
+                file=sys.stderr,
+            )
+    return 0 if unlocked else 1
 
 
 def instance_remove_command(args) -> int:
@@ -2121,6 +2169,7 @@ def instance_remove_command(args) -> int:
     stop_ok = _stop_instance_daemon_for_entry(
         entry,
         timeout_seconds=float(getattr(args, "shutdown_timeout", 8.0)),
+        force_kill=True,
     )
     removed = unregister_instance(args.name)
     if removed is None:
@@ -2438,6 +2487,7 @@ def build_parser() -> argparse.ArgumentParser:
             "instance_list_command": instance_list_command,
             "instance_show_command": instance_show_command,
             "instance_remove_command": instance_remove_command,
+            "instance_unlock_command": instance_unlock_command,
             "status_command": status_command,
             "status_queue_command": status_queue_command,
             "status_health_command": status_health_command,

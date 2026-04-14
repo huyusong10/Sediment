@@ -313,6 +313,28 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
         needs_runtime_context=False,
     )
 
+    instance_unlock_parser = instance_subparsers.add_parser(
+        "unlock",
+        help="Stop daemon/clear stale locks so instance files can be removed safely.",
+    )
+    instance_unlock_parser.add_argument("name")
+    instance_unlock_parser.add_argument(
+        "--shutdown-timeout",
+        type=float,
+        default=8.0,
+        help="Seconds to wait for graceful daemon shutdown before returning.",
+    )
+    instance_unlock_parser.add_argument(
+        "--force-kill",
+        action="store_true",
+        help="Escalate to SIGKILL when graceful shutdown times out.",
+    )
+    instance_unlock_parser.add_argument("--json", action="store_true")
+    instance_unlock_parser.set_defaults(
+        func=handlers["instance_unlock_command"],
+        needs_runtime_context=False,
+    )
+
     top_status_parser = subparsers.add_parser(
         "status",
         help="Show daemon, queue, and KB health status.",

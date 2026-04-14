@@ -15,10 +15,14 @@ from pathlib import Path
 from typing import TextIO
 
 from sediment.llm_cli import resolve_executable
+from sediment.quartz_runtime import build_quartz_site, quartz_status
 from sediment.runtime import host as runtime_host
 from sediment.runtime import instance_root as runtime_instance_root
 from sediment.runtime import kb_path as runtime_kb_path
+from sediment.runtime import knowledge_name as runtime_knowledge_name
 from sediment.runtime import port as runtime_port
+from sediment.runtime import platform_paths as runtime_platform_paths
+from sediment.instances import user_state_root
 from sediment.settings import (
     current_config_path,
     load_settings,
@@ -197,6 +201,37 @@ def terminate_all(processes: list[ManagedProcess], *, timeout_seconds: float, si
         _terminate_process(managed.process, timeout_seconds=timeout_seconds)
 
 
+def _ensure_quartz_site(*, sink: TextIO, force_build: bool) -> bool:
+    site_dir = runtime_platform_paths()["state_dir"] / "quartz" / "site"
+    runtime_dir = user_state_root() / "quartz-runtime" / "quartz"
+    status = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
+    if not force_build:
+        if status["runtime_available"] and not status["site_available"]:
+            _write_log_line(
+                sink,
+                "up",
+                "Quartz runtime is ready but site is not built yet. "
+                "Run `sediment server start --build-quartz --no-health-check` to build it.",
+            )
+        return True
+    try:
+        settings = load_settings()
+        locale = str(settings.get("locale", "en"))
+        _write_log_line(sink, "up", "Building Quartz site before startup (--build-quartz)...")
+        build_quartz_site(
+            kb_path=configured_kb_path(),
+            runtime_dir=runtime_dir,
+            site_dir=site_dir,
+            knowledge_name=runtime_knowledge_name(),
+            locale=locale,
+        )
+        _write_log_line(sink, "up", f"Quartz site is ready: {site_dir}")
+        return True
+    except RuntimeError as exc:
+        _write_log_line(sink, "up", f"Quartz build failed: {exc}")
+        return False
+
+
 def run_managed_processes(
     specs: list[ProcessSpec],
     *,
@@ -271,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip startup health checks and keep services running in background.",
     )
     parser.add_argument(
+        "--build-quartz",
+        action="store_true",
+        help="Build Quartz site for this instance before launching services.",
+    )
+    parser.add_argument(
         "--skip-checks",
         action="store_true",
         help="Skip environment validation before starting child services.",
@@ -311,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
         _write_log_line(sys.stdout, "up", f"Admin:    http://127.0.0.1:{configured_port()}/admin")
         _write_log_line(sys.stdout, "up", f"Health:   http://127.0.0.1:{configured_port()}/healthz")
         _write_log_line(sys.stdout, "up", f"Admin token: {startup_admin_token}")
+        if not _ensure_quartz_site(sink=sys.stdout, force_build=args.build_quartz):
+            return 1
         if args.no_health_check:
             _write_log_line(
                 sys.stdout,

@@ -961,6 +961,7 @@ def stop_running_daemon(*, timeout_seconds: float, force_kill: bool) -> int:
 def start_daemon(args) -> int:
     enabled = progress_enabled(args)
     no_health_check = bool(getattr(args, "no_health_check", False))
+    build_quartz = bool(getattr(args, "build_quartz", False))
     cli_progress(
         f"Starting Sediment daemon for instance `{instance_name()}`.",
         enabled=enabled,
@@ -1003,6 +1004,8 @@ def start_daemon(args) -> int:
     ]
     if no_health_check:
         command.append("--no-health-check")
+    if build_quartz:
+        command.append("--build-quartz")
     if args.skip_checks:
         command.append("--skip-checks")
 
@@ -1118,6 +1121,8 @@ def server_run(args) -> int:
     ]
     if bool(getattr(args, "no_health_check", False)):
         argv.append("--no-health-check")
+    if bool(getattr(args, "build_quartz", False)):
+        argv.append("--build-quartz")
     if args.skip_checks:
         argv.append("--skip-checks")
     return launcher.main(argv)
@@ -2194,6 +2199,7 @@ def cli_help_command(args) -> int:
 
 def run_platform_daemon(args) -> int:
     no_health_check = bool(getattr(args, "no_health_check", False))
+    build_quartz = bool(getattr(args, "build_quartz", False))
     argv = [
         "--worker-poll-interval",
         str(args.worker_poll_interval),
@@ -2202,6 +2208,8 @@ def run_platform_daemon(args) -> int:
     ]
     if no_health_check:
         argv.append("--no-health-check")
+    if build_quartz:
+        argv.append("--build-quartz")
     if args.skip_checks:
         argv.append("--skip-checks")
     return launcher.main(argv)

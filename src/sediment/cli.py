@@ -82,6 +82,13 @@ from sediment.settings import (
     source_root,
 )
 
+_LOCAL_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _urlopen_local(url: str, *, timeout: float):
+    """Open local health endpoints without inheriting proxy settings."""
+    return _LOCAL_HTTP_OPENER.open(url, timeout=timeout)
+
 
 def scoped_command(command: str) -> str:
     local = discover_local_config_path()
@@ -498,7 +505,7 @@ def _daemon_status_for_settings(settings: dict[str, Any]) -> dict[str, Any]:
     health_url = _health_url_for_settings(settings)
     health: dict[str, Any] | None = None
     try:
-        with urllib.request.urlopen(health_url, timeout=1.0) as response:
+        with _urlopen_local(health_url, timeout=1.0) as response:
             health = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError):
         health = None
@@ -841,7 +848,7 @@ def daemon_status() -> dict[str, Any]:
         metadata["stale_pid"] = True
     health: dict[str, Any] | None = None
     try:
-        with urllib.request.urlopen(local_health_url(), timeout=1.2) as response:
+        with _urlopen_local(local_health_url(), timeout=1.2) as response:
             health = json.loads(response.read().decode("utf-8"))
     except (OSError, urllib.error.URLError, json.JSONDecodeError):
         health = None

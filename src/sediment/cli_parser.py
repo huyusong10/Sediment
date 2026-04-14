@@ -219,6 +219,12 @@ def build_cli_parser(handlers: Mapping[str, Any]) -> argparse.ArgumentParser:
     quartz_subparsers = quartz_parser.add_subparsers(dest="quartz_command", required=True)
 
     quartz_status_parser = quartz_subparsers.add_parser("status", help="Show Quartz runtime/site status.")
+    quartz_status_parser.add_argument(
+        "--build-if-missing",
+        action="store_true",
+        help="Automatically build the site when runtime is ready but site is missing.",
+    )
+    quartz_status_parser.add_argument("--timeout-seconds", type=int, default=240)
     quartz_status_parser.add_argument("--json", action="store_true")
     quartz_status_parser.set_defaults(
         func=handlers["quartz_status_command"],

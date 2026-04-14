@@ -2488,6 +2488,25 @@ def _quartz_paths() -> tuple[Path, Path]:
 def quartz_status_command(args) -> int:
     runtime_dir, site_dir = _quartz_paths()
     payload = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
+    if (
+        bool(getattr(args, "build_if_missing", False))
+        and payload["runtime_available"]
+        and not payload["site_available"]
+    ):
+        try:
+            build_quartz_site(
+                kb_path=kb_path(),
+                runtime_dir=runtime_dir,
+                site_dir=site_dir,
+                knowledge_name=knowledge_name(),
+                locale=str(load_settings().get("locale", "en")),
+                timeout_seconds=max(int(getattr(args, "timeout_seconds", 240)), 30),
+            )
+            payload = quartz_status(runtime_dir=runtime_dir, site_dir=site_dir)
+            payload["built_via_status"] = True
+        except RuntimeError as exc:
+            payload["built_via_status"] = False
+            payload["build_error"] = str(exc)
     if getattr(args, "json", False):
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -2507,6 +2526,10 @@ def quartz_status_command(args) -> int:
         print("")
         print("Tip: build the instance graph site with:")
         print(f"- {scoped_command('quartz build')}")
+        print(f"- {scoped_command('quartz status --build-if-missing')}")
+    if payload.get("build_error"):
+        print(f"Build error: {payload['build_error']}", file=sys.stderr)
+        return 1
     return 0
 
 

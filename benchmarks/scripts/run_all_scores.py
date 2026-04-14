@@ -42,19 +42,27 @@ from isolated_build import (
     get_material_files,
     chunk_list,
 )
+from harness_contract import (
+    artifact_layout_payload,
+    copy_sample_kb,
+    ensure_results_layout,
+    load_benchmark_paths,
+)
 
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = SCRIPTS_DIR.parent.parent
-TESTCASE_DIR = PROJECT_ROOT / 'testcase'
-JUDGE_DIR = TESTCASE_DIR / 'judge'
-RESULTS_DIR = TESTCASE_DIR / 'results'
-BUILDS_DIR = RESULTS_DIR / 'builds'
-REPORTS_DIR = RESULTS_DIR / 'reports'
-IMPROVEMENTS_DIR = RESULTS_DIR / 'improvements'
-HISTORY_DIR = RESULTS_DIR / 'history'
+PATHS = load_benchmark_paths()
+PROJECT_ROOT = PATHS.project_root
+TESTCASE_DIR = PATHS.testcase_dir
+JUDGE_DIR = PATHS.judge_dir
+RESULTS_DIR = PATHS.results_dir
+BUILDS_DIR = PATHS.builds_dir
+REPORTS_DIR = PATHS.reports_dir
+IMPROVEMENTS_DIR = PATHS.improvements_dir
+HISTORY_DIR = PATHS.history_dir
+SAMPLE_KB_BUILDS_DIR = PATHS.sample_kb_builds_dir
 
 MCP_PORT_BASE = 18800
 PASS_THRESHOLD = 90
@@ -145,10 +153,10 @@ def cleanup_isolated_dirs(results: dict[str, dict]) -> list[str]:
 def run_preflight_checks() -> dict:
     """Validate that the test harness is using project-owned sources and clean output layout."""
     skill_files = {
-        'ingest': PROJECT_ROOT / 'skills' / 'ingest' / 'SKILL.md',
-        'tidy': PROJECT_ROOT / 'skills' / 'tidy' / 'SKILL.md',
-        'explore': PROJECT_ROOT / 'skills' / 'explore' / 'SKILL.md',
-        'health': PROJECT_ROOT / 'skills' / 'health' / 'SKILL.md',
+        'ingest': PATHS.skills_dir / 'ingest' / 'SKILL.md',
+        'tidy': PATHS.skills_dir / 'tidy' / 'SKILL.md',
+        'explore': PATHS.skills_dir / 'explore' / 'SKILL.md',
+        'health': PATHS.skills_dir / 'health' / 'SKILL.md',
     }
     missing = [name for name, path in skill_files.items() if not path.exists()]
     if missing:
@@ -180,12 +188,7 @@ def run_preflight_checks() -> dict:
         'uses_temp_kb_only': True,
         'pass_threshold': PASS_THRESHOLD,
         'shared_llm_cli': os.environ.get('SEDIMENT_CLI', 'claude'),
-        'results_layout': {
-            'builds_dir': str(BUILDS_DIR),
-            'reports_dir': str(REPORTS_DIR),
-            'improvements_dir': str(IMPROVEMENTS_DIR),
-            'history_dir': str(HISTORY_DIR),
-        },
+        'results_layout': artifact_layout_payload(PATHS),
         'stray_prompt_dir_exists': prompt_dir.exists(),
         'forbidden_results_items': forbidden_results_items,
         'root_artifacts_present': [
@@ -193,6 +196,27 @@ def run_preflight_checks() -> dict:
             if (PROJECT_ROOT / name).exists()
         ],
     }
+
+
+def copy_successful_samples(results: dict[str, dict]) -> dict[str, str]:
+    copied: dict[str, str] = {}
+    for build_type, result in results.items():
+        if build_type != 'full':
+            continue
+        if result.get('error'):
+            continue
+        kb_dir = result.get('kb_stats', {}).get('isolated_kb_dir')
+        if not kb_dir:
+            continue
+        destination = copy_sample_kb(
+            build_type=build_type,
+            kb_dir=Path(kb_dir),
+            source_isolated_dir=result.get('isolated_dir'),
+            destination_root=SAMPLE_KB_BUILDS_DIR,
+            diagnostics=result.get('kb_diagnostics'),
+        )
+        copied[build_type] = str(destination)
+    return copied
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +359,7 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
         placeholder_count = 0
         if builder.kb_dir and builder.kb_dir.exists():
             diagnostics = collect_kb_diagnostics(builder.kb_dir)
+            results['kb_diagnostics'] = diagnostics
             entry_count = diagnostics.get('entry_count', 0)
             placeholder_count = diagnostics.get('placeholder_count', 0)
             results['kb_stats'] = {
@@ -535,11 +560,7 @@ async def main():
     log(f"Mode: {'SKIP-BUILD (score only)' if args.skip_build else f'build={args.build_type}'}")
     log(f"Pass threshold: {PASS_THRESHOLD}/100")
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    BUILDS_DIR.mkdir(parents=True, exist_ok=True)
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    IMPROVEMENTS_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_results_layout(PATHS)
     preflight = run_preflight_checks()
     write_json(REPORTS_DIR / 'preflight.json', preflight)
     log(f"Preflight OK: skills={', '.join(preflight['skill_sources'].values())}")
@@ -616,6 +637,8 @@ async def main():
             'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'archived_previous_run': str(archived) if archived else None,
         }
+        copied_samples = copy_successful_samples(all_results)
+        scorecard['sample_kb_copies'] = copied_samples
 
         if avg_score >= PASS_THRESHOLD:
             cleaned_dirs = cleanup_isolated_dirs(all_results)
@@ -666,12 +689,8 @@ async def main():
             'preflight': preflight,
             'builds': all_results,
             'average_score': round(avg_score, 2),
-            'layout': {
-                'builds_dir': str(BUILDS_DIR),
-                'reports_dir': str(REPORTS_DIR),
-                'improvements_dir': str(IMPROVEMENTS_DIR),
-                'history_dir': str(HISTORY_DIR),
-            },
+            'layout': artifact_layout_payload(PATHS),
+            'sample_kb_copies': copied_samples,
             'pass_threshold': PASS_THRESHOLD,
             'archived_previous_run': str(archived) if archived else None,
         }

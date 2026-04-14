@@ -2,579 +2,22 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
-from urllib.parse import quote
 
-from sediment.package_data import read_asset_text
-
-
-@lru_cache(maxsize=1)
-def _logo_mark_svg() -> str:
-    return read_asset_text("logo-mark.svg").strip()
-
-
-@lru_cache(maxsize=1)
-def _logo_mark_data_uri() -> str:
-    return f"data:image/svg+xml;utf8,{quote(_logo_mark_svg())}"
-
-
-def _logo_inline(class_name: str = "brand-mark") -> str:
-    return _logo_mark_svg().replace("<svg ", f'<svg class="{class_name}" aria-hidden="true" ')
-
-
-def _normalize_locale(locale: str | None) -> str:
-    return "zh" if str(locale or "").strip().lower().startswith("zh") else "en"
-
-
-def _html_lang(locale: str) -> str:
-    return "zh-CN" if _normalize_locale(locale) == "zh" else "en"
-
-
-def _localized_path(path: str, locale: str) -> str:
-    separator = "&" if "?" in path else "?"
-    return f"{path}{separator}lang={_normalize_locale(locale)}"
-
-
-def _nav_link(label: str, href: str, *, primary: bool = False) -> str:
-    classes = "button primary" if primary else "button"
-    return f'<a class="{classes}" href="{href}">{label}</a>'
-
-
-def shared_shell(title: str, body: str, script: str, *, locale: str) -> str:
-    active_locale = _normalize_locale(locale)
-    toggle_label = "EN" if active_locale == "zh" else "中文"
-    return f"""<!DOCTYPE html>
-<html lang="{_html_lang(active_locale)}" data-locale="{active_locale}">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{title}</title>
-  <link rel="icon" type="image/svg+xml" href="{_logo_mark_data_uri()}" />
-  <meta name="theme-color" content="#030712" />
-  <style>
-    :root {{
-      --bg: #f8fafc;
-      --panel: rgba(255, 255, 255, 0.85);
-      --ink: #0f172a;
-      --muted: #64748b;
-      --line: rgba(59, 130, 246, 0.2);
-      --accent: #2563eb;
-      --accent-soft: rgba(59, 130, 246, 0.1);
-      --ok: #059669;
-      --warn: #d97706;
-      --danger: #dc2626;
-      --shadow: 0 8px 32px rgba(100, 116, 139, 0.15);
-      --btn-bg: rgba(241, 245, 249, 0.8);
-      --btn-hover: rgba(226, 232, 240, 1);
-      --btn-txt: #1e293b;
-      --card-bg: rgba(255, 255, 255, 0.6);
-      --input-bg: rgba(255, 255, 255, 0.8);
-      --grad-bg-1: rgba(96, 165, 250, 0.08);
-      --grad-bg-2: rgba(37, 99, 235, 0.04);
-      --hero-bg: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.8));
-    }}
-    html.dark {{
-      --bg: #030712;
-      --panel: rgba(17, 24, 39, 0.7);
-      --ink: #e2e8f0;
-      --muted: #9ca3af;
-      --line: rgba(59, 130, 246, 0.2);
-      --accent: #3b82f6;
-      --accent-soft: rgba(59, 130, 246, 0.15);
-      --ok: #10b981;
-      --warn: #f59e0b;
-      --danger: #ef4444;
-      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      --btn-bg: rgba(31, 41, 55, 0.6);
-      --btn-hover: rgba(55, 65, 81, 0.8);
-      --btn-txt: #e2e8f0;
-      --card-bg: rgba(31, 41, 55, 0.4);
-      --input-bg: rgba(15, 23, 42, 0.6);
-      --grad-bg-1: rgba(59, 130, 246, 0.1);
-      --grad-bg-2: rgba(147, 197, 253, 0.05);
-      --hero-bg: linear-gradient(135deg, rgba(31, 41, 55, 0.8), rgba(17, 24, 39, 0.95));
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at top left, var(--grad-bg-1), transparent 30%),
-        radial-gradient(circle at top right, var(--grad-bg-2), transparent 25%),
-        var(--bg);
-      min-height: 100vh;
-      transition: background 0.3s ease, color 0.3s ease;
-    }}
-    a {{ color: inherit; }}
-    .page {{
-      width: min(1280px, calc(100vw - 32px));
-      margin: 0 auto;
-      padding: 24px 0 40px;
-    }}
-    .hero {{
-      display: grid;
-      gap: 18px;
-      padding: 28px;
-      border: 1px solid var(--line);
-      border-radius: 28px;
-      background: var(--hero-bg);
-      box-shadow: var(--shadow);
-      overflow: hidden;
-      position: relative;
-    }}
-    .hero::after {{
-      content: "";
-      position: absolute;
-      inset: auto -40px -40px auto;
-      width: 220px;
-      height: 220px;
-      border-radius: 50%;
-      background: radial-gradient(circle, var(--accent-soft), transparent 70%);
-    }}
-    .hero h1 {{
-      margin: 0;
-      font-size: clamp(32px, 4vw, 56px);
-      line-height: 1.02;
-      max-width: 12ch;
-      background: linear-gradient(to right, #60a5fa, #2563eb);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }}
-    .hero p {{
-      margin: 0;
-      color: var(--muted);
-      max-width: 72ch;
-      font-size: 16px;
-      line-height: 1.6;
-    }}
-    .hero-top {{
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 18px;
-      flex-wrap: wrap;
-    }}
-    .brand {{
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      min-width: 0;
-    }}
-    .brand-mark {{
-      width: 62px;
-      height: 62px;
-      flex: none;
-      filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.15));
-    }}
-    .brand-copy {{
-      display: grid;
-      gap: 4px;
-    }}
-    .brand-copy span {{
-      color: var(--muted);
-      font-size: 12px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }}
-    .brand-copy strong {{
-      font-size: 18px;
-      line-height: 1.1;
-      color: var(--ink);
-    }}
-    .nav {{
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-    }}
-    .section-nav {{
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 18px;
-    }}
-    .chip, button, .button {{
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--btn-bg);
-      color: var(--btn-txt);
-      padding: 10px 16px;
-      font: inherit;
-      cursor: pointer;
-      text-decoration: none;
-      transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
-      backdrop-filter: blur(4px);
-    }}
-    button.primary, .button.primary {{
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: white;
-      border-color: transparent;
-      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
-    }}
-    .chip:hover, button:hover, .button:hover {{
-      transform: translateY(-1px);
-      background: var(--btn-hover);
-    }}
-    button.primary:hover, .button.primary:hover {{
-      background: linear-gradient(135deg, #3b82f6, #2563eb);
-      box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
-    }}
-    .grid {{
-      display: grid;
-      gap: 18px;
-      margin-top: 20px;
-    }}
-    .grid.cols-3 {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
-    .grid.cols-2 {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
-    .grid.cols-auto {{ grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }}
-    .panel {{
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      padding: 20px;
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(12px);
-    }}
-    .panel h2, .panel h3 {{
-      margin-top: 0;
-      margin-bottom: 10px;
-      color: var(--ink);
-    }}
-    .subtle {{
-      color: var(--muted);
-      font-size: 14px;
-      line-height: 1.55;
-    }}
-    .stats {{
-      display: grid;
-      gap: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    }}
-    .stat {{
-      padding: 14px 16px;
-      border-radius: 18px;
-      background: var(--card-bg);
-      border: 1px solid var(--line);
-    }}
-    .stat strong {{
-      display: block;
-      font-size: 28px;
-      margin-bottom: 4px;
-      color: var(--accent);
-    }}
-    .list {{
-      display: grid;
-      gap: 10px;
-    }}
-    .card {{
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 14px 16px;
-      background: var(--card-bg);
-      backdrop-filter: blur(8px);
-    }}
-    .card.interactive {{
-      cursor: pointer;
-      transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
-    }}
-    .card.interactive:hover {{
-      transform: translateY(-2px);
-      border-color: var(--accent);
-      background: var(--btn-hover);
-    }}
-    .row {{
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      flex-wrap: wrap;
-    }}
-    .row.spread {{ justify-content: space-between; }}
-    input, textarea, select {{
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      padding: 12px 14px;
-      font: inherit;
-      color: var(--ink);
-      background: var(--input-bg);
-      transition: border-color 150ms ease;
-    }}
-    input:focus, textarea:focus, select:focus {{
-      outline: none;
-      border-color: var(--accent);
-      background: var(--card-bg);
-    }}
-    textarea {{ min-height: 140px; resize: vertical; }}
-    label {{
-      display: grid;
-      gap: 8px;
-      font-size: 14px;
-      color: var(--muted);
-    }}
-    .markdown {{
-      white-space: normal;
-      line-height: 1.7;
-    }}
-    .markdown h1, .markdown h2, .markdown h3 {{
-      margin-top: 18px;
-      margin-bottom: 10px;
-      color: var(--ink);
-    }}
-    .markdown p {{
-      margin: 10px 0;
-    }}
-    .markdown ul {{
-      padding-left: 20px;
-      margin: 10px 0;
-    }}
-    .markdown code {{
-      padding: 2px 6px;
-      border-radius: 8px;
-      background: var(--accent-soft);
-      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
-      color: var(--accent);
-    }}
-    .graph {{
-      width: 100%;
-      height: 520px;
-      border-radius: 20px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-    }}
-    .legend {{
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-      font-size: 14px;
-      color: var(--muted);
-    }}
-    .legend span::before {{
-      content: "";
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      margin-right: 8px;
-      border-radius: 50%;
-      vertical-align: middle;
-      background: currentColor;
-    }}
-    .severity-bar {{
-      display: grid;
-      gap: 10px;
-    }}
-    .severity-item {{
-      display: grid;
-      gap: 6px;
-    }}
-    .bar {{
-      height: 10px;
-      border-radius: 999px;
-      overflow: hidden;
-      background: var(--accent-soft);
-    }}
-    .bar > span {{
-      display: block;
-      height: 100%;
-      border-radius: 999px;
-      background: linear-gradient(90deg, #3b82f6, #60a5fa);
-    }}
-    .tag {{
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border-radius: 999px;
-      padding: 4px 10px;
-      font-size: 12px;
-      background: var(--accent-soft);
-      color: var(--accent);
-    }}
-    .tag.ok {{ background: rgba(16, 185, 129, 0.15); color: var(--ok); }}
-    .tag.warn {{ background: rgba(245, 158, 11, 0.15); color: var(--warn); }}
-    .tag.danger {{ background: rgba(239, 68, 68, 0.15); color: var(--danger); }}
-    .notice {{
-      margin-top: 14px;
-      padding: 12px 14px;
-      border-radius: 16px;
-      border: 1px solid var(--line);
-      background: var(--card-bg);
-      color: var(--ink);
-      line-height: 1.5;
-    }}
-    button:disabled {{
-      cursor: wait;
-      opacity: 0.7;
-      transform: none;
-    }}
-    .split {{
-      display: grid;
-      gap: 18px;
-      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
-    }}
-    .stack {{
-      display: grid;
-      gap: 14px;
-    }}
-    .tabs-note {{
-      color: var(--muted);
-      font-size: 13px;
-      letter-spacing: 0.02em;
-    }}
-    .mono {{
-      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 13px;
-      line-height: 1.6;
-    }}
-    .empty {{
-      padding: 20px;
-      border-radius: 16px;
-      border: 1px dashed var(--line);
-      color: var(--muted);
-      text-align: center;
-    }}
-    .modal-backdrop {{
-      position: fixed;
-      inset: 0;
-      background: rgba(3, 7, 18, 0.6);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      z-index: 30;
-      backdrop-filter: blur(4px);
-    }}
-    .modal-backdrop[hidden] {{
-      display: none;
-    }}
-    .modal-card {{
-      width: min(980px, 100%);
-      max-height: min(88vh, 920px);
-      overflow: auto;
-      padding: 22px;
-      border-radius: 24px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
-    }}
-    .upload-grid {{
-      display: grid;
-      gap: 12px;
-    }}
-    .quartz-frame {{
-      width: 100%;
-      min-height: 78vh;
-      border: 1px solid var(--line);
-      border-radius: 24px;
-      background: var(--panel);
-    }}
-    @media (max-width: 960px) {{
-      .grid.cols-3,
-      .grid.cols-2,
-      .split {{
-        grid-template-columns: 1fr;
-      }}
-      .page {{
-        width: min(100vw - 20px, 1280px);
-      }}
-      .graph {{
-        height: 420px;
-      }}
-    }}
-  </style>
-</head>
-<body>
-  {body}
-  
-<script>
-    (function() {{
-      const savedTheme = localStorage.getItem('theme');
-      if (savedTheme === 'dark') document.documentElement.classList.add('dark');
-      else if (savedTheme === 'light') document.documentElement.classList.remove('dark');
-      else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {{
-        document.documentElement.classList.add('dark');
-      }}
-    }})();
-
-    document.addEventListener('DOMContentLoaded', () => {{
-      document.querySelectorAll('[data-shell-nav]').forEach((nav) => {{
-        const themeBtn = document.createElement('button');
-        themeBtn.className = 'chip';
-        themeBtn.type = 'button';
-        themeBtn.textContent = document.documentElement.classList.contains('dark') ? '☀ Light' : '◐ Dark';
-        themeBtn.addEventListener('click', () => {{
-          document.documentElement.classList.toggle('dark');
-          const isDark = document.documentElement.classList.contains('dark');
-          localStorage.setItem('theme', isDark ? 'dark' : 'light');
-          themeBtn.textContent = isDark ? '☀ Light' : '◐ Dark';
-        }});
-
-        const langBtn = document.createElement('button');
-        langBtn.className = 'chip';
-        langBtn.type = 'button';
-        langBtn.textContent = '{toggle_label}';
-        langBtn.addEventListener('click', () => {{
-          const currentUrl = new URL(window.location.href);
-          currentUrl.searchParams.set('lang', document.documentElement.dataset.locale === 'zh' ? 'en' : 'zh');
-          window.location.href = currentUrl.toString();
-        }});
-
-        nav.append(themeBtn, langBtn);
-      }});
-    }});
-
-    function escapeHtml(value) {{
-      return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-    }}
-
-    function renderMarkdown(text) {{
-      const lines = String(text || '').split('\\n');
-      let html = '';
-      let inList = false;
-      for (const line of lines) {{
-        if (line.startsWith('### ')) {{
-          if (inList) {{ html += '</ul>'; inList = false; }}
-          html += `<h3>${{escapeHtml(line.slice(4))}}</h3>`;
-        }} else if (line.startsWith('## ')) {{
-          if (inList) {{ html += '</ul>'; inList = false; }}
-          html += `<h2>${{escapeHtml(line.slice(3))}}</h2>`;
-        }} else if (line.startsWith('# ')) {{
-          if (inList) {{ html += '</ul>'; inList = false; }}
-          html += `<h1>${{escapeHtml(line.slice(2))}}</h1>`;
-        }} else if (line.startsWith('- ')) {{
-          if (!inList) {{ html += '<ul>'; inList = true; }}
-          html += `<li>${{escapeHtml(line.slice(2))}}</li>`;
-        }} else if (!line.trim()) {{
-          if (inList) {{ html += '</ul>'; inList = false; }}
-        }} else {{
-          if (inList) {{ html += '</ul>'; inList = false; }}
-          const withCode = escapeHtml(line).replace(/`([^`]+)`/g, '<code>$1</code>');
-          html += `<p>${{withCode}}</p>`;
-        }}
-      }}
-      if (inList) {{ html += '</ul>'; }}
-      return html || `<div class="empty">${{document.documentElement.dataset.locale === 'zh' ? '暂无内容' : 'No content'}}</div>`;
-    }}
-
-    async function fetchJson(url, options = {{}}) {{
-      const response = await fetch(url, options);
-      const data = await response.json();
-      if (!response.ok) {{
-        throw new Error(data.error || response.statusText);
-      }}
-      return data;
-    }}
-
-    {script}
-  </script>
-</body>
-</html>"""
+from sediment.web_ui_shell import (
+    localized_path as _localized_path,
+)
+from sediment.web_ui_shell import (
+    logo_inline as _logo_inline,
+)
+from sediment.web_ui_shell import (
+    nav_link as _nav_link,
+)
+from sediment.web_ui_shell import (
+    normalize_locale as _normalize_locale,
+)
+from sediment.web_ui_shell import (
+    shared_shell,
+)
 
 
 def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
@@ -611,6 +54,7 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
             else "Search concepts, rules, or lessons. Example: hot backup failover stream"
         ),
         "search_button": "搜索" if is_zh else "Search",
+        "search_clear": "清空" if is_zh else "Clear",
         "search_idle": "输入关键词后即可全文搜索。" if is_zh else "Enter keywords to start searching.",
         "updates": "最近更新" if is_zh else "Recent updates",
         "updates_empty": "暂无最近更新" if is_zh else "No recent updates yet.",
@@ -656,6 +100,11 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
             if is_zh
             else "Supports single files, folders, and zip archives. Sediment extracts text automatically."
         ),
+        "file_selection_idle": (
+            "当前还没有选择文件。"
+            if is_zh
+            else "No files are selected yet."
+        ),
         "entry_title": "条目全文" if is_zh else "Entry",
         "close": "关闭" if is_zh else "Close",
     }
@@ -694,6 +143,7 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
         <div class="row">
           <input id="search-input" data-testid="portal-search-input" placeholder="{copy["search_placeholder"]}" />
           <button class="primary" id="search-button" data-testid="portal-search-button">{copy["search_button"]}</button>
+          <button id="search-clear-button" type="button">{copy["search_clear"]}</button>
         </div>
         <div id="search-status" class="subtle" style="margin-top:12px;" role="status" aria-live="polite">{copy["search_idle"]}</div>
         <div class="list" id="search-results" data-testid="portal-search-results" style="margin-top:14px;"></div>
@@ -743,6 +193,7 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
               </div>
               <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">{copy["submit_file"]}</button>
               <div id="submit-file-status" class="subtle" role="status" aria-live="polite">{copy["file_status"]}</div>
+              <div id="upload-selection" class="subtle">{copy["file_selection_idle"]}</div>
             </div>
           </div>
         </div>
@@ -771,12 +222,20 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
             "search_empty": "没有搜索到结果" if is_zh else "No matching results.",
             "search_prompt": "请输入关键词后再搜索。" if is_zh else "Enter a query before searching.",
             "search_busy": "搜索中..." if is_zh else "Searching...",
+            "search_cleared": "搜索条件已清空。" if is_zh else "Search cleared.",
+            "search_query_label": "查询" if is_zh else "Query",
             "found_prefix": "找到" if is_zh else "Found",
             "found_suffix": "条结果。" if is_zh else "results.",
             "opened": "已打开条目：" if is_zh else "Opened entry: ",
             "submit_text_busy": "分析中..." if is_zh else "Analyzing...",
             "submit_file_busy": "上传中..." if is_zh else "Uploading...",
             "file_required": "请先选择文件、压缩包或文件夹" if is_zh else "Select a file, folder, or archive first.",
+            "name_required": "请先填写名字。" if is_zh else "Enter your name first.",
+            "title_required": "请先填写标题。" if is_zh else "Enter a title first.",
+            "content_required": "请先填写正文内容。" if is_zh else "Enter submission content first.",
+            "upload_selection_none": "当前还没有选择文件。" if is_zh else "No files are selected yet.",
+            "upload_selection_files": "已选择文件" if is_zh else "Selected files",
+            "upload_selection_root": "根目录" if is_zh else "Root",
             "analysis_title": "Agent 建议" if is_zh else "Agent recommendation",
             "analysis_related_empty": "暂无明显关联条目" if is_zh else "No obvious related entries.",
             "analysis_title_label": "建议标题" if is_zh else "Suggested title",
@@ -798,6 +257,24 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
 
     function setPortalMessage(message) {
       document.getElementById('portal-message').textContent = message;
+    }
+
+    function summarizeUploadSelection() {
+      const fileInput = document.getElementById('upload-file');
+      const folderInput = document.getElementById('upload-folder');
+      const files = Array.from(fileInput.files || []);
+      const folderFiles = Array.from(folderInput.files || []);
+      const selected = folderFiles.length ? folderFiles : files;
+      const node = document.getElementById('upload-selection');
+      if (!selected.length) {
+        node.textContent = UI.upload_selection_none;
+        return;
+      }
+      const roots = Array.from(new Set(selected
+        .map(file => String(file.webkitRelativePath || '').split('/')[0])
+        .filter(Boolean)));
+      const rootLabel = roots.length ? roots.join(', ') : UI.upload_selection_root;
+      node.textContent = `${UI.upload_selection_files}: ${selected.length} · ${rootLabel}`;
     }
 
     async function withBusy(buttonId, busyLabel, task) {
@@ -862,7 +339,7 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
         return;
       }
       const results = await fetchJson(`/api/portal/search?q=${encodeURIComponent(query)}`);
-      document.getElementById('search-status').textContent = `${UI.found_prefix} ${results.length} ${UI.found_suffix}`;
+      document.getElementById('search-status').textContent = `${UI.search_query_label}: ${query} · ${UI.found_prefix} ${results.length} ${UI.found_suffix}`;
       document.getElementById('search-results').innerHTML = results.length
         ? results.map(item => `
             <div class="card interactive" data-entry-name="${encodeURIComponent(item.name)}">
@@ -875,11 +352,24 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
         : `<div class="empty">${escapeHtml(UI.search_empty)}</div>`;
     }
 
+    function clearSearch() {
+      document.getElementById('search-input').value = '';
+      document.getElementById('search-status').textContent = UI.search_cleared;
+      document.getElementById('search-results').innerHTML = '';
+      setPortalMessage(UI.search_cleared);
+    }
+
     async function submitText() {
+      const submitterName = document.getElementById('submit-name').value.trim();
+      const title = document.getElementById('submit-title').value.trim();
+      const content = document.getElementById('submit-content').value.trim();
+      if (!submitterName) throw new Error(UI.name_required);
+      if (!title) throw new Error(UI.title_required);
+      if (!content) throw new Error(UI.content_required);
       const payload = {
-        title: document.getElementById('submit-title').value,
-        content: document.getElementById('submit-content').value,
-        submitter_name: document.getElementById('submit-name').value,
+        title,
+        content,
+        submitter_name: submitterName,
         submission_type: document.getElementById('submit-type').value
       };
       const result = await fetchJson('/api/portal/submissions/text', {
@@ -901,8 +391,10 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
       const files = Array.from(fileInput.files || []);
       const folderFiles = Array.from(folderInput.files || []);
       if (!files.length && !folderFiles.length) throw new Error(UI.file_required);
+      const submitterName = document.getElementById('upload-name').value.trim();
+      if (!submitterName) throw new Error(UI.name_required);
       const payload = {
-        submitter_name: document.getElementById('upload-name').value
+        submitter_name: submitterName
       };
       if (folderFiles.length || files.length > 1) {
         const bundle = await Promise.all((folderFiles.length ? folderFiles : files).map(async (file) => ({
@@ -930,6 +422,7 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
       document.getElementById('submit-file-status').textContent = `${UI.submit_file_success}${data.id}`;
       fileInput.value = '';
       folderInput.value = '';
+      summarizeUploadSelection();
       setPortalMessage(`${UI.submitted_file_prefix}${data.title}`);
       await loadHome();
     }
@@ -996,8 +489,11 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
     document.getElementById('recent-updates').addEventListener('click', handleEntryClick);
 
     document.getElementById('search-button').addEventListener('click', () => withBusy('search-button', UI.search_busy, () => runSearch()).catch(showError));
+    document.getElementById('search-clear-button').addEventListener('click', clearSearch);
     document.getElementById('submit-text-button').addEventListener('click', () => withBusy('submit-text-button', UI.submit_text_busy, () => submitText()).catch(showError));
     document.getElementById('submit-file-button').addEventListener('click', () => withBusy('submit-file-button', UI.submit_file_busy, () => submitFile()).catch(showError));
+    document.getElementById('upload-file').addEventListener('change', summarizeUploadSelection);
+    document.getElementById('upload-folder').addEventListener('change', summarizeUploadSelection);
     document.getElementById('entry-close-button').addEventListener('click', () => {
       document.getElementById('entry-modal').hidden = true;
     });
@@ -1025,6 +521,7 @@ def portal_html(*, knowledge_name: str, instance_name: str, locale: str) -> str:
     }
 
     loadHome().catch(showError);
+    summarizeUploadSelection();
     """.replace("__UI__", ui_json)
     return shared_shell(f"{knowledge_name} Portal", body, script, locale=active_locale)
 
@@ -1439,6 +936,7 @@ def admin_html(
         <div class="row">
           <button class="primary" id="refresh-admin" data-testid="admin-refresh-button">{copy["refresh"]}</button>
           <span class="tag ok">{'Session 已建立' if is_zh else 'Session active'}</span>
+          <span class="subtle" id="admin-refresh-status">{'尚未刷新' if is_zh else 'Not refreshed yet'}</span>
         </div>
         <div class="section-nav">
           {_nav_link(copy["overview"], _localized_path("/admin", active_locale), primary=section == "overview")}
@@ -1455,6 +953,7 @@ def admin_html(
         {
             "section": section,
             "refresh_busy": "刷新中..." if is_zh else "Refreshing...",
+            "refresh_done_prefix": "最近刷新：" if is_zh else "Last refreshed: ",
             "busy_loading": "加载中..." if is_zh else "Loading...",
             "busy_queue": "排队中..." if is_zh else "Queueing...",
             "busy_saving": "保存中..." if is_zh else "Saving...",
@@ -1534,6 +1033,12 @@ def admin_html(
 
     function setAdminMessage(message) {{
       document.getElementById('admin-message').textContent = message;
+    }}
+
+    function setRefreshStatus() {{
+      const node = document.getElementById('admin-refresh-status');
+      if (!node) return;
+      node.textContent = `${{UI.refresh_done_prefix}}${{new Date().toLocaleTimeString()}}`;
     }}
 
     async function withBusyButton(button, busyLabel, task) {{
@@ -1907,6 +1412,7 @@ def admin_html(
         tasks.push(loadReviews(), loadJobs(), loadAuditLogs());
       }}
       await Promise.all(tasks);
+      setRefreshStatus();
     }}
 
     function showAdminError(error) {{

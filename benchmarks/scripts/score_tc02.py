@@ -21,14 +21,20 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
+from isolated_build import build_benchmark_agent_settings
 from sediment.llm_cli import build_cli_command
+from sediment.llm_cli import collect_output
 
 
 # ---------------------------------------------------------------------------
@@ -244,35 +250,44 @@ def run_llm_scoring(batch: list[dict], workdir: Path | None = None) -> list[dict
     """
     prompt = build_llm_scoring_prompt(batch)
     cli_value = os.environ.get('SEDIMENT_CLI', 'claude').strip()
-    command, stdin_data = build_cli_command(
-        cli_value,
-        prompt,
-        extra_args=[
-            '--permission-mode',
-            'auto',
-            '--allowed-tools',
-            'Bash',
-            'Read',
-            'Write',
-            'Edit',
-            'Glob',
-            '--max-budget-usd',
-            '3',
-            '--no-session-persistence',
-        ],
-    )
+    settings = build_benchmark_agent_settings(cli_value)
+    extra_args = [
+        '--permission-mode',
+        'auto',
+        '--allowed-tools',
+        'Bash',
+        'Read',
+        'Write',
+        'Edit',
+        'Glob',
+        '--max-budget-usd',
+        '3',
+        '--no-session-persistence',
+    ]
 
     try:
-        proc = subprocess.run(
-            command,
-            input=stdin_data,
-            capture_output=True,
-            text=True,
-            timeout=600,  # 10 minutes per batch
-            cwd=str(workdir) if workdir else None,
-        )
-
-        output = proc.stdout.strip()
+        with tempfile.TemporaryDirectory(prefix='sediment-qa-score-') as temp_dir:
+            temp_root = Path(temp_dir)
+            invocation = build_cli_command(
+                settings,
+                prompt,
+                prompt_file=temp_root / 'prompt.txt',
+                cwd=workdir,
+                extra_args=extra_args,
+            )
+            proc = subprocess.run(
+                invocation.command,
+                input=invocation.stdin_data,
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes per batch
+                cwd=str(workdir) if workdir else None,
+            )
+            output = collect_output(
+                invocation,
+                stdout=proc.stdout,
+                stderr=proc.stderr,
+            )
 
         # Try to extract JSON from the output
         # Claude might wrap JSON in markdown code blocks

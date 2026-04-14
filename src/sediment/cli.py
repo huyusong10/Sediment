@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sediment import launcher, worker
+from sediment.cli_help import render_help as render_help_topic
+from sediment.cli_parser import build_cli_parser
 from sediment.control import (
     apply_review_decision,
     enqueue_tidy_job,
@@ -2102,173 +2104,7 @@ def logs_follow_command(args) -> int:
 
 
 def render_help(topic: str | None) -> str:
-    topic = (topic or "overview").strip().lower()
-    topics = {
-        "overview": "\n".join(
-            [
-                "Sediment help",
-                "",
-                "Core workflow:",
-                "  sediment init",
-                "  sediment instance list",
-                "  sediment doctor",
-                "  sediment server start",
-                "  sediment kb explore \"什么是热备份\"",
-                "  sediment submit text --title \"新概念\" --content \"...\"",
-                "  sediment submit file ./reports --name alice",
-                "  sediment review list",
-                "  sediment logs follow",
-                "",
-                "Anywhere management:",
-                "  sediment --instance ops-prod doctor",
-                "  sediment --instance ops-prod server start",
-                "  sediment --instance ops-prod review list",
-                "",
-                "Global options:",
-                "  --instance NAME   use a registered instance from anywhere",
-                "  --config PATH     point directly at one config.yaml",
-                "",
-                "Topics:",
-                "  sediment help init",
-                "  sediment help instance",
-                "  sediment help config",
-                "  sediment help review",
-                "  sediment help logs",
-                "  sediment help server",
-                "  sediment help kb",
-                "  sediment help submit",
-                "  sediment help doctor",
-            ]
-        ),
-        "init": "\n".join(
-            [
-                "sediment init",
-                "",
-                "Create a Sediment instance in the current directory.",
-                "",
-                "In a normal terminal, `sediment init` opens an interactive setup wizard.",
-                "Press Enter to keep defaults, or pass --no-interactive for scripts and CI.",
-                "If you work inside the instance root or its knowledge-base directory,",
-                "Sediment resolves the local config automatically and you usually do not need",
-                "`--instance`.",
-                "",
-                "Examples:",
-                "  sediment init",
-                "  sediment init --instance-name ops-prod --knowledge-name \"生产运维知识库\"",
-                "  sediment init --backend codex --host 0.0.0.0 --port 8123 --no-interactive",
-            ]
-        ),
-        "instance": "\n".join(
-            [
-                "sediment instance",
-                "",
-                "Manage the global registry of local Sediment instances.",
-                "",
-                "Commands:",
-                "  sediment instance list",
-                "  sediment instance show ops-prod",
-                "  sediment instance remove ops-prod",
-                "",
-                "Most operational commands also accept `--instance NAME`.",
-            ]
-        ),
-        "config": "\n".join(
-            [
-                "sediment config model",
-                "",
-                "Each instance stores its real runtime config in:",
-                "  ./config/sediment/config.yaml",
-                "",
-                "Important fields:",
-                "  instance.name   globally unique identifier for CLI management",
-                "  knowledge.name  title shown in Portal/Admin",
-                "  agent.backend   claude-code | codex | opencode",
-                "",
-                "Sediment no longer uses a global runtime config fallback. The only global",
-                "state is the instance registry that maps instance names to local roots.",
-            ]
-        ),
-        "review": "\n".join(
-            [
-                "sediment review",
-                "",
-                "Inspect and resolve pending review items without opening the web UI.",
-                "",
-                "Commands:",
-                "  sediment review list",
-                "  sediment review show <review-id>",
-                "  sediment review approve <review-id> --reviewer-name alice",
-                "  sediment review reject <review-id> "
-                "--comment \"needs more evidence\"",
-            ]
-        ),
-        "logs": "\n".join(
-            [
-                "sediment logs",
-                "",
-                "Read daemon logs for the current instance. Use --component all|server|worker|up.",
-                "",
-                "Commands:",
-                "  sediment logs show --lines 80",
-                "  sediment logs follow --component worker",
-            ]
-        ),
-        "server": "\n".join(
-            [
-                "sediment server",
-                "",
-                "Manage the per-instance daemon lifecycle.",
-                "Each foreground/background start prints a one-time admin login token.",
-                "",
-                "Commands:",
-                "  sediment server start",
-                "  sediment server run",
-                "  sediment server status",
-                "  sediment server stop",
-            ]
-        ),
-        "kb": "\n".join(
-            [
-                "sediment kb",
-                "",
-                "Explore and maintain the formal knowledge layer.",
-                "",
-                "Commands:",
-                "  sediment kb list",
-                "  sediment kb explore \"什么是热备份\"",
-                "  sediment kb tidy \"薄弱条目\"",
-            ]
-        ),
-        "doctor": "\n".join(
-            [
-                "sediment doctor",
-                "",
-                "Run a layered health check for the current Sediment instance.",
-                "",
-                "Quick mode checks config discovery, paths, port availability, executable",
-                "resolution, CLI help, and a simple generation probe.",
-                "",
-                "Use `sediment doctor --full` to also run the stricter structured JSON probe",
-                "used by tidy and other schema-driven workflows.",
-            ]
-        ),
-        "submit": "\n".join(
-            [
-                "sediment submit",
-                "",
-                "Create buffered submissions from the CLI using the same backend logic",
-                "as the Web portal and MCP tools.",
-                "",
-                "Commands:",
-                "  sediment submit text --title \"新概念\" --content \"...\" --type concept",
-                "  sediment submit text --title \"来自 stdin\" --type feedback < note.txt",
-                "  sediment submit file ./incident.docx --name alice",
-                "  sediment submit file ./incident-bundle.zip --name alice",
-                "  sediment submit file ./reports-folder --name alice",
-            ]
-        ),
-    }
-    return topics.get(topic, topics["overview"])
+    return render_help_topic(topic)
 
 
 def cli_help_command(args) -> int:
@@ -2308,291 +2144,39 @@ def legacy_worker_main(argv: list[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Sediment CLI for local instances, reviews, jobs, and knowledge workflows.",
-        epilog="Try `sediment help` for task-oriented examples.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+    return build_cli_parser(
+        {
+            "init_command": init_command,
+            "cli_help_command": cli_help_command,
+            "server_run": server_run,
+            "start_daemon": start_daemon,
+            "server_stop": server_stop,
+            "server_restart": server_restart,
+            "server_status": server_status,
+            "server_logs": server_logs,
+            "kb_explore": kb_explore,
+            "kb_health": kb_health,
+            "kb_list": kb_list,
+            "kb_read": kb_read,
+            "kb_tidy": kb_tidy,
+            "review_list_command": review_list_command,
+            "review_show_command": review_show_command,
+            "review_approve_command": review_approve_command,
+            "review_reject_command": review_reject_command,
+            "logs_show_command": logs_show_command,
+            "logs_follow_command": logs_follow_command,
+            "submit_text_command": submit_text_command,
+            "submit_file_command": submit_file_command,
+            "instance_list_command": instance_list_command,
+            "instance_show_command": instance_show_command,
+            "instance_remove_command": instance_remove_command,
+            "status_command": status_command,
+            "status_queue_command": status_queue_command,
+            "status_health_command": status_health_command,
+            "doctor_command": doctor_command,
+            "run_platform_daemon": run_platform_daemon,
+        }
     )
-    parser.add_argument(
-        "--config",
-        help="Path to Sediment config.yaml. Defaults to ./config/sediment/config.yaml.",
-    )
-    parser.add_argument(
-        "--instance",
-        help="Use a registered Sediment instance by name.",
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="Suppress progress logs for non-JSON commands.",
-    )
-    parser.add_argument("--registry", help=argparse.SUPPRESS)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    init_parser = subparsers.add_parser(
-        "init",
-        help="Initialize a Sediment instance in the current directory.",
-    )
-    init_parser.add_argument("--instance-name")
-    init_parser.add_argument("--knowledge-name")
-    init_parser.add_argument(
-        "--backend",
-        choices=["claude-code", "codex", "opencode"],
-        default=None,
-    )
-    init_parser.add_argument("--host", default=None)
-    init_parser.add_argument("--port", type=int)
-    init_parser.add_argument("--force", action="store_true")
-    init_parser.add_argument("--allow-nested", action="store_true")
-    init_parser.add_argument("--no-kb", action="store_true")
-    init_parser.add_argument(
-        "--interactive",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Run an interactive init wizard in the terminal. Enabled by default on TTYs.",
-    )
-    init_parser.add_argument("--json", action="store_true")
-    init_parser.set_defaults(func=init_command, needs_runtime_context=False)
-
-    help_parser = subparsers.add_parser("help", help="Show Sediment task-oriented help.")
-    help_parser.add_argument("topic", nargs="?")
-    help_parser.set_defaults(func=cli_help_command, needs_runtime_context=False)
-
-    up_parser = subparsers.add_parser("up", help="Run server + worker in the foreground.")
-    up_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
-    up_parser.add_argument("--startup-timeout", type=float, default=10.0)
-    up_parser.add_argument("--skip-checks", action="store_true")
-    up_parser.set_defaults(func=server_run, needs_runtime_context=True)
-
-    server_parser = subparsers.add_parser("server", help="Manage Sediment server/worker processes.")
-    server_subparsers = server_parser.add_subparsers(dest="server_command", required=True)
-
-    run_parser = server_subparsers.add_parser("run", help="Run server + worker in the foreground.")
-    run_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
-    run_parser.add_argument("--startup-timeout", type=float, default=10.0)
-    run_parser.add_argument("--skip-checks", action="store_true")
-    run_parser.set_defaults(func=server_run, needs_runtime_context=True)
-
-    start_parser = server_subparsers.add_parser("start", help="Start the platform daemon.")
-    start_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
-    start_parser.add_argument("--startup-timeout", type=float, default=10.0)
-    start_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
-    start_parser.add_argument("--skip-checks", action="store_true")
-    start_parser.add_argument("--force", action="store_true")
-    start_parser.set_defaults(func=start_daemon, needs_runtime_context=True)
-
-    stop_parser = server_subparsers.add_parser("stop", help="Stop the platform daemon.")
-    stop_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
-    stop_parser.add_argument("--force-kill", action="store_true")
-    stop_parser.set_defaults(func=server_stop, needs_runtime_context=True)
-
-    restart_parser = server_subparsers.add_parser("restart", help="Restart the platform daemon.")
-    restart_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
-    restart_parser.add_argument("--startup-timeout", type=float, default=10.0)
-    restart_parser.add_argument("--shutdown-timeout", type=float, default=8.0)
-    restart_parser.add_argument("--skip-checks", action="store_true")
-    restart_parser.set_defaults(func=server_restart, needs_runtime_context=True)
-
-    status_parser = server_subparsers.add_parser("status", help="Show daemon status.")
-    status_parser.add_argument("--json", action="store_true")
-    status_parser.set_defaults(func=server_status, needs_runtime_context=True)
-
-    logs_parser = server_subparsers.add_parser("logs", help="Show recent daemon logs.")
-    logs_parser.add_argument("--lines", type=int, default=60)
-    logs_parser.set_defaults(func=server_logs, needs_runtime_context=True)
-
-    kb_parser = subparsers.add_parser("kb", help="Knowledge-base operations.")
-    kb_subparsers = kb_parser.add_subparsers(dest="kb_command", required=True)
-
-    explore_parser = kb_subparsers.add_parser("explore", help="Ask a natural-language KB question.")
-    explore_parser.add_argument("question")
-    explore_parser.add_argument("--json", action="store_true")
-    explore_parser.set_defaults(func=kb_explore, needs_runtime_context=True)
-
-    health_parser = kb_subparsers.add_parser("health", help="Show KB health summary.")
-    health_parser.add_argument("--json", action="store_true")
-    health_parser.add_argument("--limit", type=int, default=10)
-    health_parser.set_defaults(func=kb_health, needs_runtime_context=True)
-
-    list_parser = kb_subparsers.add_parser("list", help="List KB entry names.")
-    list_parser.add_argument("--json", action="store_true")
-    list_parser.set_defaults(func=kb_list, needs_runtime_context=True)
-
-    read_parser = kb_subparsers.add_parser("read", help="Read a KB entry.")
-    read_parser.add_argument("name")
-    read_parser.set_defaults(func=kb_read, needs_runtime_context=True)
-
-    tidy_parser = kb_subparsers.add_parser("tidy", help="Queue a tidy job for a KB target.")
-    tidy_parser.add_argument("target")
-    tidy_parser.add_argument("--issue-type")
-    tidy_parser.add_argument("--actor-name")
-    tidy_parser.add_argument("--process-once", action="store_true")
-    tidy_parser.add_argument("--json", action="store_true")
-    tidy_parser.set_defaults(func=kb_tidy, needs_runtime_context=True)
-
-    review_parser = subparsers.add_parser("review", help="Inspect and resolve pending reviews.")
-    review_subparsers = review_parser.add_subparsers(dest="review_command", required=True)
-
-    review_list_parser = review_subparsers.add_parser("list", help="List reviews.")
-    review_list_parser.add_argument("--decision", default="pending")
-    review_list_parser.add_argument("--limit", type=int, default=20)
-    review_list_parser.add_argument("--json", action="store_true")
-    review_list_parser.set_defaults(func=review_list_command, needs_runtime_context=True)
-
-    review_show_parser = review_subparsers.add_parser("show", help="Show one review.")
-    review_show_parser.add_argument("review_id")
-    review_show_parser.add_argument("--json", action="store_true")
-    review_show_parser.set_defaults(func=review_show_command, needs_runtime_context=True)
-
-    review_approve_parser = review_subparsers.add_parser("approve", help="Approve a review.")
-    review_approve_parser.add_argument("review_id")
-    review_approve_parser.add_argument("--reviewer-name")
-    review_approve_parser.add_argument("--comment", default="")
-    review_approve_parser.add_argument("--json", action="store_true")
-    review_approve_parser.set_defaults(func=review_approve_command, needs_runtime_context=True)
-
-    review_reject_parser = review_subparsers.add_parser("reject", help="Reject a review.")
-    review_reject_parser.add_argument("review_id")
-    review_reject_parser.add_argument("--reviewer-name")
-    review_reject_parser.add_argument("--comment", default="")
-    review_reject_parser.add_argument("--json", action="store_true")
-    review_reject_parser.set_defaults(func=review_reject_command, needs_runtime_context=True)
-
-    logs_parser = subparsers.add_parser("logs", help="Read daemon logs for the current instance.")
-    logs_subparsers = logs_parser.add_subparsers(dest="logs_command", required=True)
-
-    logs_show_parser = logs_subparsers.add_parser("show", help="Show recent log lines.")
-    logs_show_parser.add_argument(
-        "--component",
-        choices=["all", "server", "worker", "up"],
-        default="all",
-    )
-    logs_show_parser.add_argument("--lines", type=int, default=60)
-    logs_show_parser.set_defaults(func=logs_show_command, needs_runtime_context=True)
-
-    logs_tail_parser = logs_subparsers.add_parser("tail", help="Alias for logs show.")
-    logs_tail_parser.add_argument(
-        "--component",
-        choices=["all", "server", "worker", "up"],
-        default="all",
-    )
-    logs_tail_parser.add_argument("--lines", type=int, default=60)
-    logs_tail_parser.set_defaults(func=logs_show_command, needs_runtime_context=True)
-
-    logs_follow_parser = logs_subparsers.add_parser("follow", help="Follow daemon logs.")
-    logs_follow_parser.add_argument(
-        "--component",
-        choices=["all", "server", "worker", "up"],
-        default="all",
-    )
-    logs_follow_parser.add_argument("--lines", type=int, default=30)
-    logs_follow_parser.set_defaults(func=logs_follow_command, needs_runtime_context=True)
-
-    submit_parser = subparsers.add_parser(
-        "submit",
-        help="Create buffered submissions from the CLI.",
-    )
-    submit_subparsers = submit_parser.add_subparsers(dest="submit_command", required=True)
-
-    submit_text_parser = submit_subparsers.add_parser("text", help="Submit plain text.")
-    submit_text_parser.add_argument("--title", required=True)
-    submit_text_parser.add_argument("--content")
-    submit_text_parser.add_argument("--content-file")
-    submit_text_parser.add_argument(
-        "--type",
-        dest="submission_type",
-        choices=["text", "concept", "lesson", "feedback"],
-        default="text",
-    )
-    submit_text_parser.add_argument("--name", dest="submitter_name")
-    submit_text_parser.add_argument("--json", action="store_true")
-    submit_text_parser.set_defaults(func=submit_text_command, needs_runtime_context=True)
-
-    submit_file_parser = submit_subparsers.add_parser(
-        "file",
-        help="Submit a document file, folder, or zip archive.",
-    )
-    submit_file_parser.add_argument("path")
-    submit_file_parser.add_argument("--filename")
-    submit_file_parser.add_argument("--mime-type")
-    submit_file_parser.add_argument("--name", dest="submitter_name")
-    submit_file_parser.add_argument("--json", action="store_true")
-    submit_file_parser.set_defaults(func=submit_file_command, needs_runtime_context=True)
-
-    instance_parser = subparsers.add_parser(
-        "instance",
-        help="Manage registered Sediment instances.",
-    )
-    instance_subparsers = instance_parser.add_subparsers(dest="instance_command", required=True)
-
-    instance_list_parser = instance_subparsers.add_parser("list", help="List known instances.")
-    instance_list_parser.add_argument("--json", action="store_true")
-    instance_list_parser.set_defaults(func=instance_list_command, needs_runtime_context=False)
-
-    instance_show_parser = instance_subparsers.add_parser("show", help="Show one instance.")
-    instance_show_parser.add_argument("name")
-    instance_show_parser.add_argument("--json", action="store_true")
-    instance_show_parser.set_defaults(func=instance_show_command, needs_runtime_context=False)
-
-    instance_remove_parser = instance_subparsers.add_parser(
-        "remove",
-        help="Remove one instance registration.",
-    )
-    instance_remove_parser.add_argument("name")
-    instance_remove_parser.add_argument("--json", action="store_true")
-    instance_remove_parser.set_defaults(func=instance_remove_command, needs_runtime_context=False)
-
-    top_status_parser = subparsers.add_parser(
-        "status",
-        help="Show daemon, queue, and KB health status.",
-    )
-    top_status_parser.add_argument("--json", action="store_true")
-    top_status_parser.set_defaults(func=status_command, needs_runtime_context=True)
-    status_subparsers = top_status_parser.add_subparsers(dest="status_command")
-
-    status_daemon_parser = status_subparsers.add_parser(
-        "daemon",
-        help="Show daemon lifecycle status.",
-    )
-    status_daemon_parser.add_argument("--json", action="store_true")
-    status_daemon_parser.set_defaults(func=server_status, needs_runtime_context=True)
-
-    status_queue_parser = status_subparsers.add_parser(
-        "queue",
-        help="Show submission/job/review queue counts.",
-    )
-    status_queue_parser.add_argument("--json", action="store_true")
-    status_queue_parser.set_defaults(func=status_queue_command, needs_runtime_context=True)
-
-    status_health_parser = status_subparsers.add_parser(
-        "health",
-        help="Show KB health summary and issue counts.",
-    )
-    status_health_parser.add_argument("--json", action="store_true")
-    status_health_parser.set_defaults(func=status_health_command, needs_runtime_context=True)
-
-    doctor_parser = subparsers.add_parser(
-        "doctor",
-        help="Check whether Sediment and its configured agent backend are healthy.",
-    )
-    doctor_parser.add_argument(
-        "--full",
-        action="store_true",
-        help="Also run the stricter structured JSON probe used by schema-driven workflows.",
-    )
-    doctor_parser.add_argument("--json", action="store_true")
-    doctor_parser.set_defaults(func=doctor_command, needs_runtime_context=True)
-
-    daemon_parser = subparsers.add_parser(
-        "__run-platform-daemon",
-        help=argparse.SUPPRESS,
-    )
-    daemon_parser.add_argument("--worker-poll-interval", type=float, default=2.0)
-    daemon_parser.add_argument("--startup-timeout", type=float, default=10.0)
-    daemon_parser.add_argument("--skip-checks", action="store_true")
-    daemon_parser.set_defaults(func=run_platform_daemon, needs_runtime_context=True)
-
-    return parser
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -56,6 +56,8 @@ def build_cli_command(
             command.extend(["-m", str(agent["model"])])
         if agent.get("profile"):
             command.extend(["-p", str(agent["profile"])])
+        if agent.get("reasoning_effort"):
+            command.extend(["-c", f'model_reasoning_effort="{agent["reasoning_effort"]}"'])
         if agent.get("sandbox"):
             command.extend(["--sandbox", str(agent["sandbox"])])
         command.append("--skip-git-repo-check")

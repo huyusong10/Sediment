@@ -69,8 +69,9 @@ cd "${ISOLATED_DIR}"
 - ingest / tidy 的提示词必须直接来自项目源码中的 `src/sediment/skills/ingest/SKILL.md` 与 `src/sediment/skills/tidy/SKILL.md`
 - 禁止测试脚本私自维护一套平行提示词（如 `benchmarks/prompts/*.md`）
 - 所有 LLM 调用应复用共享 `SEDIMENT_CLI` 合约，避免运行时与 benchmark 使用不同入口
-- 知识库只能生成在临时隔离目录内，禁止复制快照到 `benchmarks/results/`
-- `benchmarks/results/` 只用于保存评分结果、报告和改进记录
+- 知识库只能生成在临时隔离目录内，禁止复制快照到 `testcase/results/`
+- `testcase/results/` 只用于保存评分结果、报告和改进记录
+- 成功构建后需要把保留的全量 KB 样例复制到 `testcase/samples/kb_builds/full/`，并附带 `manifest.json`
 - 运行时问答默认只能检索构建后的 KB，不能回退读取 `benchmarks/material/` 原始材料
 
 ### 第 2 步：构建知识库
@@ -156,10 +157,10 @@ rm -rf "${ISOLATED_DIR}"
 
 ## 预期输出
 
-每次完整运行后，`benchmarks/results/` 目录应包含：
+每次完整运行后，`testcase/results/` 目录应包含：
 
 ```
-benchmarks/results/
+testcase/results/
 ├── builds/
 │   ├── full/
 │   │   ├── concept_answers_full.json
@@ -191,11 +192,24 @@ benchmarks/results/
     └── improvement_*.md
 ```
 
+同时，成功构建的样例 KB 应单独保存在：
+
+```
+testcase/samples/
+└── kb_builds/
+    └── full/
+        ├── entries/
+        ├── placeholders/
+        ├── indexes/
+        ├── index.root.md
+        └── manifest.json
+```
+
 详情中包含低分的概念/题目、标准答案以及回复的答案；`kb_diagnostics_*.json` 还会记录条目数、占位符数、平均条目大小、孤立条目、悬空链接和高引用占位符。
 
 **注意**：
 
-- `results/` 中不应出现 `kb_full/`、`kb_batched/` 等知识库快照目录；KB 只应存在于临时隔离目录。
+- `results/` 中不应出现 `kb_full/`、`kb_batched/` 等知识库快照目录；KB 只应存在于临时隔离目录，或成功后复制到 `testcase/samples/kb_builds/`。
 - 平均分低于 90 时，`scorecard.json` / `last_run.json` 会记录被保留的临时隔离目录路径，供后续诊断。
 
 ## 测试用例详情

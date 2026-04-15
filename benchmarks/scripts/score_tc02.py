@@ -295,34 +295,46 @@ def run_llm_scoring(
             cwd=workdir,
             extra_args=extra_args,
         )
-        started_at = time.time()
-        proc = subprocess.Popen(
-            invocation.command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(workdir) if workdir else None,
-        )
-        stdout = ''
-        stderr = ''
-        pending_input = invocation.stdin_data
-        while True:
-            elapsed = time.time() - started_at
-            remaining = 600 - elapsed
-            if remaining <= 0:
-                proc.kill()
-                stdout, stderr = proc.communicate()
-                raise subprocess.TimeoutExpired(invocation.command, 600, output=stdout, stderr=stderr)
-            try:
-                stdout, stderr = proc.communicate(
-                    input=pending_input,
-                    timeout=min(SCORING_HEARTBEAT_SECONDS, remaining),
-                )
-                break
-            except subprocess.TimeoutExpired:
-                pending_input = None
-                if progress_callback:
+        if progress_callback is None:
+            completed = subprocess.run(
+                invocation.command,
+                input=invocation.stdin_data,
+                text=True,
+                capture_output=True,
+                cwd=str(workdir) if workdir else None,
+                timeout=600,
+                check=False,
+            )
+            stdout = completed.stdout
+            stderr = completed.stderr
+        else:
+            started_at = time.time()
+            proc = subprocess.Popen(
+                invocation.command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=str(workdir) if workdir else None,
+            )
+            stdout = ''
+            stderr = ''
+            pending_input = invocation.stdin_data
+            while True:
+                elapsed = time.time() - started_at
+                remaining = 600 - elapsed
+                if remaining <= 0:
+                    proc.kill()
+                    stdout, stderr = proc.communicate()
+                    raise subprocess.TimeoutExpired(invocation.command, 600, output=stdout, stderr=stderr)
+                try:
+                    stdout, stderr = proc.communicate(
+                        input=pending_input,
+                        timeout=min(SCORING_HEARTBEAT_SECONDS, remaining),
+                    )
+                    break
+                except subprocess.TimeoutExpired:
+                    pending_input = None
                     progress_callback(
                         {
                             'phase': 'score_tc02',

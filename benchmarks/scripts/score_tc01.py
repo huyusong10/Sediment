@@ -14,6 +14,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Callable
 
 
 def extract_key_phrases(text: str) -> list[str]:
@@ -154,7 +155,14 @@ def score_concept(answer_text: str, concept_name: str, concept_def: dict,
     return score
 
 
-def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_type: str | None = None) -> dict:
+def run_scoring(
+    answers_file: Path,
+    judge_file: Path,
+    output_dir: Path,
+    build_type: str | None = None,
+    *,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> dict:
     """Run concept coverage scoring and produce report."""
     with open(judge_file, 'r', encoding='utf-8') as f:
         judge_data = json.load(f)
@@ -167,6 +175,16 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_ty
     all_terms = judge_data.get('terms', {})
     total_score = 0.0
     details = []
+    total_concepts = len(judge_data['terms'])
+
+    if progress_callback:
+        progress_callback(
+            {
+                'phase': 'score_tc01',
+                'event': 'score_started',
+                'total_questions': total_concepts,
+            }
+        )
 
     for concept_name, concept_def in judge_data['terms'].items():
         answer_item = answers.get(concept_name, {})
@@ -193,7 +211,7 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_ty
         'raw_score': round(raw_score, 2),
         'final_score': round(final_score, 2),
         'max_score': 40,
-        'total_concepts': len(judge_data['terms']),
+        'total_concepts': total_concepts,
         'answered': sum(1 for d in details if d['has_answer']),
         'zero_score': sum(1 for d in details if d['score'] == 0),
         'full_score': sum(1 for d in details if d['score'] >= 0.99),
@@ -219,6 +237,18 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_ty
     print(f"\n最低分概念 (Top 10):")
     for d in details[:10]:
         print(f"  {d['concept']}: {d['score']:.3f} | 定义: {d['definition'][:40]}...")
+
+    if progress_callback:
+        progress_callback(
+            {
+                'phase': 'score_tc01',
+                'event': 'score_completed',
+                'total_questions': total_concepts,
+                'answered': result['answered'],
+                'zero_score': result['zero_score'],
+                'final_score': result['final_score'],
+            }
+        )
 
     return result
 

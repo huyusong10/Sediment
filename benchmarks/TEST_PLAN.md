@@ -68,10 +68,12 @@ cd "${ISOLATED_DIR}"
 
 - ingest / tidy 的提示词必须直接来自项目源码中的 `src/sediment/skills/ingest/SKILL.md` 与 `src/sediment/skills/tidy/SKILL.md`
 - 禁止测试脚本私自维护一套平行提示词（如 `benchmarks/prompts/*.md`）
+- 默认采用claude code构建知识库
 - 所有 LLM 调用应复用共享 `SEDIMENT_CLI` 合约，避免运行时与 benchmark 使用不同入口
 - 如果运行环境显式启用 `SEDIMENT_BENCHMARK_BUILD_MODE=offline`，构建阶段也必须继续落到 `knowledge-base/entries/`、`indexes/` 等白盒产物；不能改成直接读取 `benchmarks/material/` 回答问题
-- 知识库只能生成在临时隔离目录内，禁止复制快照到 `testcase/results/`
-- `testcase/results/` 只用于保存评分结果、报告和改进记录
+- 知识库只能生成在临时隔离目录内，禁止复制快照到 `benchmarks/results/`
+- `benchmarks/results/` 只用于保存评分结果、报告和改进记录
+- 长时间构建与评分阶段必须持续更新 `testcase/results/reports/live_status.json` 与 `testcase/results/builds/<type>/status.json`；至少要暴露 `current_subphase`、`current_chunk`/`total_chunks`、`heartbeat_at`、当前 `entry_count`/`placeholder_count`，以及评分批次进度，才能区分“慢”与“卡死”
 - 成功构建后需要把保留的全量 KB 官方样例复制到 `examples/`
 - 运行时问答默认只能检索构建后的 KB，不能回退读取 `benchmarks/material/` 原始材料
 - 如果 loopback 端口绑定不可用，允许 benchmark 使用进程内查询传输；但该传输仍然只能调用同一个 `knowledge_ask` / `answer_question()` 运行时，不得绕过 KB 或引入 benchmark 专用答案旁路
@@ -99,6 +101,10 @@ cd "${ISOLATED_DIR}"
 ### 第 4 步：评分与报告
 
 两个仓库分别计算总分，取平均值作为最终成绩。
+
+- `TC-01` / `TC-02` 的评分阶段也必须落状态；至少要能看到当前在 `score_tc01` 还是 `score_tc02`
+- `TC-02` 的 LLM 批量评分必须持续暴露 `batch_num`、`completed_batches`、`total_batches`、`scored_questions`、`heartbeat_at`
+- HTML report 生成时要把 `live_status.json` 切到 `reporting`，避免“分数已出但报告还在生成”时被误判为结束或卡死
 
 ### 一键运行
 
@@ -205,6 +211,17 @@ examples/
 ```
 
 详情中包含低分的概念/题目、标准答案以及回复的答案；`kb_diagnostics_*.json` 还会记录条目数、占位符数、平均条目大小、孤立条目、悬空链接和高引用占位符。
+
+`live_status.json` 与 `builds/*/status.json` 在长时间 build / scoring / reporting 期间还应额外包含：
+
+- `current_subphase`：例如 `ingest`、`tidy`、`canonical_convergence`
+- `current_chunk` / `total_chunks`：当前批次与总批次
+- `heartbeat_at`：最近一次确认 benchmark 仍在工作的时间
+- `entry_count` / `placeholder_count`：当前 KB 规模
+- `build_event`：最近一个关键节点，例如 `ingest_started`、`heartbeat`、`ingest_completed`
+- 在 `tc01` / `tc02` 阶段还应暴露 `answered` / `total_questions`，避免长时间问答执行时没有进度信号
+- 在 `score_tc02` 阶段还应暴露 `batch_num`、`completed_batches`、`total_batches`、`scored_questions`、`scoring_event`
+- 在 `reporting` 阶段应暴露当前状态与生成出的 `report_files`
 
 **注意**：
 

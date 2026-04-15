@@ -33,7 +33,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
@@ -56,6 +56,7 @@ FULL_BUILD_INGEST_BATCHES = 3
 CODEX_FULL_BUILD_INGEST_BATCHES = 6
 INGEST_INITIAL_WRITE_DEADLINE_SECONDS = 240
 INGEST_WATCHDOG_POLL_SECONDS = 5
+BUILD_HEARTBEAT_SECONDS = 30
 
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
@@ -74,6 +75,9 @@ from offline_builder import (
 
 def log(msg: str):
     print(f"[isolated_build] {msg}", flush=True)
+
+
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 def offline_benchmark_mode_enabled() -> bool:
@@ -805,17 +809,73 @@ def _cleanup_agent_process_tempdir(proc: asyncio.subprocess.Process) -> None:
         shutil.rmtree(temp_root, ignore_errors=True)
 
 
-async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
+def _count_kb_artifacts(kb_dir: Path) -> tuple[int, int]:
+    entries_dir = kb_dir / 'entries'
+    placeholders_dir = kb_dir / 'placeholders'
+    entry_count = len(list(entries_dir.glob('*.md'))) if entries_dir.exists() else 0
+    placeholder_count = len(list(placeholders_dir.glob('*.md'))) if placeholders_dir.exists() else 0
+    return entry_count, placeholder_count
+
+
+async def _progress_heartbeat(
+    *,
+    kb_dir: Path,
+    started_at: float,
+    progress_callback: ProgressCallback | None,
+    base_payload: dict[str, Any],
+    stop_event: asyncio.Event,
+) -> None:
+    if progress_callback is None:
+        return
+
+    while not stop_event.is_set():
+        await asyncio.sleep(BUILD_HEARTBEAT_SECONDS)
+        if stop_event.is_set():
+            break
+        entry_count, placeholder_count = _count_kb_artifacts(kb_dir)
+        progress_callback(
+            {
+                **base_payload,
+                'event': 'heartbeat',
+                'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'elapsed_seconds': round(time.time() - started_at, 1),
+                'entry_count': entry_count,
+                'placeholder_count': placeholder_count,
+            }
+        )
+
+
+async def run_ingest(
+    isolated_dir: Path,
+    materials: list[Path],
+    *,
+    progress_callback: ProgressCallback | None = None,
+    progress_meta: dict[str, Any] | None = None,
+) -> bool:
     """Run ingest through the shared Sediment CLI contract."""
     kb_root = isolated_dir / 'knowledge-base'
     kb_entries = kb_root / 'entries'
     kb_entries.mkdir(parents=True, exist_ok=True)
+    progress_base = dict(progress_meta or {})
 
     if offline_benchmark_mode_enabled():
         log("Running offline white-box ingest fallback...")
         result = build_offline_batch(kb_root, materials)
         entry_count = result.get("entry_count", 0)
         log(f"  Offline ingest created/updated {entry_count} formal entries.")
+        if progress_callback:
+            progress_callback(
+                {
+                    **progress_base,
+                    'event': 'ingest_completed',
+                    'mode': 'offline',
+                    'success': entry_count > 0,
+                    'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'elapsed_seconds': 0.0,
+                    'entry_count': entry_count,
+                    'placeholder_count': _count_kb_artifacts(kb_root)[1],
+                }
+            )
         return entry_count > 0
 
     MAX_RETRIES = 2
@@ -834,13 +894,44 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
         log(f"Running ingest for {len(materials)} files (attempt {attempt}/{MAX_RETRIES})...")
         start = time.time()
         proc = None
+        heartbeat_stop = asyncio.Event()
+        heartbeat_task = None
 
         try:
+            if progress_callback:
+                entry_count, placeholder_count = _count_kb_artifacts(kb_root)
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'ingest_started',
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'material_count': len(materials),
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': 0.0,
+                        'entry_count': entry_count,
+                        'placeholder_count': placeholder_count,
+                    }
+                )
             proc = await _spawn_agent_process(
                 prompt=prompt,
                 cwd=isolated_dir,
                 env=env,
                 max_budget_usd='15',
+            )
+            heartbeat_task = asyncio.create_task(
+                _progress_heartbeat(
+                    kb_dir=kb_root,
+                    started_at=start,
+                    progress_callback=progress_callback,
+                    base_payload={
+                        **progress_base,
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'material_count': len(materials),
+                    },
+                    stop_event=heartbeat_stop,
+                )
             )
 
             wait_task = asyncio.create_task(proc.wait())
@@ -858,6 +949,21 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
                     f"{INGEST_INITIAL_WRITE_DEADLINE_SECONDS}s, killing process..."
                 )
                 proc.kill()
+            elif activity_seen and progress_callback:
+                entry_count, placeholder_count = _count_kb_artifacts(kb_root)
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'initial_kb_activity',
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'material_count': len(materials),
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': round(time.time() - start, 1),
+                        'entry_count': entry_count,
+                        'placeholder_count': placeholder_count,
+                    }
+                )
             try:
                 await asyncio.wait_for(wait_task, timeout=3600)
             except asyncio.TimeoutError:
@@ -865,6 +971,21 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
                 proc.kill()
                 await wait_task
                 await stream_task
+                if progress_callback:
+                    entry_count, placeholder_count = _count_kb_artifacts(kb_root)
+                    progress_callback(
+                        {
+                            **progress_base,
+                            'event': 'ingest_timeout',
+                            'attempt': attempt,
+                            'max_retries': MAX_RETRIES,
+                            'material_count': len(materials),
+                            'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'elapsed_seconds': round(time.time() - start, 1),
+                            'entry_count': entry_count,
+                            'placeholder_count': placeholder_count,
+                        }
+                    )
                 if attempt < MAX_RETRIES:
                     log("Retrying in 5 seconds...")
                     await asyncio.sleep(5)
@@ -875,6 +996,23 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
             elapsed = time.time() - start
             entry_count = len(list(kb_entries.glob('*.md')))
             log(f"  Ingest complete in {elapsed:.1f}s ({elapsed/60:.1f}min). Created {entry_count} entries.")
+            if progress_callback:
+                _, placeholder_count = _count_kb_artifacts(kb_root)
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'ingest_completed',
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'material_count': len(materials),
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': round(elapsed, 1),
+                        'entry_count': entry_count,
+                        'placeholder_count': placeholder_count,
+                        'returncode': proc.returncode,
+                        'success': proc.returncode == 0 and entry_count > 0,
+                    }
+                )
 
             if stalled_before_write and entry_count == 0:
                 log("Warning: ingest stalled before writing any KB artifacts")
@@ -895,37 +1033,75 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
 
         except Exception as e:
             log(f"Ingest attempt {attempt} failed: {e}")
+            if progress_callback:
+                entry_count, placeholder_count = _count_kb_artifacts(kb_root)
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'ingest_exception',
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'material_count': len(materials),
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': round(time.time() - start, 1),
+                        'entry_count': entry_count,
+                        'placeholder_count': placeholder_count,
+                        'error': str(e),
+                    }
+                )
             if attempt < MAX_RETRIES:
                 log("Retrying in 5 seconds...")
                 await asyncio.sleep(5)
                 continue
             return False
         finally:
+            heartbeat_stop.set()
+            if heartbeat_task is not None:
+                await heartbeat_task
             if proc is not None:
                 _cleanup_agent_process_tempdir(proc)
 
     return False
 
 
-async def run_tidy(isolated_dir: Path, focus: str = 'general') -> bool:
+async def run_tidy(
+    isolated_dir: Path,
+    focus: str = 'general',
+    *,
+    progress_callback: ProgressCallback | None = None,
+    progress_meta: dict[str, Any] | None = None,
+) -> bool:
     """Run tidy through the shared Sediment CLI contract."""
     kb_dir = isolated_dir / 'knowledge-base'
     if not kb_dir.exists():
         return False
+    progress_base = dict(progress_meta or {})
 
-    entry_count = len(list((kb_dir / 'entries').glob('*.md')))
-    placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
+    entry_count, placeholder_count = _count_kb_artifacts(kb_dir)
     log(f"Running tidy ({focus}). Current: {entry_count} entries, {placeholder_count} placeholders.")
 
     if offline_benchmark_mode_enabled():
         log("Running offline white-box tidy fallback...")
         tidy_offline_kb(kb_dir, focus=focus)
-        new_entry_count = len(list((kb_dir / 'entries').glob('*.md')))
-        new_placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
+        new_entry_count, new_placeholder_count = _count_kb_artifacts(kb_dir)
         log(
             f"  Offline tidy ({focus}) complete. "
             f"Now: {new_entry_count} entries, {new_placeholder_count} placeholders."
         )
+        if progress_callback:
+            progress_callback(
+                {
+                    **progress_base,
+                    'event': 'tidy_completed',
+                    'mode': 'offline',
+                    'focus': focus,
+                    'success': True,
+                    'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'elapsed_seconds': 0.0,
+                    'entry_count': new_entry_count,
+                    'placeholder_count': new_placeholder_count,
+                }
+            )
         return True
 
     MAX_RETRIES = 2
@@ -939,35 +1115,97 @@ async def run_tidy(isolated_dir: Path, focus: str = 'general') -> bool:
         log(f"Tidy ({focus}) attempt {attempt}/{MAX_RETRIES}...")
         start = time.time()
         proc = None
+        heartbeat_stop = asyncio.Event()
+        heartbeat_task = None
 
         try:
+            if progress_callback:
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'tidy_started',
+                        'focus': focus,
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': 0.0,
+                        'entry_count': entry_count,
+                        'placeholder_count': placeholder_count,
+                    }
+                )
             proc = await _spawn_agent_process(
                 prompt=prompt,
                 cwd=isolated_dir,
                 env=env,
                 max_budget_usd='5',
             )
+            heartbeat_task = asyncio.create_task(
+                _progress_heartbeat(
+                    kb_dir=kb_dir,
+                    started_at=start,
+                    progress_callback=progress_callback,
+                    base_payload={
+                        **progress_base,
+                        'focus': focus,
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                    },
+                    stop_event=heartbeat_stop,
+                )
+            )
 
-            await _stream_subprocess(proc, 'tidy')
+            stream_task = asyncio.create_task(_stream_subprocess(proc, 'tidy'))
             try:
                 await asyncio.wait_for(proc.wait(), timeout=600)
             except asyncio.TimeoutError:
                 log(f"  Tidy timed out after 10 minutes, killing process...")
                 proc.kill()
                 await proc.wait()
+                await stream_task
+                if progress_callback:
+                    current_entries, current_placeholders = _count_kb_artifacts(kb_dir)
+                    progress_callback(
+                        {
+                            **progress_base,
+                            'event': 'tidy_timeout',
+                            'focus': focus,
+                            'attempt': attempt,
+                            'max_retries': MAX_RETRIES,
+                            'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'elapsed_seconds': round(time.time() - start, 1),
+                            'entry_count': current_entries,
+                            'placeholder_count': current_placeholders,
+                        }
+                    )
                 if attempt < MAX_RETRIES:
                     log("Retrying in 5 seconds...")
                     await asyncio.sleep(5)
                     continue
                 return False
+            await stream_task
 
             elapsed = time.time() - start
-            new_entry_count = len(list((kb_dir / 'entries').glob('*.md')))
-            new_placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
+            new_entry_count, new_placeholder_count = _count_kb_artifacts(kb_dir)
             log(
                 f"  Tidy ({focus}) complete in {elapsed:.1f}s. "
                 f"Now: {new_entry_count} entries, {new_placeholder_count} placeholders."
             )
+            if progress_callback:
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'tidy_completed',
+                        'focus': focus,
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': round(elapsed, 1),
+                        'entry_count': new_entry_count,
+                        'placeholder_count': new_placeholder_count,
+                        'returncode': proc.returncode,
+                        'success': proc.returncode == 0,
+                    }
+                )
 
             if proc.returncode != 0:
                 log(f"Warning: tidy ({focus}) exited with code {proc.returncode}")
@@ -980,12 +1218,31 @@ async def run_tidy(isolated_dir: Path, focus: str = 'general') -> bool:
 
         except Exception as e:
             log(f"Tidy ({focus}) attempt {attempt} failed: {e}")
+            if progress_callback:
+                current_entries, current_placeholders = _count_kb_artifacts(kb_dir)
+                progress_callback(
+                    {
+                        **progress_base,
+                        'event': 'tidy_exception',
+                        'focus': focus,
+                        'attempt': attempt,
+                        'max_retries': MAX_RETRIES,
+                        'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'elapsed_seconds': round(time.time() - start, 1),
+                        'entry_count': current_entries,
+                        'placeholder_count': current_placeholders,
+                        'error': str(e),
+                    }
+                )
             if attempt < MAX_RETRIES:
                 log("Retrying in 5 seconds...")
                 await asyncio.sleep(5)
                 continue
             return False
         finally:
+            heartbeat_stop.set()
+            if heartbeat_task is not None:
+                await heartbeat_task
             if proc is not None:
                 _cleanup_agent_process_tempdir(proc)
 
@@ -1221,12 +1478,23 @@ class IsolatedBuilder:
             # use server for testing...
     """
 
-    def __init__(self, build_type: str = 'full', port: int = 18800):
+    def __init__(
+        self,
+        build_type: str = 'full',
+        port: int = 18800,
+        progress_callback: ProgressCallback | None = None,
+    ):
         self.build_type = build_type
         self.port = port
         self.isolated_dir: Path | None = None
         self.kb_dir: Path | None = None
         self.sediment: MCPServer | InProcessMCPServer | None = None
+        self.progress_callback = progress_callback
+
+    def _emit_progress(self, **payload: Any) -> None:
+        if self.progress_callback is None:
+            return
+        self.progress_callback(payload)
 
     async def __aenter__(self):
         await self.create_isolated_copy()
@@ -1285,17 +1553,49 @@ class IsolatedBuilder:
         for i, batch in enumerate(batches, 1):
             batch_size = sum(f.stat().st_size for f in batch) / 1024
             log(f"\n  [full {i}/{len(batches)}] ingest {len(batch)} files ({batch_size:.0f}KB)")
+            self._emit_progress(
+                subphase='ingest',
+                stage_label='full_ingest',
+                current_chunk=i,
+                total_chunks=len(batches),
+                batch_file_count=len(batch),
+                batch_size_kb=round(batch_size, 1),
+            )
             batch_start = time.time()
-            success = await run_ingest(self.isolated_dir, batch)
+            success = await run_ingest(
+                self.isolated_dir,
+                batch,
+                progress_callback=self.progress_callback,
+                progress_meta={
+                    'subphase': 'ingest',
+                    'stage_label': 'full_ingest',
+                    'current_chunk': i,
+                    'total_chunks': len(batches),
+                    'batch_file_count': len(batch),
+                    'batch_size_kb': round(batch_size, 1),
+                },
+            )
             batch_elapsed = time.time() - batch_start
             if not success:
                 log(f"  Full ingest chunk {i} failed after {batch_elapsed:.1f}s")
             else:
                 log(f"  Full ingest chunk {i} complete in {batch_elapsed:.1f}s")
 
-            entry_count = len(list((self.kb_dir / 'entries').glob('*.md')))
-            placeholder_count = len(list((self.kb_dir / 'placeholders').glob('*.md')))
+            entry_count, placeholder_count = _count_kb_artifacts(self.kb_dir)
             log(f"    KB now: {entry_count} entries, {placeholder_count} placeholders")
+            self._emit_progress(
+                event='chunk_summary',
+                subphase='ingest',
+                stage_label='full_ingest',
+                current_chunk=i,
+                total_chunks=len(batches),
+                batch_file_count=len(batch),
+                batch_size_kb=round(batch_size, 1),
+                elapsed_seconds=round(batch_elapsed, 1),
+                success=success,
+                entry_count=entry_count,
+                placeholder_count=placeholder_count,
+            )
 
         log(f"Total ingest phase complete in {time.time() - total_ingest_start:.1f}s")
 
@@ -1303,7 +1603,16 @@ class IsolatedBuilder:
         log(f"Phase 2: Tidy")
         log(f"{'─'*60}")
         tidy_start = time.time()
-        await run_tidy(self.isolated_dir, focus='general')
+        self._emit_progress(subphase='tidy', stage_label='full_tidy')
+        await run_tidy(
+            self.isolated_dir,
+            focus='general',
+            progress_callback=self.progress_callback,
+            progress_meta={
+                'subphase': 'tidy',
+                'stage_label': 'full_tidy',
+            },
+        )
         tidy_elapsed = time.time() - tidy_start
         log(f"Tidy phase complete in {tidy_elapsed:.1f}s")
 
@@ -1311,12 +1620,20 @@ class IsolatedBuilder:
         log("Phase 3: Canonical convergence tidy")
         log(f"{'─'*60}")
         convergence_start = time.time()
-        await run_tidy(self.isolated_dir, focus='canonicalization')
+        self._emit_progress(subphase='canonical_convergence', stage_label='full_canonical_convergence')
+        await run_tidy(
+            self.isolated_dir,
+            focus='canonicalization',
+            progress_callback=self.progress_callback,
+            progress_meta={
+                'subphase': 'canonical_convergence',
+                'stage_label': 'full_canonical_convergence',
+            },
+        )
         convergence_elapsed = time.time() - convergence_start
         log(f"Canonical convergence complete in {convergence_elapsed:.1f}s")
 
-        final_entry_count = len(list((self.kb_dir / 'entries').glob('*.md')))
-        final_placeholder_count = len(list((self.kb_dir / 'placeholders').glob('*.md')))
+        final_entry_count, final_placeholder_count = _count_kb_artifacts(self.kb_dir)
         diagnostics = collect_kb_diagnostics(self.kb_dir)
         log(f"  After tidy: {final_entry_count} entries, {final_placeholder_count} placeholders")
         log(
@@ -1336,34 +1653,101 @@ class IsolatedBuilder:
             log(f"\n{'─'*60}")
             log(f"Phase {i+1}/5: Batch ingest ({len(batch)} files, {batch_size:.0f}KB)")
             log(f"{'─'*60}")
+            self._emit_progress(
+                subphase='ingest',
+                stage_label='batched_ingest',
+                current_chunk=i + 1,
+                total_chunks=len(batches),
+                batch_file_count=len(batch),
+                batch_size_kb=round(batch_size, 1),
+            )
             batch_start = time.time()
-            success = await run_ingest(self.isolated_dir, batch)
+            success = await run_ingest(
+                self.isolated_dir,
+                batch,
+                progress_callback=self.progress_callback,
+                progress_meta={
+                    'subphase': 'ingest',
+                    'stage_label': 'batched_ingest',
+                    'current_chunk': i + 1,
+                    'total_chunks': len(batches),
+                    'batch_file_count': len(batch),
+                    'batch_size_kb': round(batch_size, 1),
+                },
+            )
             if success:
                 log(f"  Batch ingest complete in {time.time() - batch_start:.1f}s")
                 log(f"  Running tidy...")
                 tidy_start = time.time()
-                await run_tidy(self.isolated_dir, focus='general')
+                self._emit_progress(
+                    subphase='tidy',
+                    stage_label='batched_tidy',
+                    current_chunk=i + 1,
+                    total_chunks=len(batches),
+                )
+                await run_tidy(
+                    self.isolated_dir,
+                    focus='general',
+                    progress_callback=self.progress_callback,
+                    progress_meta={
+                        'subphase': 'tidy',
+                        'stage_label': 'batched_tidy',
+                        'current_chunk': i + 1,
+                        'total_chunks': len(batches),
+                    },
+                )
                 log(f"  Tidy complete in {time.time() - tidy_start:.1f}s")
             else:
                 log(f"  Batch ingest failed after {time.time() - batch_start:.1f}s")
+            entry_count, placeholder_count = _count_kb_artifacts(self.kb_dir)
+            self._emit_progress(
+                event='chunk_summary',
+                subphase='batched_cycle',
+                stage_label='batched_cycle',
+                current_chunk=i + 1,
+                total_chunks=len(batches),
+                batch_file_count=len(batch),
+                batch_size_kb=round(batch_size, 1),
+                elapsed_seconds=round(time.time() - batch_start, 1),
+                success=success,
+                entry_count=entry_count,
+                placeholder_count=placeholder_count,
+            )
             await asyncio.sleep(1)
 
         log(f"\n{'─'*60}")
         log("Final global tidy across all batched ingests")
         log(f"{'─'*60}")
         final_tidy_start = time.time()
-        await run_tidy(self.isolated_dir, focus='general')
+        self._emit_progress(subphase='final_tidy', stage_label='batched_final_tidy')
+        await run_tidy(
+            self.isolated_dir,
+            focus='general',
+            progress_callback=self.progress_callback,
+            progress_meta={
+                'subphase': 'final_tidy',
+                'stage_label': 'batched_final_tidy',
+            },
+        )
         log(f"  Final global tidy complete in {time.time() - final_tidy_start:.1f}s")
 
         log(f"\n{'─'*60}")
         log("Final canonical convergence tidy")
         log(f"{'─'*60}")
         final_convergence_start = time.time()
-        await run_tidy(self.isolated_dir, focus='canonicalization')
+        self._emit_progress(subphase='canonical_convergence', stage_label='batched_canonical_convergence')
+        await run_tidy(
+            self.isolated_dir,
+            focus='canonicalization',
+            progress_callback=self.progress_callback,
+            progress_meta={
+                'subphase': 'canonical_convergence',
+                'stage_label': 'batched_canonical_convergence',
+            },
+        )
         log(f"  Final canonical convergence complete in {time.time() - final_convergence_start:.1f}s")
 
-        final_entry_count = len(list((self.kb_dir / 'entries').glob('*.md')))
-        final_placeholder_count = len(list((self.kb_dir / 'placeholders').glob('*.md')))
+        final_entry_count, final_placeholder_count = _count_kb_artifacts(self.kb_dir)
         log(f"\n{'─'*60}")
         log(f"Batched build complete: {final_entry_count} entries, {final_placeholder_count} placeholders")
         log(f"{'─'*60}")

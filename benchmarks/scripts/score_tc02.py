@@ -27,6 +27,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from typing import Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SRC_ROOT = PROJECT_ROOT / 'src'
@@ -34,6 +35,12 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from sediment.llm_cli import build_cli_command, collect_output
+
+
+SCORING_HEARTBEAT_SECONDS = max(
+    5,
+    int(os.environ.get('SEDIMENT_BENCHMARK_SCORING_HEARTBEAT_SECONDS', '20')),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +249,14 @@ def build_llm_scoring_prompt(batch: list[dict]) -> str:
     return '\n'.join(parts)
 
 
-def run_llm_scoring(batch: list[dict], workdir: Path | None = None) -> list[dict] | None:
+def run_llm_scoring(
+    batch: list[dict],
+    workdir: Path | None = None,
+    *,
+    progress_callback: Callable[[dict], None] | None = None,
+    batch_num: int | None = None,
+    total_batches: int | None = None,
+) -> list[dict] | None:
     """
     Use the shared Sediment LLM CLI contract to score a batch of questions.
     Returns list of scoring results, or None if LLM scoring fails.
@@ -256,6 +270,7 @@ def run_llm_scoring(batch: list[dict], workdir: Path | None = None) -> list[dict
     prompt_file = None
     payload_file = None
     skill_file = None
+    proc = None
     if needs_prompt_files:
         temp_root_parent = workdir if workdir and workdir.exists() else None
         temp_root = Path(
@@ -280,16 +295,46 @@ def run_llm_scoring(batch: list[dict], workdir: Path | None = None) -> list[dict
             cwd=workdir,
             extra_args=extra_args,
         )
-        proc = subprocess.run(
+        started_at = time.time()
+        proc = subprocess.Popen(
             invocation.command,
-            input=invocation.stdin_data,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=600,  # 10 minutes per batch
             cwd=str(workdir) if workdir else None,
         )
+        stdout = ''
+        stderr = ''
+        pending_input = invocation.stdin_data
+        while True:
+            elapsed = time.time() - started_at
+            remaining = 600 - elapsed
+            if remaining <= 0:
+                proc.kill()
+                stdout, stderr = proc.communicate()
+                raise subprocess.TimeoutExpired(invocation.command, 600, output=stdout, stderr=stderr)
+            try:
+                stdout, stderr = proc.communicate(
+                    input=pending_input,
+                    timeout=min(SCORING_HEARTBEAT_SECONDS, remaining),
+                )
+                break
+            except subprocess.TimeoutExpired:
+                pending_input = None
+                if progress_callback:
+                    progress_callback(
+                        {
+                            'phase': 'score_tc02',
+                            'event': 'heartbeat',
+                            'batch_num': batch_num,
+                            'total_batches': total_batches,
+                            'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                            'elapsed_seconds': round(elapsed, 1),
+                        }
+                    )
 
-        output = collect_output(invocation, stdout=proc.stdout, stderr=proc.stderr)
+        output = collect_output(invocation, stdout=stdout, stderr=stderr)
 
         # Try to extract JSON from the output
         # Claude might wrap JSON in markdown code blocks
@@ -318,9 +363,44 @@ def run_llm_scoring(batch: list[dict], workdir: Path | None = None) -> list[dict
 
         return result
 
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
+    except subprocess.TimeoutExpired:
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'score_tc02',
+                    'event': 'batch_timeout',
+                    'batch_num': batch_num,
+                    'total_batches': total_batches,
+                }
+            )
+        return None
+    except json.JSONDecodeError:
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'score_tc02',
+                    'event': 'batch_parse_failed',
+                    'batch_num': batch_num,
+                    'total_batches': total_batches,
+                }
+            )
+        return None
+    except Exception as exc:
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'score_tc02',
+                    'event': 'batch_exception',
+                    'batch_num': batch_num,
+                    'total_batches': total_batches,
+                    'error': str(exc),
+                }
+            )
         return None
     finally:
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.communicate()
         if temp_root is not None:
             shutil.rmtree(temp_root, ignore_errors=True)
 
@@ -395,7 +475,13 @@ def _build_scoring_agent_settings(*, cli_value: str, max_budget_usd: str) -> tup
     )
 
 
-def score_with_llm(questions: list[dict], answers_lookup: dict, workdir: Path | None = None) -> list[dict]:
+def score_with_llm(
+    questions: list[dict],
+    answers_lookup: dict,
+    workdir: Path | None = None,
+    *,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> list[dict]:
     """
     Score all questions using LLM in batches.
     Falls back to script scoring for failed batches.
@@ -404,6 +490,17 @@ def score_with_llm(questions: list[dict], answers_lookup: dict, workdir: Path | 
     all_results = []
     total_batches = (len(questions) + batch_size - 1) // batch_size
     print(f"  Total batches: {total_batches} ({len(questions)} questions)", flush=True)
+    if progress_callback:
+        progress_callback(
+            {
+                'phase': 'score_tc02',
+                'event': 'score_started',
+                'total_batches': total_batches,
+                'completed_batches': 0,
+                'total_questions': len(questions),
+                'scored_questions': 0,
+            }
+        )
 
     for i in range(0, len(questions), batch_size):
         batch_questions = questions[i:i + batch_size]
@@ -411,6 +508,19 @@ def score_with_llm(questions: list[dict], answers_lookup: dict, workdir: Path | 
 
         print(f"  LLM scoring batch {batch_num}/{total_batches}...", flush=True)
         batch_start = time.time()
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'score_tc02',
+                    'event': 'batch_started',
+                    'batch_num': batch_num,
+                    'total_batches': total_batches,
+                    'completed_batches': batch_num - 1,
+                    'total_questions': len(questions),
+                    'scored_questions': i,
+                    'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                }
+            )
 
         # Prepare batch data with answers
         batch_data = []
@@ -427,7 +537,13 @@ def score_with_llm(questions: list[dict], answers_lookup: dict, workdir: Path | 
             })
 
         # Try LLM scoring
-        llm_scores = run_llm_scoring(batch_data, workdir=workdir)
+        llm_scores = run_llm_scoring(
+            batch_data,
+            workdir=workdir,
+            progress_callback=progress_callback,
+            batch_num=batch_num,
+            total_batches=total_batches,
+        )
         batch_elapsed = time.time() - batch_start
 
         if llm_scores:
@@ -478,6 +594,22 @@ def score_with_llm(questions: list[dict], answers_lookup: dict, workdir: Path | 
                 script_result['id'] = qid
                 all_results.append(script_result)
 
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'score_tc02',
+                    'event': 'batch_completed',
+                    'batch_num': batch_num,
+                    'total_batches': total_batches,
+                    'completed_batches': batch_num,
+                    'total_questions': len(questions),
+                    'scored_questions': min(i + len(batch_questions), len(questions)),
+                    'batch_method': 'llm' if llm_scores else 'script_fallback',
+                    'heartbeat_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'elapsed_seconds': round(batch_elapsed, 1),
+                }
+            )
+
     return all_results
 
 
@@ -485,7 +617,14 @@ def score_with_llm(questions: list[dict], answers_lookup: dict, workdir: Path | 
 # Main Scoring Runner
 # ---------------------------------------------------------------------------
 
-def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_type: str | None = None) -> dict:
+def run_scoring(
+    answers_file: Path,
+    judge_file: Path,
+    output_dir: Path,
+    build_type: str | None = None,
+    *,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> dict:
     """Run QA accuracy scoring and produce report."""
     with open(judge_file, 'r', encoding='utf-8') as f:
         judge_data = json.load(f)
@@ -508,7 +647,12 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_ty
     print(f"  LLM 评分失败时回退到脚本评分")
 
     # Score with LLM (with script fallback)
-    scored_results = score_with_llm(questions, answers, workdir=output_dir)
+    scored_results = score_with_llm(
+        questions,
+        answers,
+        workdir=output_dir,
+        progress_callback=progress_callback,
+    )
 
     # Build lookup by id
     results_by_id = {r['id']: r for r in scored_results}
@@ -598,6 +742,24 @@ def run_scoring(answers_file: Path, judge_file: Path, output_dir: Path, build_ty
     print(f"\n最低分题目 (Top 10):")
     for d in details[:10]:
         print(f"  Q{d['id']} [{d['difficulty']}]: {d['earned']:.3f}/{d['max_points']:.3f} | {d['question']}")
+
+    if progress_callback:
+        total_batches = (len(questions) + 9) // 10
+        progress_callback(
+            {
+                'phase': 'score_tc02',
+                'event': 'score_completed',
+                'total_batches': total_batches,
+                'completed_batches': total_batches,
+                'total_questions': len(questions),
+                'scored_questions': len(questions),
+                'answered': result['answered'],
+                'zero_score': result['zero_score'],
+                'final_score': result['final_score'],
+                'llm_scored': llm_count,
+                'script_fallback': script_count,
+            }
+        )
 
     return result
 

@@ -29,6 +29,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 # Add scripts dir to path for isolated_build imports
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -246,7 +247,12 @@ async def _ask_window(
     return results
 
 
-async def run_concept_test(server: MCPServer, judge_file: Path) -> list[dict]:
+async def run_concept_test(
+    server: MCPServer,
+    judge_file: Path,
+    *,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> list[dict]:
     """Run TC-01: concept coverage test."""
     with open(judge_file, 'r', encoding='utf-8') as f:
         judge_data = json.load(f)
@@ -298,12 +304,26 @@ async def run_concept_test(server: MCPServer, judge_file: Path) -> list[dict]:
                 'sources': sources,
                 'definition': item['definition'],
             })
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'tc01',
+                    'answered': len(results),
+                    'total_questions': total,
+                    'empty_answers': empty_count,
+                }
+            )
 
     log(f"Concept test complete: {len(results)}/{total}")
     return results
 
 
-async def run_qa_test(server: MCPServer, judge_file: Path) -> list[dict]:
+async def run_qa_test(
+    server: MCPServer,
+    judge_file: Path,
+    *,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> list[dict]:
     """Run TC-02: QA accuracy test."""
     with open(judge_file, 'r', encoding='utf-8') as f:
         judge_data = json.load(f)
@@ -350,6 +370,15 @@ async def run_qa_test(server: MCPServer, judge_file: Path) -> list[dict]:
                 'standard_answer': q.get('standard_answer', ''),
                 'expected_keywords': q.get('expected_keywords', []),
             })
+        if progress_callback:
+            progress_callback(
+                {
+                    'phase': 'tc02',
+                    'answered': len(results),
+                    'total_questions': total,
+                    'empty_answers': empty_count,
+                }
+            )
 
     log(f"QA test complete: {len(results)}/{total}")
     return results
@@ -371,7 +400,7 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
     log(f"Starting {build_type} build on port {port}")
     log(f"{'='*60}")
 
-    builder = IsolatedBuilder(build_type=build_type, port=port)
+    builder: IsolatedBuilder | None = None
     results = {
         'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'build_type': build_type,
@@ -380,7 +409,70 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
     }
     build_start = time.time()
 
+    def on_build_progress(progress: dict) -> None:
+        isolated_dir = str(builder.isolated_dir) if builder and builder.isolated_dir else None
+        update_live_status(
+            build_type,
+            'build_kb',
+            isolated_dir=isolated_dir,
+            build_event=progress.get('event'),
+            current_subphase=progress.get('subphase'),
+            stage_label=progress.get('stage_label'),
+            current_chunk=progress.get('current_chunk'),
+            total_chunks=progress.get('total_chunks'),
+            batch_file_count=progress.get('batch_file_count'),
+            batch_size_kb=progress.get('batch_size_kb'),
+            focus=progress.get('focus'),
+            attempt=progress.get('attempt'),
+            max_retries=progress.get('max_retries'),
+            material_count=progress.get('material_count'),
+            heartbeat_at=progress.get('heartbeat_at'),
+            elapsed_seconds=progress.get('elapsed_seconds'),
+            entry_count=progress.get('entry_count'),
+            placeholder_count=progress.get('placeholder_count'),
+            build_success=progress.get('success'),
+            build_error=progress.get('error'),
+            build_returncode=progress.get('returncode'),
+        )
+
+    def on_question_progress(progress: dict) -> None:
+        phase = progress.get('phase') or 'questions'
+        update_live_status(
+            build_type,
+            phase,
+            answered=progress.get('answered'),
+            total_questions=progress.get('total_questions'),
+            empty_answers=progress.get('empty_answers'),
+        )
+
+    def on_score_progress(progress: dict) -> None:
+        phase = progress.get('phase') or 'scoring'
+        update_live_status(
+            build_type,
+            phase,
+            scoring_event=progress.get('event'),
+            batch_num=progress.get('batch_num'),
+            total_batches=progress.get('total_batches'),
+            completed_batches=progress.get('completed_batches'),
+            batch_method=progress.get('batch_method'),
+            heartbeat_at=progress.get('heartbeat_at'),
+            elapsed_seconds=progress.get('elapsed_seconds'),
+            scored_questions=progress.get('scored_questions'),
+            total_questions=progress.get('total_questions'),
+            answered=progress.get('answered'),
+            zero_score=progress.get('zero_score'),
+            final_score=progress.get('final_score'),
+            llm_scored=progress.get('llm_scored'),
+            script_fallback=progress.get('script_fallback'),
+            scoring_error=progress.get('error'),
+        )
+
     try:
+        builder = IsolatedBuilder(
+            build_type=build_type,
+            port=port,
+            progress_callback=on_build_progress,
+        )
         # Step 1: Create isolated copy
         log(f"\n[STEP 1/5] Creating isolated project copy...")
         update_live_status(build_type, 'create_isolated_copy')
@@ -460,7 +552,11 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
             log(f"\n[STEP 4/5] Running TC-01: Concept Coverage (100 questions)...")
             update_live_status(build_type, 'tc01')
             step_start = time.time()
-            concept_results = await run_concept_test(server, JUDGE_DIR / '概念.json')
+            concept_results = await run_concept_test(
+                server,
+                JUDGE_DIR / '概念.json',
+                progress_callback=on_question_progress,
+            )
             log(f"  TC-01 complete in {time.time() - step_start:.1f}s")
 
             # Save concept answers
@@ -472,7 +568,14 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
             # Score TC-01
             log(f"\n  Scoring TC-01...")
             from score_tc01 import run_scoring as score_tc01
-            tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir, build_type)
+            update_live_status(build_type, 'score_tc01')
+            tc01_result = score_tc01(
+                concept_answers_file,
+                JUDGE_DIR / '概念.json',
+                output_dir,
+                build_type,
+                progress_callback=on_score_progress,
+            )
             results['tc01'] = tc01_result
             log(f"  TC-01 score: {tc01_result['final_score']:.1f}/40")
 
@@ -480,7 +583,11 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
             log(f"\n[STEP 5/5] Running TC-02: QA Accuracy (100 questions)...")
             update_live_status(build_type, 'tc02', tc01_score=tc01_result['final_score'])
             step_start = time.time()
-            qa_results = await run_qa_test(server, JUDGE_DIR / '问答.json')
+            qa_results = await run_qa_test(
+                server,
+                JUDGE_DIR / '问答.json',
+                progress_callback=on_question_progress,
+            )
             log(f"  TC-02 complete in {time.time() - step_start:.1f}s")
 
             # Save QA answers
@@ -492,7 +599,14 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
             # Score TC-02
             log(f"\n  Scoring TC-02...")
             from score_tc02 import run_scoring as score_tc02
-            tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir, build_type)
+            update_live_status(build_type, 'score_tc02', tc01_score=tc01_result['final_score'])
+            tc02_result = score_tc02(
+                qa_answers_file,
+                JUDGE_DIR / '问答.json',
+                output_dir,
+                build_type,
+                progress_callback=on_score_progress,
+            )
             results['tc02'] = tc02_result
             log(f"  TC-02 score: {tc02_result['final_score']:.1f}/60")
 
@@ -562,8 +676,44 @@ def score_existing(build_type: str, output_dir: Path) -> dict:
     from score_tc01 import run_scoring as score_tc01
     from score_tc02 import run_scoring as score_tc02
 
-    tc01_result = score_tc01(concept_answers_file, JUDGE_DIR / '概念.json', output_dir, build_type)
-    tc02_result = score_tc02(qa_answers_file, JUDGE_DIR / '问答.json', output_dir, build_type)
+    def on_score_progress(progress: dict) -> None:
+        phase = progress.get('phase') or 'scoring'
+        update_live_status(
+            build_type,
+            phase,
+            scoring_event=progress.get('event'),
+            batch_num=progress.get('batch_num'),
+            total_batches=progress.get('total_batches'),
+            completed_batches=progress.get('completed_batches'),
+            batch_method=progress.get('batch_method'),
+            heartbeat_at=progress.get('heartbeat_at'),
+            elapsed_seconds=progress.get('elapsed_seconds'),
+            scored_questions=progress.get('scored_questions'),
+            total_questions=progress.get('total_questions'),
+            answered=progress.get('answered'),
+            zero_score=progress.get('zero_score'),
+            final_score=progress.get('final_score'),
+            llm_scored=progress.get('llm_scored'),
+            script_fallback=progress.get('script_fallback'),
+            scoring_error=progress.get('error'),
+        )
+
+    update_live_status(build_type, 'score_tc01')
+    tc01_result = score_tc01(
+        concept_answers_file,
+        JUDGE_DIR / '概念.json',
+        output_dir,
+        build_type,
+        progress_callback=on_score_progress,
+    )
+    update_live_status(build_type, 'score_tc02', tc01_score=tc01_result['final_score'])
+    tc02_result = score_tc02(
+        qa_answers_file,
+        JUDGE_DIR / '问答.json',
+        output_dir,
+        build_type,
+        progress_callback=on_score_progress,
+    )
 
     total_score = tc01_result['final_score'] + tc02_result['final_score']
 
@@ -753,14 +903,29 @@ async def main():
         # Generate HTML report
         if not args.no_report:
             try:
+                update_live_status(None, 'reporting', status='running', average_score=round(avg_score, 2))
                 from generate_report import generate_report_from_results
                 report_files = generate_report_from_results(RESULTS_DIR, all_results)
                 for rf in report_files:
                     log(f"HTML report: {rf}")
+                update_live_status(
+                    None,
+                    'reporting',
+                    status='completed',
+                    average_score=round(avg_score, 2),
+                    report_files=report_files,
+                )
             except Exception as e:
                 log(f"Warning: Failed to generate HTML report: {e}")
                 import traceback
                 log(traceback.format_exc())
+                update_live_status(
+                    None,
+                    'reporting',
+                    status='failed',
+                    average_score=round(avg_score, 2),
+                    error=f'report generation failed: {e}',
+                )
 
     else:
         log("No valid scores obtained")
@@ -776,7 +941,17 @@ async def main():
 
 
 if __name__ == '__main__':
-    score = asyncio.run(main())
+    try:
+        score = asyncio.run(main())
+    except KeyboardInterrupt:
+        update_live_status(
+            None,
+            'interrupted',
+            status='interrupted',
+            interrupted_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        )
+        log("Benchmark interrupted by user. Preserved current artifacts and isolated dirs for diagnosis.")
+        sys.exit(130)
     print(f"\nFINAL_SCORE={score:.1f}")
     if score >= PASS_THRESHOLD:
         print(f"PASSED: Score exceeds {PASS_THRESHOLD} points")

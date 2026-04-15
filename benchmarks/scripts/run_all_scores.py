@@ -197,6 +197,8 @@ def run_preflight_checks() -> dict:
         'uses_temp_kb_only': True,
         'pass_threshold': PASS_THRESHOLD,
         'shared_llm_cli': os.environ.get('SEDIMENT_CLI', 'claude'),
+        'benchmark_build_mode': os.environ.get('SEDIMENT_BENCHMARK_BUILD_MODE', '').strip() or 'default',
+        'benchmark_transport_mode': os.environ.get('SEDIMENT_BENCHMARK_TRANSPORT', '').strip() or 'auto',
         'results_layout': {
             'builds_dir': str(BUILDS_DIR),
             'reports_dir': str(REPORTS_DIR),
@@ -438,18 +440,20 @@ async def build_and_test(build_type: str, output_dir: Path, port: int, preserve_
             update_live_status(build_type, 'failed', status='failed', error=results['error'])
             return results
 
-        # Step 3: Start MCP server
-        log(f"\n[STEP 3/5] Starting MCP server on port {port}...")
-        update_live_status(build_type, 'start_mcp_server', port=port)
+        # Step 3: Start benchmark query transport
+        transport_mode = builder.query_transport_mode(port=port)
+        log(f"\n[STEP 3/5] Starting benchmark query transport ({transport_mode})...")
+        update_live_status(build_type, 'start_query_transport', port=port, query_transport=transport_mode)
         step_start = time.time()
-        server = builder.start_mcp_server(port=port)
+        server = builder.start_query_server(port=port)
+        results['query_transport'] = server.transport_name
         started = await server.start()
         if not started:
-            log("  FAILED to start MCP server")
-            results['error'] = 'MCP server failed to start'
+            log("  FAILED to start benchmark query transport")
+            results['error'] = 'Benchmark query transport failed to start'
             update_live_status(build_type, 'failed', status='failed', error=results['error'])
             return results
-        log(f"  MCP server ready in {time.time() - step_start:.1f}s")
+        log(f"  Query transport ready in {time.time() - step_start:.1f}s")
 
         try:
             # Step 4: Run concept test
@@ -672,6 +676,7 @@ async def main():
                 'isolated_dir': v.get('isolated_dir'),
                 'cleanup_policy': v.get('cleanup_policy'),
                 'kb_diagnostics_file': v.get('kb_diagnostics_file'),
+                'query_transport': v.get('query_transport'),
             } for k, v in all_results.items()},
             'average_score': round(avg_score, 2),
             'max_score': 100,

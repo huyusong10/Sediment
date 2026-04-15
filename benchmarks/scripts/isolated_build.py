@@ -21,17 +21,23 @@ isolated_build.py — Sediment 隔离构建脚本
 
 import argparse
 import asyncio
+import errno
 import json
 import os
 import random
 import re
 import shlex
 import shutil
+import socket
 import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
 from harness_contract import load_benchmark_paths
 
@@ -56,6 +62,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from sediment.llm_cli import build_cli_command
+from offline_builder import (
+    build_offline_batch,
+    tidy_offline_kb,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +74,41 @@ from sediment.llm_cli import build_cli_command
 
 def log(msg: str):
     print(f"[isolated_build] {msg}", flush=True)
+
+
+def offline_benchmark_mode_enabled() -> bool:
+    return os.environ.get("SEDIMENT_BENCHMARK_BUILD_MODE", "").strip().lower() in {
+        "offline",
+        "local",
+        "white-box",
+    }
+
+
+def requested_benchmark_transport_mode() -> str:
+    raw = os.environ.get("SEDIMENT_BENCHMARK_TRANSPORT", "").strip().lower()
+    if raw in {"mcp", "http", "tcp"}:
+        return "mcp"
+    if raw in {"local", "inprocess", "in-process", "direct"}:
+        return "inprocess"
+    return "auto"
+
+
+def loopback_bind_supported(host: str, port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        return True
+    except OSError as exc:
+        if exc.errno in {errno.EPERM, errno.EACCES}:
+            log(
+                f"  Local TCP bind is unavailable on {host}:{port} "
+                f"({exc}); benchmark will use in-process transport."
+            )
+            return False
+        return True
+    finally:
+        sock.close()
 
 
 def load_prompt_template(path: Path, **format_kwargs) -> str:
@@ -766,6 +811,13 @@ async def run_ingest(isolated_dir: Path, materials: list[Path]) -> bool:
     kb_entries = kb_root / 'entries'
     kb_entries.mkdir(parents=True, exist_ok=True)
 
+    if offline_benchmark_mode_enabled():
+        log("Running offline white-box ingest fallback...")
+        result = build_offline_batch(kb_root, materials)
+        entry_count = result.get("entry_count", 0)
+        log(f"  Offline ingest created/updated {entry_count} formal entries.")
+        return entry_count > 0
+
     MAX_RETRIES = 2
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -865,6 +917,17 @@ async def run_tidy(isolated_dir: Path, focus: str = 'general') -> bool:
     placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
     log(f"Running tidy ({focus}). Current: {entry_count} entries, {placeholder_count} placeholders.")
 
+    if offline_benchmark_mode_enabled():
+        log("Running offline white-box tidy fallback...")
+        tidy_offline_kb(kb_dir, focus=focus)
+        new_entry_count = len(list((kb_dir / 'entries').glob('*.md')))
+        new_placeholder_count = len(list((kb_dir / 'placeholders').glob('*.md')))
+        log(
+            f"  Offline tidy ({focus}) complete. "
+            f"Now: {new_entry_count} entries, {new_placeholder_count} placeholders."
+        )
+        return True
+
     MAX_RETRIES = 2
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -941,6 +1004,7 @@ class MCPServer:
         self.port = port
         self.isolated_dir = isolated_dir
         self.process = None
+        self.transport_name = 'mcp-http'
         self.base_url = f'http://{MCP_HOST}:{port}'
         self.sse_url = f'{self.base_url}/sediment/'
 
@@ -1091,6 +1155,58 @@ class MCPServer:
             log(f"MCP server on port {self.port} stopped")
 
 
+class InProcessMCPServer:
+    """Benchmark-only transport that calls the same explore entrypoint without TCP bind."""
+
+    def __init__(self, kb_path: Path, isolated_dir: Path):
+        self.kb_path = kb_path
+        self.isolated_dir = isolated_dir
+        self.transport_name = 'inprocess'
+        self._saved_env: dict[str, str | None] = {}
+
+    async def start(self):
+        self._saved_env = {
+            'SEDIMENT_KB_PATH': os.environ.get('SEDIMENT_KB_PATH'),
+            'SEDIMENT_RUNTIME_ALLOW_MATERIAL_FALLBACK': os.environ.get(
+                'SEDIMENT_RUNTIME_ALLOW_MATERIAL_FALLBACK'
+            ),
+            'SEDIMENT_EXPLORE_FAST_ONLY': os.environ.get('SEDIMENT_EXPLORE_FAST_ONLY'),
+        }
+        os.environ['SEDIMENT_KB_PATH'] = str(self.kb_path)
+        os.environ['SEDIMENT_RUNTIME_ALLOW_MATERIAL_FALLBACK'] = '0'
+        os.environ['SEDIMENT_EXPLORE_FAST_ONLY'] = '1'
+        log(
+            "  Using in-process benchmark transport "
+            "(same answer_question entrypoint, no loopback socket)"
+        )
+        return True
+
+    async def call_tool(self, tool_name: str, arguments: dict) -> str:
+        if tool_name != 'knowledge_ask':
+            return json.dumps(
+                {'error': f'Unsupported in-process tool: {tool_name}'},
+                ensure_ascii=False,
+            )
+
+        from sediment.server import answer_question
+
+        question = str(arguments.get('question', ''))
+        result = await asyncio.to_thread(
+            answer_question,
+            question,
+            self.kb_path,
+            self.isolated_dir,
+        )
+        return json.dumps(result, ensure_ascii=False)
+
+    async def stop(self):
+        for key, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
 # ---------------------------------------------------------------------------
 # IsolatedBuilder: Main orchestrator
 # ---------------------------------------------------------------------------
@@ -1110,7 +1226,7 @@ class IsolatedBuilder:
         self.port = port
         self.isolated_dir: Path | None = None
         self.kb_dir: Path | None = None
-        self.sediment: MCPServer | None = None
+        self.sediment: MCPServer | InProcessMCPServer | None = None
 
     async def __aenter__(self):
         await self.create_isolated_copy()
@@ -1252,12 +1368,30 @@ class IsolatedBuilder:
         log(f"Batched build complete: {final_entry_count} entries, {final_placeholder_count} placeholders")
         log(f"{'─'*60}")
 
-    def start_mcp_server(self, port: int | None = None) -> MCPServer:
-        """Start the MCP server. Returns the server instance."""
+    def query_transport_mode(self, port: int | None = None) -> str:
         if port is None:
             port = self.port
-        self.sediment = MCPServer(self.kb_dir, port, self.isolated_dir)
+        requested = requested_benchmark_transport_mode()
+        if requested == 'mcp':
+            return 'mcp'
+        if requested == 'inprocess':
+            return 'inprocess'
+        return 'mcp' if loopback_bind_supported(MCP_HOST, port) else 'inprocess'
+
+    def start_query_server(self, port: int | None = None) -> MCPServer | InProcessMCPServer:
+        """Return the benchmark query transport for this isolated build."""
+        if port is None:
+            port = self.port
+        mode = self.query_transport_mode(port)
+        if mode == 'inprocess':
+            self.sediment = InProcessMCPServer(self.kb_dir, self.isolated_dir)
+        else:
+            self.sediment = MCPServer(self.kb_dir, port, self.isolated_dir)
         return self.sediment
+
+    def start_mcp_server(self, port: int | None = None) -> MCPServer | InProcessMCPServer:
+        """Backward-compatible alias for older callers."""
+        return self.start_query_server(port)
 
     async def cleanup(self, remove_dir: bool = True):
         """Stop MCP server, clean up background processes, optionally remove isolated directory."""

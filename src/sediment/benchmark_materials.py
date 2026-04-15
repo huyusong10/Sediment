@@ -98,12 +98,9 @@ def answer_from_materials(question: str, project_root: Path) -> dict[str, Any] |
 
 
 def _material_root(project_root: Path) -> Path:
-    for candidate in (
-        project_root / "benchmarks" / "material",
-        project_root / "testcase" / "material",
-    ):
-        if candidate.exists():
-            return candidate
+    candidate = project_root / "benchmarks" / "material"
+    if candidate.exists():
+        return candidate
     return project_root / "benchmarks" / "material"
 
 

@@ -215,7 +215,7 @@ def test_answer_question_does_not_fall_back_to_materials(tmp_path: Path, monkeyp
         """,
     )
     _write(
-        project_root / "testcase" / "material" / "secret.md",
+        project_root / "benchmarks" / "material" / "secret.md",
         """
         # 外部秘密
 

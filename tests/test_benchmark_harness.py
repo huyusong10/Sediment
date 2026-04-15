@@ -7,9 +7,19 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+BENCHMARK_HARNESS_ENTRY = REPO_ROOT / "benchmarks" / "scripts" / "harness_contract.py"
+pytestmark = pytest.mark.skipif(
+    not BENCHMARK_HARNESS_ENTRY.exists(),
+    reason="local benchmark harness is not checked into git",
+)
+
 
 def _load_module(name: str, relative_path: str):
-    module_path = Path(__file__).resolve().parent.parent / relative_path
+    module_path = REPO_ROOT / relative_path
     spec = importlib.util.spec_from_file_location(name, module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Could not load module spec for {module_path}")
@@ -21,13 +31,13 @@ def _load_module(name: str, relative_path: str):
     return module
 
 
-def test_harness_contract_points_to_testcase_results_and_repo_skills() -> None:
+def test_harness_contract_points_to_benchmark_results_and_repo_skills() -> None:
     contract = _load_module("benchmark_harness_contract", "benchmarks/scripts/harness_contract.py")
 
     paths = contract.load_benchmark_paths()
 
     assert paths.test_plan_path.name == "TEST_PLAN.md"
-    assert paths.results_dir == paths.project_root / "testcase" / "results"
+    assert paths.results_dir == paths.project_root / "benchmarks" / "results"
     assert paths.sample_workspace_dir == paths.project_root / "examples"
     assert (paths.skills_dir / "ingest" / "SKILL.md").exists()
     assert (paths.skills_dir / "tidy" / "SKILL.md").exists()

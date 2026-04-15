@@ -3,7 +3,7 @@
   const pageData = shell.readJsonScript("sediment-page-data") || {};
   const UI = pageData.ui || {};
   const ROUTES = pageData.routes || {};
-  const { escapeHtml, fetchJson, renderMarkdown } = shell;
+  const { collectUploads, escapeHtml, fetchJson, renderMarkdown } = shell;
   const isZh = document.documentElement.dataset.locale === "zh";
   const state = {
     suggestions: [],
@@ -44,6 +44,11 @@
   function setSearchStatus(message) {
     const node = document.getElementById("search-status");
     if (node) node.textContent = String(message || "");
+  }
+
+  function setDocumentTitle(label) {
+    const suffix = String(pageData.knowledgeName || "").trim();
+    document.title = [String(label || "").trim(), suffix].filter(Boolean).join(" | ") || document.title;
   }
 
   function suggestionNode() {
@@ -232,7 +237,7 @@
     const payload = await fetchJson("/api/portal/home");
     renderPortalStats(payload);
     renderRecentUpdates(payload);
-    setPortalMessage(isZh ? "门户已就绪。" : "Portal ready.");
+    setPortalMessage(UI.home_ready || (isZh ? "知识库已就绪。" : "Knowledge base ready."));
   }
 
   async function loadSuggestions(query) {
@@ -269,36 +274,14 @@
   async function loadEntry() {
     const name = pageData.entryName || "";
     const payload = await fetchJson(`/api/portal/entries/${encodeURIComponent(name)}`);
+    const entryTitle = payload.structured?.title || name;
     const pageTitleNode = document.getElementById("entry-page-title");
-    if (pageTitleNode) pageTitleNode.textContent = payload.structured?.title || name;
+    if (pageTitleNode) pageTitleNode.textContent = entryTitle;
+    setDocumentTitle(entryTitle);
     renderEntrySignals(payload);
     renderEntrySections(payload);
     renderEntryMarkdown(payload);
-    setPortalMessage(`${UI.entry_open}${payload.structured?.title || name}`);
-  }
-
-  function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = String(reader.result || "");
-        resolve(result.includes(",") ? result.split(",", 2)[1] : result);
-      };
-      reader.onerror = () => reject(reader.error || new Error(UI.file_read_error || "Failed to read file"));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function collectUploads(files) {
-    const list = Array.from(files || []);
-    return Promise.all(
-      list.map(async (file) => ({
-        filename: file.name,
-        relative_path: file.webkitRelativePath || file.name,
-        mime_type: file.type || "application/octet-stream",
-        content_base64: await fileToBase64(file),
-      }))
-    );
+    setPortalMessage(`${UI.entry_open}${entryTitle}`);
   }
 
   function renderSubmissionAnalysis(analysis) {

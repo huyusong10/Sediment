@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from html import escape
 from urllib.parse import quote
 
 from sediment.package_data import read_asset_text, render_asset_template
@@ -14,12 +15,17 @@ def _logo_mark_svg() -> str:
 
 
 @lru_cache(maxsize=1)
+def _logo_svg() -> str:
+    return read_asset_text("logo.svg").strip()
+
+
+@lru_cache(maxsize=1)
 def _logo_mark_data_uri() -> str:
     return f"data:image/svg+xml;utf8,{quote(_logo_mark_svg())}"
 
 
-def _logo_inline(class_name: str = "brand-mark") -> str:
-    return _logo_mark_svg().replace("<svg ", f'<svg class="{class_name}" aria-hidden="true" ')
+def _logo_inline(class_name: str = "brand-lockup") -> str:
+    return _logo_svg().replace("<svg ", f'<svg class="{class_name}" aria-hidden="true" ')
 
 
 def _normalize_locale(locale: str | None) -> str:
@@ -35,9 +41,28 @@ def _localized_path(path: str, locale: str) -> str:
     return f"{path}{separator}lang={_normalize_locale(locale)}"
 
 
-def _nav_link(label: str, href: str, *, primary: bool = False) -> str:
-    classes = "button primary" if primary else "button"
-    return f'<a class="{classes}" href="{href}">{label}</a>'
+def _nav_link(
+    label: str,
+    href: str,
+    *,
+    primary: bool = False,
+    variant: str = "nav",
+    new_tab: bool = False,
+) -> str:
+    variant_class = {
+        "nav": "nav-link",
+        "action": "action-link",
+        "utility": "utility-action",
+        "download": "download-action",
+    }.get(variant, "nav-link")
+    classes = ["button", variant_class]
+    if primary:
+        classes.append("primary")
+    extra_attrs = ' target="_blank" rel="noopener noreferrer"' if new_tab else ""
+    return (
+        f'<a class="{" ".join(classes)}" href="{escape(href, quote=True)}"{extra_attrs}>'
+        f"{escape(label)}</a>"
+    )
 
 
 def _render_html_template(name: str, **replacements: str) -> str:
@@ -50,6 +75,274 @@ def _asset_url(name: str) -> str:
 
 def _json_script_payload(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
+
+
+def _document_title(*parts: str) -> str:
+    return " | ".join(part for part in parts if str(part).strip())
+
+
+def _portal_page_title(page: str, *, is_zh: bool, entry_name: str = "") -> str:
+    return {
+        "home": "知识库概览" if is_zh else "Knowledge base overview",
+        "search": "全文搜索" if is_zh else "Full-text search",
+        "entry": entry_name or ("条目详情" if is_zh else "Entry detail"),
+        "submit": "提交缓冲区" if is_zh else "Buffered submission",
+        "tutorial": "接入教程" if is_zh else "Integration guide",
+    }[page]
+
+
+def _admin_page_title(section: str, *, is_zh: bool) -> str:
+    return {
+        "overview": "总览" if is_zh else "Overview",
+        "kb": "KB Management 知识库管理" if is_zh else "Knowledge base management",
+        "files": "Files 文件管理" if is_zh else "File management",
+        "reviews": "评审" if is_zh else "Reviews",
+        "users": "用户" if is_zh else "Users",
+        "system": "设置" if is_zh else "Settings",
+    }[section]
+
+
+def _tutorial_skill_slug() -> str:
+    return "mcp-explore"
+
+
+def _tutorial_skill_filename() -> str:
+    return "sediment-mcp-explore-SKILL.md"
+
+
+def _mono(text: str) -> str:
+    return f'<span class="inline-mono">{escape(text)}</span>'
+
+
+def _tutorial_tip(summary_html: str, detail_html: str, *, locale: str, testid: str = "") -> str:
+    label = "更多说明" if _normalize_locale(locale) == "zh" else "More details"
+    data_attr = f' data-testid="{escape(testid, quote=True)}"' if testid else ""
+    return "\n".join(
+        [
+            f'<div class="compact-note"{data_attr}>',
+            f'  <span class="compact-note-text">{summary_html}</span>',
+            '  <span class="tip-anchor">',
+            f'    <button class="tip-trigger" type="button" aria-label="{escape(label, quote=True)}">i</button>',
+            f'    <span class="tip-panel" role="note">{detail_html}</span>',
+            "  </span>",
+            "</div>",
+        ]
+    )
+
+
+@lru_cache(maxsize=2)
+def _tutorial_mcp_tool_cards(locale: str) -> str:
+    active_locale = _normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    cards = [
+        {
+            "title": "knowledge_list",
+            "badge": "候选集合" if is_zh else "Candidate set",
+            "summary_html": (
+                f"先用 {_mono('knowledge_list')} 缩小候选集合。"
+                if is_zh
+                else f"Use {_mono('knowledge_list')} to narrow the candidate set first."
+            ),
+            "detail_html": (
+                "它最适合做别名比对、范围收敛和第一次分流。不要一上来就穷举读取全文，否则上下文会很快膨胀。"
+                if is_zh
+                else "Use it for alias matching, scope narrowing, and the first split of likely entries. Avoid reading the entire KB up front or you will waste context."
+            ),
+            "call": "knowledge_list()",
+        },
+        {
+            "title": "knowledge_read",
+            "badge": "原文读取" if is_zh else "Entry read",
+            "summary_html": (
+                f"用 {_mono('knowledge_read')} 读取关键条目原文。"
+                if is_zh
+                else f"Use {_mono('knowledge_read')} to inspect the key entries in full text."
+            ),
+            "detail_html": (
+                "通常连续读取 1 到 5 个最相关条目即可。如果 Related、别名或 Scope 指向新的关键概念，再补 1 到 2 跳，不要无限扩散。"
+                if is_zh
+                else "Usually 1-5 closely related entries are enough. Add only 1-2 more hops when Related, aliases, or Scope point to another key concept."
+            ),
+            "call": (
+                'knowledge_read(filename="热备份")'
+                if is_zh
+                else 'knowledge_read(filename="hot-backup")'
+            ),
+        },
+        {
+            "title": "knowledge_ask",
+            "badge": "快速问答" if is_zh else "Fast answer",
+            "summary_html": (
+                f"{_mono('knowledge_ask')} 直接返回服务端综合结果。"
+                if is_zh
+                else f"{_mono('knowledge_ask')} returns a server-side synthesized answer directly."
+            ),
+            "detail_html": (
+                "适合想快速接入、统一服务端行为，或只需要一个高层答案的场景。若你想自己控制证据链或降低远端往返依赖，就只暴露 knowledge_list / knowledge_read。"
+                if is_zh
+                else "Use it when you want the fastest integration path, a service-owned reasoning loop, or a quick top-level answer. If you want local white-box control, expose only knowledge_list and knowledge_read instead."
+            ),
+            "call": (
+                'knowledge_ask(question="热备份的前置条件是什么？")'
+                if is_zh
+                else 'knowledge_ask(question="What are the preconditions for hot backup?")'
+            ),
+        },
+    ]
+    return "\n".join(
+        "\n".join(
+            [
+                '<article class="card tutorial-tool-card">',
+                '  <div class="row spread tutorial-card-heading">',
+                f"    <strong>{escape(card['title'])}</strong>",
+                f'    <span class="tag">{escape(card["badge"])}</span>',
+                "  </div>",
+                "  "
+                + _tutorial_tip(
+                    card["summary_html"],
+                    card["detail_html"],
+                    locale=active_locale,
+                    testid=f"tutorial-tool-{card['title']}",
+                ),
+                f'  <div class="subtle mono">{escape(card["call"])}</div>',
+                "</article>",
+            ]
+        )
+        for card in cards
+    )
+
+
+@lru_cache(maxsize=2)
+def _tutorial_decision_cards(locale: str) -> str:
+    active_locale = _normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    cards = [
+        {
+            "title": "选 MCP" if is_zh else "Choose MCP",
+            "summary_html": (
+                f"服务端直接用 {_mono('knowledge_ask')} 给答案。"
+                if is_zh
+                else f"Let the service answer directly with {_mono('knowledge_ask')}."
+            ),
+            "detail_html": (
+                "优点是接入简单、结果直达，而且不会把整段探索过程塞进你本地 Agent 的上下文。代价是会占用服务端 Agent 算力，自由度也更低。"
+                if is_zh
+                else "This path is simple to integrate, returns an answer directly, and avoids pushing the whole exploration loop into your local agent context. The tradeoff is that it consumes server-side agent capacity and offers less control."
+            ),
+        },
+        {
+            "title": "选 SKILL" if is_zh else "Choose SKILL",
+            "summary_html": (
+                f"本地 Agent 结合 Skill，自主调用 {_mono('knowledge_list')} / {_mono('knowledge_read')}。"
+                if is_zh
+                else f"Let the local agent use the Skill with {_mono('knowledge_list')} / {_mono('knowledge_read')}."
+            ),
+            "detail_html": (
+                "优点是自由度高、证据链白盒可控，也更适合想复刻 ask 逻辑或继续深挖的场景。代价是需要本地 Agent 自己探索，通常更依赖本地上下文与执行质量。"
+                if is_zh
+                else "This path gives you higher freedom, a white-box evidence chain, and more room to reproduce or extend the ask logic locally. The tradeoff is that your local agent must do the exploration itself, so it depends more on local context budget and execution quality."
+            ),
+        },
+    ]
+    return "\n".join(
+        "\n".join(
+            [
+                '<article class="card tutorial-decision-card">',
+                f"  <strong>{escape(card['title'])}</strong>",
+                f'  {_tutorial_tip(card["summary_html"], card["detail_html"], locale=active_locale)}',
+                "</article>",
+            ]
+        )
+        for card in cards
+    )
+
+
+@lru_cache(maxsize=2)
+def _tutorial_skill_cards(locale: str) -> str:
+    active_locale = _normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    title = "Sediment MCP Explore SKILL"
+    summary_html = (
+        f"把 Sediment Explore 的推导习惯搬到本地 Agent。"
+        if is_zh
+        else "Bring the Sediment Explore reasoning style into the local agent."
+    )
+    detail_html = (
+        "适合在本地白盒复刻 ask 逻辑。它是刻意的 list/read 路线，不要求 knowledge_ask。"
+        if is_zh
+        else "Use it when you want to reproduce the ask workflow locally in a white-box way. It intentionally follows the list/read path and does not require knowledge_ask."
+    )
+    download_label = "下载 SKILL" if is_zh else "Download SKILL"
+    return "\n".join(
+        [
+            '<article class="card tutorial-skill-card">',
+            '  <div class="row spread">',
+            f"    <strong>{escape(title)}</strong>",
+            f'    {_nav_link(download_label, _localized_path(f"/downloads/skills/{_tutorial_skill_slug()}", active_locale), variant="download")}',
+            "  </div>",
+            f'  {_tutorial_tip(summary_html, detail_html, locale=active_locale, testid="tutorial-skill-card-tip")}',
+            f'  <div class="subtle mono">{escape(_tutorial_skill_filename())}</div>',
+            "</article>",
+        ]
+    )
+
+
+@lru_cache(maxsize=2)
+def _tutorial_agent_guides(locale: str) -> str:
+    active_locale = _normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    cards = [
+        {
+            "title": "快速问答路径" if is_zh else "Fast-answer path",
+            "summary_html": (
+                f'直接告诉 Agent：使用 Sediment MCP，并优先调用 {_mono("knowledge_ask")}。'
+                if is_zh
+                else f'Tell the agent: use Sediment MCP and prefer {_mono("knowledge_ask")} for this task.'
+            ),
+            "detail_html": (
+                "适合 Codex / OpenCode / Claude Code 这类命令式 Agent 运行时里的快速接法。你只需要在任务里点名 server 或 tool，通常就足够让它走对路径。"
+                if is_zh
+                else "This is the quickest path in command-style agent runtimes such as Codex, OpenCode, or Claude Code. In many cases, naming the MCP server or tool directly in the task is enough to steer the run."
+            ),
+        },
+        {
+            "title": "本地白盒路径" if is_zh else "Local white-box path",
+            "summary_html": (
+                f'直接告诉 Agent：不要调用 {_mono("knowledge_ask")}，只用 {_mono("knowledge_list")} / {_mono("knowledge_read")}。'
+                if is_zh
+                else f'Tell the agent: do not call {_mono("knowledge_ask")}; use only {_mono("knowledge_list")} / {_mono("knowledge_read")} instead.'
+            ),
+            "detail_html": (
+                "这条提示最适合需要可审计证据链、想把综合推理留在本地，或感觉远端 ask 往返太慢的时候。下载区里的本地 Skill 就是围绕这条路径设计的。"
+                if is_zh
+                else "Use this when you need an auditable evidence chain, want synthesis to stay local, or find the remote ask round-trip too slow. The downloadable local Skill is built around this path."
+            ),
+        },
+        {
+            "title": "如果运行时支持限缩工具" if is_zh else "When the runtime can narrow tools",
+            "summary_html": (
+                "如果框架支持 tool allowlist 或 tool filter，就直接收窄可见工具。"
+                if is_zh
+                else "If your framework supports a tool allowlist or tool filter, narrow the visible tools directly."
+            ),
+            "detail_html": (
+                "例如：快速问答 Agent 只看 knowledge_ask，研究型 Agent 只看 knowledge_list / knowledge_read。这样比纯靠 prompt 更稳定，也能减少无关工具干扰。"
+                if is_zh
+                else "For example, let a fast-answer agent see only knowledge_ask, while a research agent sees only knowledge_list and knowledge_read. This is usually more stable than prompt-only steering and reduces distraction from irrelevant tools."
+            ),
+        },
+    ]
+    return "\n".join(
+        "\n".join(
+            [
+                '<article class="card tutorial-guide-card">',
+                f"  <strong>{escape(card['title'])}</strong>",
+                f'  {_tutorial_tip(card["summary_html"], card["detail_html"], locale=active_locale)}',
+                "</article>",
+            ]
+        )
+        for card in cards
+    )
 
 
 def shared_shell(
@@ -103,7 +396,7 @@ def _public_nav(active_locale: str, *, page: str) -> dict[str, str]:
     is_zh = active_locale == "zh"
     return {
         "HOME_LINK": _nav_link(
-            "门户首页" if is_zh else "Home",
+            "知识库概览" if is_zh else "KB Overview",
             _localized_path("/", active_locale),
             primary=page == "home",
         ),
@@ -111,6 +404,11 @@ def _public_nav(active_locale: str, *, page: str) -> dict[str, str]:
             "搜索" if is_zh else "Search",
             _localized_path("/search", active_locale),
             primary=page == "search",
+        ),
+        "TUTORIAL_LINK": _nav_link(
+            "接入教程" if is_zh else "Integration Guide",
+            _localized_path("/tutorial", active_locale),
+            primary=page == "tutorial",
         ),
         "SUBMIT_LINK": _nav_link(
             "提交" if is_zh else "Submit",
@@ -121,6 +419,7 @@ def _public_nav(active_locale: str, *, page: str) -> dict[str, str]:
             "Quartz" if is_zh else "Quartz",
             _localized_path("/quartz/", active_locale),
             primary=page == "quartz",
+            new_tab=True,
         ),
     }
 
@@ -134,22 +433,27 @@ def portal_html(
     initial_query: str = "",
     entry_name: str = "",
     current_user: dict[str, object] | None = None,
+    mcp_endpoint: str = "",
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
-    page = page if page in {"home", "search", "entry", "submit"} else "home"
+    page = page if page in {"home", "search", "entry", "submit", "tutorial"} else "home"
     nav = _public_nav(active_locale, page=page)
+    page_title = _portal_page_title(page, is_zh=is_zh, entry_name=entry_name)
     subtitles = {
         "home": "搜索" if is_zh else "Search",
         "search": "全文搜索" if is_zh else "Full-text search",
         "entry": "正式条目" if is_zh else "Canonical entry",
         "submit": "提交缓冲区" if is_zh else "Buffered submission",
+        "tutorial": "接入" if is_zh else "Access",
     }
     common = {
         "LOGO_INLINE": _logo_inline(),
         "KNOWLEDGE_NAME": knowledge_name,
         "INSTANCE_NAME": instance_name,
         "ACTIVE_LOCALE": active_locale,
+        "PAGE_TITLE": page_title,
+        "PAGE_TITLE_CLASS": "page-title sr-only" if page == "home" else "page-title",
         "PAGE_KICKER": subtitles[page],
         "SEARCH_PLACEHOLDER": (
             "搜索概念、规则、经验，比如：热备份 泄洪 暗流"
@@ -157,7 +461,7 @@ def portal_html(
             else "Search concepts, rules, or lessons. Example: hot backup failover stream"
         ),
         "SEARCH_BUTTON_LABEL": "搜索" if is_zh else "Search",
-        "STATS_TITLE": "门户统计" if is_zh else "Portal stats",
+        "STATS_TITLE": "知识库统计" if is_zh else "Knowledge base stats",
         "UPDATES_TITLE": "最近更新" if is_zh else "Recent updates",
         "ENTRY_SIGNALS_TITLE": "条目信号" if is_zh else "Entry signals",
         "ENTRY_SECTIONS_TITLE": "结构化分区" if is_zh else "Structured sections",
@@ -181,6 +485,79 @@ def portal_html(
         "UPLOAD_FILES_LABEL": "上传文件" if is_zh else "Upload files",
         "UPLOAD_FOLDER_LABEL": "上传文件夹" if is_zh else "Upload folder",
         "SUBMIT_FILE_BUTTON": "上传文档" if is_zh else "Upload documents",
+        "MCP_TITLE": "通过 MCP 接入" if is_zh else "Connect via MCP",
+        "MCP_INTRO": _tutorial_tip(
+            (
+                f"让 Sediment 在服务端直接给结果。"
+                if is_zh
+                else "Let Sediment return the answer from the service side."
+            ),
+            (
+                f"最直接的方式是让 Agent 走 {_mono('knowledge_ask')}。如果运行时支持 tool allowlist / tool filter，就把可见工具收窄到当前路径需要的那几个；如果不支持，在提示词里点名具体 tool 也通常有效。"
+                if is_zh
+                else f"The simplest path is to steer the agent toward {_mono('knowledge_ask')}. If your runtime supports a tool allowlist or tool filter, narrow the visible tools to the current path. If it does not, explicitly naming the target tool in the prompt is still an effective fallback."
+            ),
+            locale=active_locale,
+            testid="tutorial-mcp-intro",
+        ),
+        "MCP_ENDPOINT_LABEL": "SSE 端点" if is_zh else "SSE endpoint",
+        "MCP_ENDPOINT": mcp_endpoint,
+        "DECISION_TITLE": "怎么选" if is_zh else "Which path to choose",
+        "DECISION_INTRO": _tutorial_tip(
+            (
+                "真正需要先做的决策只有一个：这次是走 MCP，还是走本地 Skill。"
+                if is_zh
+                else "There is really only one decision to make first: use MCP this time, or use the local Skill."
+            ),
+            (
+                "如果你更看重接入速度和直接拿结果，就偏向 MCP；如果你更看重自由度、证据链控制和本地自主探索，就偏向 Skill。"
+                if is_zh
+                else "Lean toward MCP when you want the fastest path and a direct answer. Lean toward the Skill when you want more control, a clearer evidence trail, and local autonomous exploration."
+            ),
+            locale=active_locale,
+            testid="tutorial-decision-intro",
+        ),
+        "DECISION_CARDS": _tutorial_decision_cards(active_locale),
+        "TOOLS_TITLE": "工具分工" if is_zh else "Tool roles",
+        "MCP_TOOL_CARDS": _tutorial_mcp_tool_cards(active_locale),
+        "MCP_EXAMPLES_TITLE": "如何让 Agent 用对工具" if is_zh else "How to steer the agent toward the right tools",
+        "MCP_EXAMPLES_INTRO": _tutorial_tip(
+            (
+                "大多数 Agent 运行时都支持“在任务里点名 server 或 tool”。"
+                if is_zh
+                else "Most agent runtimes support naming the server or tool directly in the task."
+            ),
+            (
+                "下面这些例子故意不用代码，而是用你可以直接贴给 Agent 的指令句式。"
+                if is_zh
+                else "The examples below are intentionally written as instructions you can paste directly into an agent, instead of code."
+            ),
+            locale=active_locale,
+            testid="tutorial-agent-guides-intro",
+        ),
+        "MCP_AGENT_GUIDES": _tutorial_agent_guides(active_locale),
+        "SKILL_TITLE": "通过 SKILL 接入" if is_zh else "Connect via SKILL",
+        "SKILL_INTRO": _tutorial_tip(
+            (
+                "让本地 Agent 自己探索和综合。"
+                if is_zh
+                else "Let the local agent explore and synthesize on its own."
+            ),
+            (
+                f"这个 Skill 默认只依赖 {_mono('knowledge_list')} / {_mono('knowledge_read')}。如果你不想把远端 MCP 往返放进推理链里，或者想保留更高的本地自由度，就优先考虑这条路径。"
+                if is_zh
+                else f"It assumes only {_mono('knowledge_list')} / {_mono('knowledge_read')}. Prefer this path when you do not want remote MCP round-trips inside the reasoning loop, or when you want more local freedom."
+            ),
+            locale=active_locale,
+            testid="tutorial-skill-intro",
+        ),
+        "SKILL_INSTALL_PATH_LABEL": "建议安装位置" if is_zh else "Suggested install location",
+        "SKILL_INSTALL_PATH": (
+            "$CODEX_HOME/skills/ 或你的 Agent 运行时 skills 目录"
+            if is_zh
+            else "$CODEX_HOME/skills/ or your agent runtime's skills directory"
+        ),
+        "SKILL_DOWNLOADS": _tutorial_skill_cards(active_locale),
         **nav,
     }
     templates = {
@@ -188,6 +565,7 @@ def portal_html(
         "search": "portal-search-body.html",
         "entry": "portal-entry-body.html",
         "submit": "portal-submit-body.html",
+        "tutorial": "portal-tutorial-body.html",
     }
     body = _render_html_template(
         templates[page],
@@ -207,10 +585,11 @@ def portal_html(
         "pageKind": page,
         "initialQuery": initial_query,
         "entryName": entry_name,
-        "user": current_user,
+        "knowledgeName": knowledge_name,
         "routes": {
             "home": _localized_path("/", active_locale),
             "search": _localized_path("/search", active_locale),
+            "tutorial": _localized_path("/tutorial", active_locale),
             "submit": _localized_path("/submit", active_locale),
             "entryPrefix": "/entries/",
             "quartz": _localized_path("/quartz/", active_locale),
@@ -222,6 +601,7 @@ def portal_html(
             "pending": "待审提交" if is_zh else "Pending submissions",
             "health": "治理问题" if is_zh else "Health issues",
             "updates_empty": "暂无最近更新" if is_zh else "No recent updates yet.",
+            "home_ready": "知识库已就绪。" if is_zh else "Knowledge base ready.",
             "search_placeholder": (
                 "搜索概念、规则、经验，比如：热备份 泄洪 暗流"
                 if is_zh
@@ -272,7 +652,7 @@ def portal_html(
         },
     }
     return shared_shell(
-        f"{knowledge_name} Portal",
+        _document_title(page_title, knowledge_name),
         body,
         locale=active_locale,
         page_script_name="portal.js",
@@ -287,19 +667,17 @@ def portal_graph_html(
     instance_name: str,
     locale: str,
     quartz: dict[str, object],
-    admin_kb_path: str,
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
+    page_title = "Quartz"
+    nav = _public_nav(active_locale, page="quartz")
     body = _render_html_template(
         "portal-quartz-fallback-body.html",
         LOGO_INLINE=_logo_inline(),
         KNOWLEDGE_NAME=knowledge_name,
         INSTANCE_NAME=instance_name,
-        HOME_LINK=_nav_link("门户首页" if is_zh else "Home", _localized_path("/", active_locale)),
-        SEARCH_LINK=_nav_link("搜索" if is_zh else "Search", _localized_path("/search", active_locale)),
-        SUBMIT_LINK=_nav_link("提交" if is_zh else "Submit", _localized_path("/submit", active_locale)),
-        QUARTZ_LINK=_nav_link("Quartz", _localized_path("/quartz/", active_locale), primary=True),
+        PAGE_TITLE=page_title,
         STATUS_LABEL=(
             "站点已构建，可直接打开 Quartz。" if quartz.get("site_available") else "当前实例还没有可用的 Quartz 站点。"
             if is_zh
@@ -310,18 +688,21 @@ def portal_graph_html(
         ),
         ACTIONS_TITLE="操作" if is_zh else "Actions",
         ADMIN_KB_LINK=_nav_link(
-            "前往管理台系统页" if is_zh else "Open admin system page",
+            "前往管理台设置页" if is_zh else "Open admin settings page",
             _localized_path("/admin/system", active_locale),
-            primary=True,
+            variant="action",
         ),
         OPEN_QUARTZ_LINK=_nav_link(
             "打开 Quartz" if is_zh else "Open Quartz",
             _localized_path("/quartz/", active_locale),
             primary=True,
+            variant="action",
+            new_tab=True,
         ),
+        **nav,
     )
     return shared_shell(
-        f"{knowledge_name} Quartz",
+        _document_title(page_title, knowledge_name),
         body,
         locale=active_locale,
         shell_variant="portal",
@@ -331,22 +712,22 @@ def portal_graph_html(
 def admin_login_html(*, knowledge_name: str, instance_name: str, locale: str, next_path: str) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
+    page_title = "管理台登录" if is_zh else "Admin sign in"
+    nav = _public_nav(active_locale, page="")
     body = _render_html_template(
         "admin-login-body.html",
         LOGO_INLINE=_logo_inline(),
         KNOWLEDGE_NAME=knowledge_name,
         INSTANCE_NAME=instance_name,
-        HOME_LINK=_nav_link("门户首页" if is_zh else "Home", _localized_path("/", active_locale)),
-        SEARCH_LINK=_nav_link("搜索" if is_zh else "Search", _localized_path("/search", active_locale)),
-        SUBMIT_LINK=_nav_link("提交" if is_zh else "Submit", _localized_path("/submit", active_locale)),
-        QUARTZ_LINK=_nav_link("Quartz", _localized_path("/quartz/", active_locale)),
+        PAGE_TITLE=page_title,
         TOKEN_LABEL="登录 Token" if is_zh else "Sign-in token",
         TOKEN_PLACEHOLDER="输入 owner 或 committer token" if is_zh else "Enter an owner or committer token",
         OPEN_ADMIN_LABEL="进入管理台" if is_zh else "Open admin",
         LOGIN_STATUS="需要有效 token 才能进入后台。" if is_zh else "A valid token is required.",
+        **nav,
     )
     return shared_shell(
-        f"{knowledge_name} Admin Login",
+        _document_title(page_title, knowledge_name),
         body,
         locale=active_locale,
         page_script_name="admin-login.js",
@@ -369,8 +750,9 @@ def admin_html(
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
-    allowed_sections = {"overview", "kb", "reviews", "users", "system"}
+    allowed_sections = {"overview", "kb", "files", "reviews", "users", "system"}
     section = section if section in allowed_sections else "overview"
+    page_title = _admin_page_title(section, is_zh=is_zh)
     is_owner = bool(current_user and current_user.get("role") == "owner")
     section_links = {
         "OVERVIEW_LINK": _nav_link(
@@ -379,9 +761,14 @@ def admin_html(
             primary=section == "overview",
         ),
         "KB_LINK": _nav_link(
-            "知识库" if is_zh else "KB",
+            "知识库管理" if is_zh else "KB Management",
             _localized_path("/admin/kb", active_locale),
             primary=section == "kb",
+        ),
+        "FILES_LINK": _nav_link(
+            "文件管理" if is_zh else "Files",
+            _localized_path("/admin/files", active_locale),
+            primary=section == "files",
         ),
         "REVIEWS_LINK": _nav_link(
             "评审" if is_zh else "Reviews",
@@ -399,7 +786,7 @@ def admin_html(
         ),
         "SYSTEM_LINK": (
             _nav_link(
-                "系统" if is_zh else "System",
+                "设置" if is_zh else "Settings",
                 _localized_path("/admin/system", active_locale),
                 primary=section == "system",
             )
@@ -421,8 +808,33 @@ def admin_html(
         ),
         "kb": _render_html_template(
             "admin-kb-section.html",
-            EXPLORE_TITLE="知识探索" if is_zh else "KB explore",
-            EXPLORE_NOTE="知识库问答" if is_zh else "KB Q&A",
+            INGEST_TITLE="Ingest 导入" if is_zh else "Ingest",
+            INGEST_NOTE="拖入文档后直接入队" if is_zh else "drop documents and enqueue immediately",
+            INGEST_DROPZONE_TITLE="拖入文档或压缩包" if is_zh else "Drop documents or an archive",
+            INGEST_DROPZONE_BODY=(
+                "支持 Markdown、文本、DOCX、PPTX 和 zip；也可以直接选择文件或文件夹。"
+                if is_zh
+                else "Supports Markdown, text, DOCX, PPTX, and zip. You can also choose files or folders directly."
+            ),
+            INGEST_FILE_LABEL="选择文件" if is_zh else "Choose files",
+            INGEST_FOLDER_LABEL="选择文件夹" if is_zh else "Choose folder",
+            INGEST_SELECTION_LABEL="当前导入选择" if is_zh else "Current import selection",
+            INGEST_SELECTION_EMPTY="还没有选择任何文档。" if is_zh else "No documents selected yet.",
+            INGEST_BUTTON="上传并运行 Ingest" if is_zh else "Upload and run ingest",
+            INGEST_STATUS="上传完成后会在这里显示 submission 与 job 信息。" if is_zh else "Submission and job feedback appears here after upload.",
+            TIDY_TITLE="Tidy 整理" if is_zh else "Tidy",
+            TIDY_NOTE="输入原因后直接发起治理" if is_zh else "enter a reason and queue maintenance",
+            TIDY_REASON_LABEL="本次 tidy 原因" if is_zh else "Tidy reason",
+            TIDY_REASON_PLACEHOLDER="例如：整理 dangling links 与未覆盖正式条目" if is_zh else "Example: clean up dangling links and uncovered formal entries",
+            TIDY_BUTTON="执行 Tidy" if is_zh else "Run tidy",
+            TIDY_HINT_TITLE="默认范围" if is_zh else "Default scope",
+            TIDY_HINT_BODY=(
+                "这里默认按阻断性健康问题执行；如果你需要更大范围的整理，建议走 CLI 或专门任务。"
+                if is_zh
+                else "This button targets blocking health issues by default. Use the CLI or a dedicated task when you need a broader cleanup."
+            ),
+            EXPLORE_TITLE="Explore 探索" if is_zh else "Knowledge explore",
+            EXPLORE_NOTE="保留当前问答能力" if is_zh else "keep the current Q&A path",
             EXPLORE_INPUT_LABEL="问题 / 场景" if is_zh else "Question / scenario",
             EXPLORE_INPUT_PLACEHOLDER=(
                 "例如：热备份在什么情况下不该当成主备切换方案？"
@@ -431,27 +843,40 @@ def admin_html(
             ),
             EXPLORE_BUTTON="运行探索" if is_zh else "Run explore",
             EXPLORE_RESULT_EMPTY="这里会显示回答、来源和缺口。" if is_zh else "Answers, sources, and gaps appear here.",
-            SUBMISSION_TITLE="待处理提交" if is_zh else "Buffered submissions",
-            SUBMISSION_NOTE="匿名提交默认开启" if is_zh else "Anonymous by default",
-            TIDY_TITLE="KB 级维护" if is_zh else "KB-level tidy",
-            TIDY_NOTE="按 scope 发起治理任务" if is_zh else "Queue maintenance by scope",
-            TIDY_SCOPE_LABEL="维护范围" if is_zh else "Scope",
-            TIDY_SCOPE_FULL="全库维护" if is_zh else "Full KB",
-            TIDY_SCOPE_GRAPH="图谱修复" if is_zh else "Graph repair",
-            TIDY_SCOPE_INDEXES="索引整理" if is_zh else "Index cleanup",
-            TIDY_SCOPE_HEALTH_BLOCKING="阻断问题" if is_zh else "Blocking health issues",
-            TIDY_REASON_LABEL="原因" if is_zh else "Reason",
-            TIDY_REASON_PLACEHOLDER="例如：修复图谱断链与孤岛条目" if is_zh else "Example: repair dangling links and orphan entries",
-            TIDY_BUTTON="发起 Tidy" if is_zh else "Run tidy",
-            ISSUE_TITLE="健康问题队列" if is_zh else "Health issue queue",
-            ISSUE_NOTE="逐条阅读问题，但只通过上面的 KB 级 tidy 发起治理" if is_zh else "Review issues here, but queue maintenance only through the KB-level tidy controls above",
-            EDITOR_TITLE="在线编辑" if is_zh else "Inline editor",
-            EDITOR_NAME_LABEL="条目名" if is_zh else "Entry name",
-            EDITOR_NAME_PLACEHOLDER="例如：热备份" if is_zh else "Example: hot-backup",
-            LOAD_ENTRY_BUTTON="加载条目" if is_zh else "Load entry",
-            EDITOR_CONTENT_LABEL="内容" if is_zh else "Content",
-            SAVE_ENTRY_BUTTON="保存条目" if is_zh else "Save entry",
-            EDITOR_STATUS="这里会显示校验结果和保存反馈。" if is_zh else "Validation and save feedback appears here.",
+        ),
+        "files": _render_html_template(
+            "admin-files-section.html",
+            FILE_BROWSER_TITLE="Files 文件结构" if is_zh else "File browser",
+            FILE_BROWSER_NOTE=(
+                "按 index 导航组织文档，而不是把所有 Markdown 平铺出来。"
+                if is_zh
+                else "Browse documents through the index network instead of a flat markdown dump."
+            ),
+            FILE_COUNTS_INDEXED="已纳入索引" if is_zh else "Indexed",
+            FILE_COUNTS_UNINDEXED="未纳入索引" if is_zh else "Unindexed",
+            FILE_SEARCH_LABEL="搜索并直接打开文档" if is_zh else "Search and open a document",
+            FILE_SEARCH_PLACEHOLDER="输入标题、别名、路径或 index 名称" if is_zh else "Search by title, alias, path, or index name",
+            FILE_SEARCH_STATUS="输入后会显示自动建议；选中后直接载入编辑区。" if is_zh else "Suggestions appear as you type and open directly in the editor.",
+            FILE_BROWSE_HINT_TITLE="Index 治理约定" if is_zh else "Index governance",
+            FILE_BROWSE_HINT_BODY=(
+                "Tidy 会负责维护 index.root 与分段 index 的可导航性；文件管理页沿用这套结构来浏览与修订文档。"
+                if is_zh
+                else "Tidy maintains index.root and segment indexes; this page reuses that structure for browsing and editing."
+            ),
+            DOC_STRUCTURE_TITLE="Index 结构浏览" if is_zh else "Index structure",
+            DOC_STRUCTURE_NOTE="按根索引与分段索引展开" if is_zh else "expand root and segment indexes",
+            DOC_HEALTH_TITLE="健康队列联动" if is_zh else "Health-driven selection",
+            DOC_HEALTH_NOTE="可从治理问题直接跳到对应文档" if is_zh else "jump from a governance issue straight into the related document",
+            EDITOR_TITLE="Markdown 编辑器" if is_zh else "Markdown editor",
+            EDITOR_NOTE="复用门户渲染，保存前先看预览与关联问题" if is_zh else "reuse the portal renderer and inspect linked issues before saving",
+            EDITOR_CURRENT_LABEL="当前文档" if is_zh else "Current document",
+            EDITOR_CURRENT_EMPTY="还没有选中文档。" if is_zh else "No document selected yet.",
+            EDITOR_CONTENT_LABEL="Markdown 内容" if is_zh else "Markdown content",
+            SAVE_ENTRY_BUTTON="保存 Markdown" if is_zh else "Save markdown",
+            EDITOR_PREVIEW_TITLE="预览" if is_zh else "Preview",
+            EDITOR_PREVIEW_EMPTY="选中文档后，这里会复用门户的 Markdown 渲染方式预览。" if is_zh else "After you select a document, the portal-style Markdown preview appears here.",
+            EDITOR_LINKED_ISSUES_TITLE="关联治理问题" if is_zh else "Linked governance issues",
+            EDITOR_STATUS="这里会显示校验结果、保存反馈和冲突提示。" if is_zh else "Validation, save feedback, and conflict hints appear here.",
         ),
         "reviews": _render_html_template(
             "admin-reviews-section.html",
@@ -491,14 +916,32 @@ def admin_html(
         ),
         "system": _render_html_template(
             "admin-system-section.html",
-            SYSTEM_TITLE="系统状态" if is_zh else "System status",
-            SYSTEM_NOTE="仅所有者可操作" if is_zh else "Owner only",
+            SETTINGS_TITLE="配置文件" if is_zh else "Config file",
+            SETTINGS_NOTE="仅 owner 可查看与修改" if is_zh else "owner-only view and edit",
+            SETTINGS_PATH_LABEL="当前配置路径" if is_zh else "Current config path",
+            SETTINGS_PATH_EMPTY="配置路径加载中..." if is_zh else "Loading config path...",
+            SETTINGS_EDITOR_LABEL="原始 YAML 配置" if is_zh else "Raw YAML config",
+            SETTINGS_RELOAD_BUTTON="从磁盘重新载入" if is_zh else "Reload from disk",
+            SETTINGS_SAVE_BUTTON="保存配置" if is_zh else "Save config",
+            SETTINGS_RESTART_BUTTON="一键重启服务" if is_zh else "Restart service",
+            SETTINGS_STATUS="这里会显示保存结果与校验反馈。" if is_zh else "Validation and save feedback appears here.",
+            SETTINGS_RUNTIME_NOTE_TITLE="生效说明" if is_zh else "Runtime note",
+            SETTINGS_RUNTIME_NOTE=(
+                "大多数配置会在保存后立即重载；监听地址、端口和 SSE 路径需要重启服务才能完全生效。保存后可直接点一键重启。"
+                if is_zh
+                else "Most settings reload immediately after save. Bind address, port, and SSE path still need a service restart. Use the restart button after saving when needed."
+            ),
+            EFFECTIVE_SETTINGS_TITLE="展开后的有效配置" if is_zh else "Resolved effective config",
+            EFFECTIVE_SETTINGS_NOTE="包含默认值、路径展开和运行态结果" if is_zh else "includes defaults, resolved paths, and runtime values",
+            EFFECTIVE_SETTINGS_EMPTY="有效配置加载中..." if is_zh else "Loading effective config...",
             QUARTZ_TITLE="Quartz" if is_zh else "Quartz",
             QUARTZ_NOTE="运行时 / 构建状态 / 刷新" if is_zh else "runtime / build state / refresh",
             QUARTZ_BUTTON="构建 / 刷新 Quartz" if is_zh else "Build / refresh Quartz",
             OPEN_QUARTZ_LINK=_nav_link(
                 "打开 Quartz" if is_zh else "Open Quartz",
                 _localized_path("/quartz/", active_locale),
+                variant="action",
+                new_tab=True,
             ),
         ),
     }[section]
@@ -507,14 +950,19 @@ def admin_html(
         LOGO_INLINE=_logo_inline(),
         KNOWLEDGE_NAME=knowledge_name,
         INSTANCE_NAME=instance_name,
+        PAGE_TITLE=page_title,
         READY_MESSAGE="管理台加载中..." if is_zh else "Loading admin...",
-        PORTAL_LINK=_nav_link("返回门户" if is_zh else "Back to portal", _localized_path("/", active_locale)),
+        PORTAL_LINK=_nav_link(
+            "返回知识库" if is_zh else "Back to knowledge base",
+            _localized_path("/", active_locale),
+            variant="utility",
+        ),
         LOGOUT_LABEL="退出登录" if is_zh else "Log out",
         SECTION_MARKUP=section_markup,
         **section_links,
     )
     return shared_shell(
-        f"{knowledge_name} Admin",
+        _document_title(page_title, knowledge_name),
         body,
         locale=active_locale,
         page_script_name="admin.js",
@@ -538,6 +986,7 @@ def admin_html(
                 "issue_scope_label": "建议范围" if is_zh else "Suggested scope",
                 "issue_action_label": "建议动作" if is_zh else "Suggested action",
                 "issue_target_label": "目标" if is_zh else "Target",
+                "issue_open_document": "打开文档" if is_zh else "Open document",
                 "submission_empty": "暂无待处理提交。" if is_zh else "No buffered submissions right now.",
                 "review_empty": "暂无待审补丁。" if is_zh else "No pending reviews right now.",
                 "job_empty": "暂无任务。" if is_zh else "No jobs right now.",
@@ -545,11 +994,40 @@ def admin_html(
                 "diff_empty": "选择待审 patch 后在这里查看。" if is_zh else "Select a pending review to inspect its diff here.",
                 "editor_loaded": "已加载" if is_zh else "Loaded",
                 "editor_saved": "保存成功" if is_zh else "Saved",
+                "editor_preview_empty": "预览将在这里显示。" if is_zh else "Preview appears here.",
+                "editor_linked_issues_empty": "当前文档没有关联治理问题。" if is_zh else "No linked governance issues for this document.",
                 "explore_answer": "回答" if is_zh else "Answer",
                 "explore_sources": "来源" if is_zh else "Sources",
                 "explore_gaps": "缺口" if is_zh else "Gaps",
                 "explore_confidence": "置信度" if is_zh else "Confidence",
                 "manual_tidy_reason_required": "请填写 tidy 原因。" if is_zh else "Enter a tidy reason.",
+                "ingest_file_required": "请先拖入或选择至少一个文档。" if is_zh else "Drop or choose at least one document first.",
+                "ingest_selected_prefix": "当前已选择" if is_zh else "Selected",
+                "ingest_selected_suffix": "个文件" if is_zh else "files",
+                "ingest_uploaded": "已创建 Ingest：" if is_zh else "Created ingest: ",
+                "ingest_submission_prefix": "submission" if is_zh else "submission",
+                "doc_group_formal": "正式条目" if is_zh else "Formal entries",
+                "doc_group_placeholder": "Placeholders" if not is_zh else "待补全条目",
+                "doc_group_index": "索引" if is_zh else "Indexes",
+                "doc_counts_formal": "正式条目" if is_zh else "Formal",
+                "doc_counts_placeholder": "待补全" if is_zh else "Placeholders",
+                "doc_counts_index": "索引" if is_zh else "Indexes",
+                "doc_browser_empty": "没有匹配的文档。" if is_zh else "No matching documents.",
+                "doc_health_empty": "当前没有可联动的治理问题。" if is_zh else "No governance issues to link right now.",
+                "doc_selected": "已选中文档：" if is_zh else "Selected document: ",
+                "doc_select_prompt": "请先从左侧选择一个文档。" if is_zh else "Select a document from the left first.",
+                "doc_path_label": "路径" if is_zh else "Path",
+                "doc_kind_label": "类别" if is_zh else "Kind",
+                "doc_status_label": "状态" if is_zh else "Status",
+                "doc_issues_label": "治理问题" if is_zh else "Issues",
+                "doc_indexes_label": "所在索引" if is_zh else "Indexes",
+                "doc_aliases_label": "别名" if is_zh else "Aliases",
+                "doc_links_label": "链接" if is_zh else "Links",
+                "doc_updated_label": "最后修改" if is_zh else "Updated",
+                "doc_issue_count_suffix": "个" if is_zh else "",
+                "settings_loaded": "已从磁盘载入配置。" if is_zh else "Config reloaded from disk.",
+                "settings_saved": "配置已保存。" if is_zh else "Config saved.",
+                "settings_restart_scheduled": "服务重启已安排，页面会自动重新连接。" if is_zh else "Service restart scheduled. The page will reconnect automatically.",
                 "triaged": "标记已归类" if is_zh else "Mark triaged",
                 "reject": "拒绝提交" if is_zh else "Reject",
                 "run_ingest": "运行 Ingest" if is_zh else "Run ingest",
@@ -601,6 +1079,19 @@ def admin_html(
                 "scope_graph": "图谱修复" if is_zh else "Graph",
                 "scope_indexes": "索引整理" if is_zh else "Indexes",
                 "scope_health_blocking": "阻断问题" if is_zh else "Blocking issues",
+                "file_counts_formal": "正式条目" if is_zh else "Formal",
+                "file_counts_placeholder": "待补全" if is_zh else "Placeholders",
+                "file_counts_index": "索引" if is_zh else "Indexes",
+                "file_counts_indexed": "已纳入索引" if is_zh else "Indexed",
+                "file_counts_unindexed": "未纳入索引" if is_zh else "Unindexed",
+                "file_search_empty": "没有匹配的文档。" if is_zh else "No matching documents.",
+                "file_search_hint": "输入后会显示自动建议；选中后直接载入编辑区。" if is_zh else "Suggestions appear as you type and open directly in the editor.",
+                "file_search_matches": "条匹配" if is_zh else "matches",
+                "file_search_auto_loading": "检测到精确匹配，正在载入：" if is_zh else "Exact match detected, loading: ",
+                "file_unindexed_group": "未纳入任何索引的文档" if is_zh else "Documents outside all indexes",
+                "file_index_direct_docs": "直接文档" if is_zh else "Direct documents",
+                "file_index_child_indexes": "子索引" if is_zh else "Child indexes",
+                "file_tokens_label": "token 估算" if is_zh else "tokens",
             },
             "quartz": quartz,
         },

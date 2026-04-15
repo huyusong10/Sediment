@@ -40,7 +40,7 @@ Sediment 建立在一个很简单、但很少被认真贯彻的判断上：
 
 - 标准 `src/` 布局的 Python 项目
 - 一个统一的命令行入口：`sediment`
-- MCP 服务、Web Portal 和 Admin 后台
+- MCP 服务、知识库 Web 界面和 Admin 后台
 - 由本地 Agent 托管执行的 `ingest` / `tidy` 工作流
 - 多种 Agent CLI 后端支持：
   - Claude Code CLI
@@ -202,9 +202,9 @@ sediment --instance ops-prod review list
 uv run --project /path/to/Sediment sediment --help
 ```
 
-## Portal 工作流
+## 知识库 Web 工作流
 
-- 搜索是主界面：Portal 优先服务全文搜索，条目全文改成聚焦弹层，而不是长期占据一整块固定侧栏。
+- 搜索是主界面：知识库 Web 界面优先服务全文搜索，条目全文改成聚焦弹层，而不是长期占据一整块固定侧栏。
 - 文本提交在进入缓冲区之前，会先结合当前 KB 做一次 Agent 建议分析，让 committer 直接看到建议标题、建议类型、重复风险和相关条目。
 - 文档提交支持单文件、文件夹、多文件和 `.zip` 压缩包；Sediment 会自动解压支持的文档，并把提取出的文本送进缓冲区。
 - Quartz 4 被当作可选增强页，而不是基础运行时依赖。只要你已经构建好 Quartz 静态站点，Sediment 就会在 `/portal/graph-view` 自动嵌入；如果没有，核心安装也依然不需要 Node/npm。

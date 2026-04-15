@@ -55,6 +55,10 @@ def sse_endpoint() -> str:
     return str(load_settings()["server"]["sse_path"])
 
 
+def public_base_url() -> str:
+    return str(load_settings()["server"]["public_base_url"]).strip()
+
+
 def admin_token() -> str:
     return str(load_settings()["auth"]["admin_token"]).strip()
 

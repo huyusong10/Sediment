@@ -43,7 +43,7 @@
       let utility = nav.parentElement?.querySelector("[data-shell-utility]") || null;
       if (!utility && nav.parentElement) {
         utility = document.createElement("div");
-        utility.className = "nav";
+        utility.className = "nav utility-bar";
         utility.setAttribute("data-shell-utility", "");
         nav.parentElement.appendChild(utility);
       }
@@ -162,9 +162,35 @@
     return data;
   }
 
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result || "");
+        resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+      };
+      reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function collectUploads(files) {
+    const list = Array.from(files || []);
+    return Promise.all(
+      list.map(async (file) => ({
+        filename: file.name,
+        relative_path: file.webkitRelativePath || file.name,
+        mime_type: file.type || "application/octet-stream",
+        content_base64: await fileToBase64(file),
+      }))
+    );
+  }
+
   window.SedimentShell = {
+    collectUploads,
     escapeHtml,
     fetchJson,
+    fileToBase64,
     readJsonScript,
     renderMarkdown,
     shellData,

@@ -30,6 +30,7 @@ import mimetypes
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timedelta, timezone
@@ -79,9 +80,12 @@ from sediment.platform_services import (
     get_health_payload,
     get_portal_home,
     graph_payload,
+    kb_document_browser_payload,
+    kb_file_management_payload,
     list_reviews_with_jobs,
     save_entry,
     search_kb,
+    search_kb_file_suggestions,
     search_kb_suggestions,
 )
 from sediment.platform_store import PlatformStore, utc_now
@@ -140,6 +144,9 @@ from sediment.runtime import (
     port as runtime_port,
 )
 from sediment.runtime import (
+    public_base_url as runtime_public_base_url,
+)
+from sediment.runtime import (
     run_jobs_in_process as runtime_run_jobs_in_process,
 )
 from sediment.runtime import (
@@ -166,7 +173,7 @@ from sediment.runtime import (
 from sediment.runtime import (
     trusted_proxy_cidrs as runtime_trusted_proxy_cidrs,
 )
-from sediment.settings import clear_settings_cache, load_settings
+from sediment.settings import clear_settings_cache, load_settings, load_settings_for_path
 from sediment.skills.explore.scripts.kb_query import (
     inventory,
     prepare_explore_context,
@@ -200,6 +207,7 @@ def refresh_runtime_state() -> None:
     global HOST
     global PORT
     global SSE_ENDPOINT
+    global PUBLIC_BASE_URL
     global ADMIN_TOKEN
     global STARTUP_ADMIN_TOKEN
     global SESSION_SECRET
@@ -229,6 +237,7 @@ def refresh_runtime_state() -> None:
     HOST = runtime_host()
     PORT = runtime_port()
     SSE_ENDPOINT = runtime_sse_endpoint()
+    PUBLIC_BASE_URL = runtime_public_base_url()
     ADMIN_TOKEN = runtime_admin_token()
     STARTUP_ADMIN_TOKEN = ""
     SESSION_SECRET = runtime_session_secret()
@@ -334,12 +343,141 @@ def _request_locale(request) -> str:
         return "zh"
     if header.startswith("en"):
         return "en"
-    return DEFAULT_LOCALE
+    return "en"
 
 
 def _path_with_locale(path: str, locale: str) -> str:
     joiner = "&" if "?" in path else "?"
     return f"{path}{joiner}lang={locale}"
+
+
+def _first_forwarded_value(raw: str) -> str:
+    return str(raw or "").split(",", 1)[0].strip()
+
+
+def _absolute_app_url(base_url: str, path: str) -> str:
+    return f"{str(base_url or '').rstrip('/')}/{str(path or '/').lstrip('/')}"
+
+
+def _request_origin(request) -> str:
+    if PUBLIC_BASE_URL:
+        return PUBLIC_BASE_URL.rstrip("/")
+    if TRUST_PROXY_HEADERS:
+        proto = _first_forwarded_value(request.headers.get("x-forwarded-proto", ""))
+        host = _first_forwarded_value(request.headers.get("x-forwarded-host", ""))
+        forwarded_port = _first_forwarded_value(request.headers.get("x-forwarded-port", ""))
+        prefix = _first_forwarded_value(request.headers.get("x-forwarded-prefix", ""))
+        if proto and host:
+            authority = host
+            if forwarded_port and ":" not in host and (
+                (proto == "http" and forwarded_port != "80")
+                or (proto == "https" and forwarded_port != "443")
+            ):
+                authority = f"{host}:{forwarded_port}"
+            base_url = f"{proto}://{authority}"
+            if prefix:
+                base_url = _absolute_app_url(base_url, prefix)
+            return base_url.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+def _tutorial_mcp_endpoint(request) -> str:
+    return _absolute_app_url(_request_origin(request), SSE_ENDPOINT)
+
+
+def _tutorial_skill_slug() -> str:
+    return "mcp-explore"
+
+
+def _tutorial_skill_download_name() -> str:
+    return "sediment-mcp-explore-SKILL.md"
+
+
+def _tutorial_skill_text(locale: str) -> str:
+    is_zh = str(locale or "").strip().lower().startswith("zh")
+    if is_zh:
+        return "\n".join(
+            [
+                "---",
+                "name: sediment-mcp-explore",
+                "description: >",
+                "  用 MCP `knowledge_list` / `knowledge_read` 在本地完成知识推导，不依赖 `knowledge_ask`。",
+                "---",
+                "",
+                "# Sediment MCP Explore Skill",
+                "",
+                "这个 Skill 适用于你只暴露 Sediment 的读工具时。",
+                "如果你只想快速拿答案，可以直接使用 `knowledge_ask`。",
+                "这个 Skill 对应的是另一条路径：不调用 `knowledge_ask`，而是在本地白盒复刻 ask 的推导过程。",
+                "",
+                "## 默认工作流",
+                "",
+                "1. 先调用 `knowledge_list` 建立候选条目集合。",
+                "2. 选择最相关的 1 到 5 个条目，再调用 `knowledge_read` 读取原文。",
+                "3. 如果 `Related`、别名或 Scope 指向新的关键概念，再补读 1 到 2 跳。",
+                "4. 在本地综合答案，并显式说明结论、推断和缺口。",
+                "",
+                "## 推导要求",
+                "",
+                "- 先回答问题，再补充搜索过程。",
+                "- 优先抽取定义、范围、阈值、例外和 Related 关系。",
+                "- 如果证据不足或条目互相冲突，要直接说出来。",
+                "- 不要无限扩散阅读范围；通常 1 到 2 跳就够。",
+                "",
+                "## 简单例子",
+                "",
+                "问题：`热备份的前置条件是什么？`",
+                "",
+                "建议工具序列：",
+                "",
+                "- `knowledge_list()`",
+                '- `knowledge_read(filename="热备份")`',
+                '- 如果 `Related` 指向观测前提，再读 `knowledge_read(filename="回音壁")`',
+                "",
+                "最后在本地输出答案，并注明使用了哪些条目名。",
+            ]
+        )
+    return "\n".join(
+        [
+            "---",
+            "name: sediment-mcp-explore",
+            "description: >",
+            "  Use MCP `knowledge_list` / `knowledge_read` to reason locally without relying on `knowledge_ask`.",
+            "---",
+            "",
+            "# Sediment MCP Explore Skill",
+            "",
+            "Use this Skill when Sediment exposes only its read tools.",
+            "If you only need a fast answer, call `knowledge_ask` directly.",
+            "This Skill is the other path: instead of calling `knowledge_ask`, reproduce that reasoning loop locally in a white-box way.",
+            "",
+            "## Default workflow",
+            "",
+            "1. Call `knowledge_list` first to build a candidate set.",
+            "2. Pick the top 1-5 relevant entries, then read them with `knowledge_read`.",
+            "3. If `Related`, aliases, or Scope point to another key concept, read 1-2 more hops.",
+            "4. Synthesize the answer locally and separate conclusions, inferences, and gaps.",
+            "",
+            "## Reasoning rules",
+            "",
+            "- Answer the question first, then explain the search path if needed.",
+            "- Prefer definitions, scope, thresholds, exceptions, and Related links.",
+            "- Say so plainly when evidence is weak or conflicting.",
+            "- Do not widen the read set indefinitely; 1-2 hops is usually enough.",
+            "",
+            "## Simple example",
+            "",
+            "Question: `What are the preconditions for hot backup?`",
+            "",
+            "Suggested tool sequence:",
+            "",
+            "- `knowledge_list()`",
+            '- `knowledge_read(filename="hot-backup")`',
+            '- If `Related` points to an observability prerequisite, also read `knowledge_read(filename="echo-wall")`',
+            "",
+            "Finish by answering locally and naming the entries you used.",
+        ]
+    )
 
 
 def _settings() -> dict[str, Any]:
@@ -815,6 +953,7 @@ async def _knowledge_platform_status() -> str:
         host=HOST,
         port=PORT,
         sse_endpoint=SSE_ENDPOINT,
+        public_base_url=PUBLIC_BASE_URL,
         auth_required=_admin_auth_required(),
         run_jobs_in_process=RUN_JOBS_IN_PROCESS,
         submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
@@ -3186,9 +3325,85 @@ def _configured_users() -> list[dict[str, Any]]:
     return auth_users_from_settings(_settings())
 
 
+def _config_raw_text() -> str:
+    if CONFIG_PATH.exists():
+        return CONFIG_PATH.read_text(encoding="utf-8")
+    return yaml.safe_dump(_settings().get("raw") or {}, allow_unicode=True, sort_keys=False)
+
+
+def _yaml_friendly(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _admin_settings_payload(store: PlatformStore) -> dict[str, Any]:
+    effective = _settings()
+    return {
+        "config_path": str(CONFIG_PATH.resolve()),
+        "raw_text": _config_raw_text(),
+        "effective_config_text": yaml.safe_dump(
+            _yaml_friendly(effective),
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        "status": _system_status_payload(store),
+    }
+
+
 def _reload_runtime_settings() -> None:
     clear_settings_cache()
     refresh_runtime_state()
+
+
+def _schedule_admin_restart() -> dict[str, Any]:
+    from sediment.cli import daemon_status
+
+    status = daemon_status()
+    if not status.get("running"):
+        raise RuntimeError("restart is only available when Sediment runs as a managed daemon")
+
+    source_root = str(Path(__file__).resolve().parents[1])
+    python_path = os.environ.get("PYTHONPATH", "").strip()
+    if python_path:
+        python_path = f"{source_root}{os.pathsep}{python_path}"
+    else:
+        python_path = source_root
+    restart_command = [
+        sys.executable,
+        "-m",
+        "sediment.cli",
+        "--config",
+        str(CONFIG_PATH.resolve()),
+        "server",
+        "restart",
+        "--skip-checks",
+    ]
+    wrapper = [
+        sys.executable,
+        "-c",
+        (
+            "import subprocess, sys, time; "
+            "time.sleep(0.75); "
+            "subprocess.run(sys.argv[1:], check=False)"
+        ),
+        *restart_command,
+    ]
+    log_path = _platform_paths()["log_dir"] / "platform.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log_file:
+        subprocess.Popen(
+            wrapper,
+            cwd=str(INSTANCE_ROOT),
+            env={**os.environ, "PYTHONPATH": python_path},
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    return {
+        "scheduled": True,
+        "config_path": str(CONFIG_PATH.resolve()),
+        "message": "restart scheduled",
+    }
 
 
 async def _portal_page(request):
@@ -3204,7 +3419,6 @@ async def _portal_home_page(request):
             locale=_request_locale(request),
             page="home",
             initial_query=str(request.query_params.get("q", "")).strip(),
-            current_user=_current_optional_user(request),
         )
     )
 
@@ -3234,7 +3448,6 @@ async def _portal_graph_page(request):
                 runtime_dir=QUARTZ_RUNTIME_DIR,
                 site_dir=QUARTZ_SITE_DIR,
             ),
-            admin_kb_path=_path_with_locale("/admin/system", locale),
         )
     )
 
@@ -3253,7 +3466,19 @@ async def _portal_search_page(request):
             locale=locale,
             page="search",
             initial_query=str(request.query_params.get("q", "")).strip(),
-            current_user=_current_optional_user(request),
+        )
+    )
+
+
+async def _portal_tutorial_page(request):
+    locale = _request_locale(request)
+    return _html_response(
+        portal_html(
+            knowledge_name=KNOWLEDGE_NAME,
+            instance_name=INSTANCE_NAME,
+            locale=locale,
+            page="tutorial",
+            mcp_endpoint=_tutorial_mcp_endpoint(request),
         )
     )
 
@@ -3267,7 +3492,6 @@ async def _portal_entry_page(request):
             locale=locale,
             page="entry",
             entry_name=request.path_params["name"],
-            current_user=_current_optional_user(request),
         )
     )
 
@@ -3282,6 +3506,19 @@ async def _portal_submit_page(request):
             page="submit",
             current_user=_current_optional_user(request),
         )
+    )
+
+
+async def _skill_download(request):
+    from starlette.responses import Response
+
+    skill_name = str(request.path_params["skill_name"]).strip()
+    if skill_name != _tutorial_skill_slug():
+        return _text_response("skill not found", media_type="text/plain; charset=utf-8", status=404)
+    return Response(
+        _tutorial_skill_text(_request_locale(request)),
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_tutorial_skill_download_name()}"'},
     )
 
 
@@ -3330,6 +3567,10 @@ async def _admin_overview_page(request):
 
 async def _admin_kb_page(request):
     return await _admin_section_page(request, section="kb")
+
+
+async def _admin_files_page(request):
+    return await _admin_section_page(request, section="files")
 
 
 async def _admin_reviews_page(request):
@@ -3529,6 +3770,7 @@ def _system_status_payload(store: PlatformStore) -> dict[str, Any]:
         host=HOST,
         port=PORT,
         sse_endpoint=SSE_ENDPOINT,
+        public_base_url=PUBLIC_BASE_URL,
         auth_required=_admin_auth_required(),
         run_jobs_in_process=RUN_JOBS_IN_PROCESS,
         submission_rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
@@ -3722,6 +3964,55 @@ async def _api_admin_run_ingest(request):
     return _json_response(job, status=202)
 
 
+async def _api_admin_ingest_document(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    body = await _request_json_or_empty(request)
+    submitter_name = str(body.get("submitter_name", "")).strip() or str(
+        actor.get("name", "")
+    ).strip()
+    try:
+        decoded_files = _decode_uploaded_files(body.get("files") or [])
+        submission = submit_document_request(
+            store=_platform_store(),
+            uploads_dir=_platform_paths()["uploads_dir"],
+            filename=str(body.get("filename", "")),
+            mime_type=str(body.get("mime_type", "")),
+            file_bytes=b"",
+            uploads=decoded_files,
+            submitter_name=submitter_name,
+            submitter_ip=detect_submitter_ip(
+                dict(request.headers),
+                request.client.host if request.client else None,
+                trust_proxy_headers=TRUST_PROXY_HEADERS,
+                trusted_proxy_cidrs=TRUSTED_PROXY_CIDRS,
+            ),
+            submitter_user_id=str(actor.get("id", "")).strip() or None,
+            notes="admin ingest upload",
+            rate_limit_count=1_000_000,
+            rate_limit_window_seconds=1,
+            max_upload_bytes=MAX_UPLOAD_BYTES,
+            dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
+        )
+        job = enqueue_ingest_job(
+            store=_platform_store(),
+            submission_id=submission["id"],
+            actor_name=str(actor.get("name", "")),
+            actor_id=str(actor.get("id", "")) or None,
+            actor_role=str(actor.get("role", "")),
+            max_attempts=JOB_MAX_ATTEMPTS,
+        )
+    except FileExistsError as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    except (ValueError, binascii.Error) as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    if RUN_JOBS_IN_PROCESS:
+        _agent_runner().submit(job["id"])
+    return _json_response({"submission": submission, "job": job}, status=202)
+
+
 async def _api_admin_jobs(request):
     guard = await _admin_guard(request)
     if guard:
@@ -3896,6 +4187,78 @@ async def _api_admin_system_status(request):
     return _json_response(_system_status_payload(store))
 
 
+async def _api_admin_settings_config(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    return _json_response(_admin_settings_payload(_platform_store()))
+
+
+async def _api_admin_settings_save(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    body = await _request_json_or_empty(request)
+    raw_text = str(body.get("raw_text", "")).strip()
+    if not raw_text:
+        return _json_response({"error": "raw_text must not be empty"}, status=400)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        suffix=".yaml",
+        dir=CONFIG_PATH.parent,
+        delete=False,
+    ) as handle:
+        temp_path = Path(handle.name)
+        handle.write(raw_text if raw_text.endswith("\n") else f"{raw_text}\n")
+    try:
+        validated = load_settings_for_path(temp_path, argv=[])
+        if not isinstance(validated, dict):
+            raise RuntimeError("config must produce a mapping")
+    except (RuntimeError, ValueError, yaml.YAMLError) as exc:
+        temp_path.unlink(missing_ok=True)
+        return _json_response({"error": str(exc)}, status=400)
+    temp_path.unlink(missing_ok=True)
+    CONFIG_PATH.write_text(
+        raw_text if raw_text.endswith("\n") else f"{raw_text}\n",
+        encoding="utf-8",
+    )
+    _reload_runtime_settings()
+    _platform_store().add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="settings.update",
+        target_type="config",
+        target_id=str(CONFIG_PATH.resolve()),
+        details={"public_base_url": _settings()["server"].get("public_base_url", "")},
+    )
+    return _json_response(_admin_settings_payload(_platform_store()))
+
+
+async def _api_admin_settings_restart(request):
+    guard = await _admin_guard(request, allowed_roles=("owner",))
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    try:
+        payload = _schedule_admin_restart()
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    _platform_store().add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="settings.restart",
+        target_type="config",
+        target_id=str(CONFIG_PATH.resolve()),
+        details={"scheduled": True},
+    )
+    return _json_response(payload, status=202)
+
+
 async def _api_admin_audit_logs(request):
     guard = await _admin_guard(request)
     if guard:
@@ -3942,6 +4305,28 @@ async def _api_admin_entry_save(request):
     except (RuntimeError, ValueError) as exc:
         return _json_response({"error": str(exc)}, status=400)
     return _json_response(payload)
+
+
+async def _api_admin_kb_documents(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    return _json_response(kb_document_browser_payload(KB_PATH))
+
+
+async def _api_admin_files(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    return _json_response(kb_file_management_payload(KB_PATH))
+
+
+async def _api_admin_files_suggest(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    query = str(request.query_params.get("q", "")).strip()
+    return _json_response({"suggestions": search_kb_file_suggestions(KB_PATH, query)})
 
 
 async def _api_admin_explore(request):
@@ -4142,7 +4527,6 @@ class QuartzStaticApp:
                             runtime_dir=QUARTZ_RUNTIME_DIR,
                             site_dir=QUARTZ_SITE_DIR,
                         ),
-                        admin_kb_path=_path_with_locale("/admin/system", _request_locale(request)),
                     )
                 )
                 await response(scope, receive, send)
@@ -4373,12 +4757,15 @@ def create_starlette_app():
         Route("/ui-assets/{asset_name:str}", _ui_asset),
         Route("/portal", _portal_page),
         Route("/search", _portal_search_page),
+        Route("/tutorial", _portal_tutorial_page),
         Route("/entries/{name:str}", _portal_entry_page),
         Route("/submit", _portal_submit_page),
+        Route("/downloads/skills/{skill_name:str}", _skill_download),
         Route("/portal/graph-view", _portal_graph_page),
         Route("/admin", _admin_page),
         Route("/admin/overview", _admin_overview_page),
         Route("/admin/kb", _admin_kb_page),
+        Route("/admin/files", _admin_files_page),
         Route("/admin/reviews", _admin_reviews_page),
         Route("/admin/users", _admin_users_page),
         Route("/admin/system", _admin_system_page),
@@ -4401,11 +4788,15 @@ def create_starlette_app():
         Route("/api/admin/submissions/{submission_id:str}", _api_admin_submission_detail),
         Route("/api/admin/submissions/{submission_id:str}/triage", _api_admin_submission_triage, methods=["POST"]),
         Route("/api/admin/submissions/{submission_id:str}/run-ingest", _api_admin_run_ingest, methods=["POST"]),
+        Route("/api/admin/ingest/document", _api_admin_ingest_document, methods=["POST"]),
         Route("/api/admin/jobs", _api_admin_jobs),
         Route("/api/admin/jobs/{job_id:str}", _api_admin_job_detail),
         Route("/api/admin/jobs/{job_id:str}/retry", _api_admin_job_retry, methods=["POST"]),
         Route("/api/admin/jobs/{job_id:str}/cancel", _api_admin_job_cancel, methods=["POST"]),
         Route("/api/admin/tidy", _api_admin_tidy, methods=["POST"]),
+        Route("/api/admin/kb/documents", _api_admin_kb_documents, methods=["GET"]),
+        Route("/api/admin/files", _api_admin_files, methods=["GET"]),
+        Route("/api/admin/files/suggest", _api_admin_files_suggest, methods=["GET"]),
         Route("/api/admin/reviews", _api_admin_reviews),
         Route("/api/admin/reviews/{review_id:str}", _api_admin_review_detail),
         Route("/api/admin/reviews/{review_id:str}/approve", _api_admin_review_approve, methods=["POST"]),
@@ -4413,6 +4804,9 @@ def create_starlette_app():
         Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
         Route("/api/admin/explore", _api_admin_explore, methods=["POST"]),
+        Route("/api/admin/settings/config", _api_admin_settings_config, methods=["GET"]),
+        Route("/api/admin/settings/config", _api_admin_settings_save, methods=["PUT"]),
+        Route("/api/admin/settings/restart", _api_admin_settings_restart, methods=["POST"]),
         Route("/api/admin/users", _api_admin_users_list, methods=["GET"]),
         Route("/api/admin/users", _api_admin_users_create, methods=["POST"]),
         Route("/api/admin/users/{user_id:str}/token", _api_admin_user_token, methods=["GET"]),

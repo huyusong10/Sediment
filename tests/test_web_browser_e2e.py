@@ -21,7 +21,7 @@ def _browser_page():
             browser = playwright.chromium.launch()
         except PlaywrightError as exc:  # pragma: no cover - environment dependent
             pytest.skip(f"Chromium is unavailable for Playwright E2E: {exc}")
-        context = browser.new_context(locale="zh-CN")
+        context = browser.new_context(locale="zh-CN", accept_downloads=True)
         page = context.new_page()
         try:
             yield page
@@ -36,10 +36,29 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
 
             expect(page.get_by_test_id("portal-search-input")).to_be_visible()
-            expect(page.get_by_test_id("portal-message")).to_contain_text("门户已就绪")
-            expect(page.locator("[data-shell-nav] button")).to_have_count(0)
+            expect(page.get_by_test_id("portal-page-title")).to_have_class(re.compile("sr-only"))
+            expect(page.get_by_test_id("portal-message")).to_contain_text("知识库已就绪")
+            expect(page.locator("[data-shell-nav] a.nav-link")).to_have_count(5)
             expect(page.locator("[data-shell-utility] .utility-icon-button")).to_have_count(2)
+            expect(page.locator(".brand svg.brand-lockup")).to_be_visible()
+            expect(page.locator('a[href^="/admin"]')).to_have_count(0)
             assert page.locator('a[href="/submit?lang=zh"]').count() == 1
+            brand_box = page.locator(".brand").bounding_box()
+            nav_row_box = page.locator("[data-shell-nav]").bounding_box()
+            assert brand_box is not None and nav_row_box is not None
+            assert nav_row_box["y"] > brand_box["y"]
+            overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
+            tutorial_box = page.locator("[data-shell-nav] a.nav-link").nth(2).bounding_box()
+            assert overview_box is not None and tutorial_box is not None
+            assert abs(overview_box["width"] - tutorial_box["width"]) < 2
+
+            page.goto(f"{live['base_url']}/?lang=en", wait_until="domcontentloaded")
+            overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
+            tutorial_box = page.locator("[data-shell-nav] a.nav-link").nth(2).bounding_box()
+            assert overview_box is not None and tutorial_box is not None
+            assert abs(overview_box["height"] - tutorial_box["height"]) < 2
+
+            page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
 
             search_button = page.get_by_test_id("portal-search-button")
             before_box = search_button.bounding_box()
@@ -64,6 +83,8 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             page.get_by_test_id("portal-search-button").click()
             expect(page.get_by_test_id("portal-search-results")).to_contain_text("热备份")
             page.locator("#search-results .card").filter(has_text="热备份").first.click()
+            expect(page.get_by_test_id("portal-entry-page-title")).to_have_text("热备份")
+            expect(page).to_have_title(re.compile("热备份"))
             expect(page.get_by_test_id("portal-entry-sections")).to_contain_text("适用于需要连续服务的系统")
             signal_cards = page.locator("#entry-signals .signal-card")
             expect(signal_cards).to_have_count(5)
@@ -103,6 +124,38 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.locator("#submit-file-status")).to_contain_text("submission_id=")
 
 
+def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) -> None:
+    with live_server(tmp_path, monkeypatch, locale="zh") as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/tutorial", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-page-title")).to_have_text("接入教程")
+            title_box = page.get_by_test_id("portal-page-title").bounding_box()
+            nav_row_box = page.locator("[data-shell-nav]").bounding_box()
+            assert title_box is not None and nav_row_box is not None
+            assert nav_row_box["y"] > title_box["y"]
+            expect(page.locator('[data-testid="tutorial-skill-downloads"] .card')).to_have_count(1)
+            expect(page.locator('[data-testid="tutorial-decision-cards"] .card')).to_have_count(2)
+            expect(page.locator('[data-testid="tutorial-tool-cards"] .card')).to_have_count(3)
+            expect(page.locator('[data-testid="tutorial-agent-guides"] .card')).to_have_count(3)
+            expect(page.locator("body")).to_contain_text("通过 MCP 接入")
+            expect(page.locator("body")).to_contain_text("knowledge_ask")
+            expect(page.locator("body")).to_contain_text("knowledge_list")
+            expect(page.locator("body")).to_contain_text("knowledge_read")
+            expect(page.locator("body")).to_contain_text("http://127.0.0.1")
+            expect(page.locator("body")).not_to_contain_text("传输协议")
+            expect(page.locator("body")).not_to_contain_text("公开浏览默认匿名")
+            expect(page.locator("body")).not_to_contain_text("推荐工作流")
+            tooltip = page.locator('[data-testid="tutorial-mcp-intro"] .tip-panel')
+            expect(tooltip).not_to_be_visible()
+            page.locator('[data-testid="tutorial-mcp-intro"] .tip-trigger').hover()
+            expect(tooltip).to_be_visible()
+            expect(tooltip).to_contain_text("tool allowlist")
+            with page.expect_download() as download_info:
+                page.get_by_role("link", name="下载 SKILL").first.click()
+            download = download_info.value
+            assert download.suggested_filename == "sediment-mcp-explore-SKILL.md"
+
+
 def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
         with _browser_page() as page:
@@ -114,13 +167,27 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             expect(page.locator("#submit-text-status")).to_contain_text("submission_id=")
 
             page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("管理台登录")
             expect(page.get_by_test_id("admin-login-token")).to_be_visible()
             page.get_by_test_id("admin-login-token").fill("top-secret")
             page.get_by_test_id("admin-login-button").click()
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
             expect(page.get_by_test_id("admin-message")).to_contain_text("管理台已就绪")
             expect(page.locator('[data-testid="admin-refresh-button"]')).to_have_count(0)
 
+            page.goto(f"{live['base_url']}/admin/system", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("设置")
+            expect(page.get_by_test_id("admin-settings-raw-text")).to_be_visible()
+            expect(page.get_by_test_id("admin-settings-restart-button")).to_be_visible()
+            build_box = page.get_by_test_id("admin-quartz-build-button").bounding_box()
+            open_box = page.locator('[data-testid="admin-quartz-actions"] a.button').bounding_box()
+            assert build_box is not None and open_box is not None
+            assert abs(build_box["width"] - open_box["width"]) < 2
+            assert abs(build_box["height"] - open_box["height"]) < 2
+
             page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-ingest-dropzone")).to_be_visible()
+            expect(page.locator('[data-testid="admin-file-index-tree"]')).to_have_count(0)
             submission_card = page.locator("#submission-list .card").filter(
                 has_text="浏览器管理台提案"
             ).first
@@ -141,10 +208,17 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.get_by_test_id("admin-approve-review-button").click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("已批准")
 
-            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
-            page.get_by_test_id("admin-editor-name").fill("薄弱条目")
-            page.get_by_test_id("admin-load-entry-button").click()
+            page.goto(f"{live['base_url']}/admin/files", wait_until="domcontentloaded")
+            expect(page.locator('[data-testid="admin-load-entry-button"]')).to_have_count(0)
+            search_input = page.get_by_test_id("admin-file-search")
+            search_input.fill("薄弱")
+            expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
+            page.locator('#admin-file-suggestions button[data-name="薄弱条目"]').click()
+            tree_box = page.get_by_test_id("admin-file-index-tree").bounding_box()
             editor = page.get_by_test_id("admin-editor-content")
+            editor_box = editor.bounding_box()
+            assert tree_box is not None and editor_box is not None
+            assert editor_box["y"] > tree_box["y"]
             expect(editor).to_have_value(re.compile("单一关系"))
             original = editor.input_value()
             updated = original.replace(
@@ -174,6 +248,7 @@ def test_portal_quartz_page_shows_optional_state(tmp_path: Path, monkeypatch) ->
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-page-title")).to_have_text("Quartz")
             expect(page).to_have_title(re.compile("Quartz"))
             expect(page.locator("body")).to_contain_text("Quartz")
             expect(page.locator("body")).to_contain_text("打开 Quartz")
@@ -189,6 +264,11 @@ def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypat
         )
 
         with _browser_page() as page:
-            page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
-            expect(page).to_have_url(re.compile(".*/quartz/.*"))
-            expect(page.locator("body")).to_contain_text("Quartz Ready")
+            page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
+            with page.expect_popup() as popup_info:
+                page.get_by_role("link", name="Quartz").click()
+            popup = popup_info.value
+            popup.wait_for_load_state("domcontentloaded")
+            expect(page).not_to_have_url(re.compile(".*/quartz/.*"))
+            expect(popup).to_have_url(re.compile(".*/quartz/.*"))
+            expect(popup.locator("body")).to_contain_text("Quartz Ready")

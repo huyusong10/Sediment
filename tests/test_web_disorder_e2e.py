@@ -79,3 +79,24 @@ def test_web_disorder_out_of_order_entry_update_rejects_missing_entry(tmp_path: 
         json={"content": "# none", "expected_hash": "x", "actor_name": "qa"},
     )
     assert update.status_code == 404
+
+
+def test_web_disorder_committer_cannot_access_settings(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+        admin_token="owner-token",
+    )
+
+    assert client.post("/api/admin/session", json={"token": "owner-token"}).status_code == 200
+    created = client.post("/api/admin/users", json={"name": "Committer User"})
+    assert created.status_code == 201
+    committer_token = created.json()["token"]
+    assert client.delete("/api/admin/session").status_code == 200
+
+    assert client.post("/api/admin/session", json={"token": committer_token}).status_code == 200
+    assert client.get("/admin/system").status_code == 403
+    assert client.get("/api/admin/settings/config").status_code == 403

@@ -40,7 +40,7 @@ That means the knowledge base cannot just be searchable. It has to stay inspecta
 
 - A Python package with a standard `src/` layout
 - A local-instance CLI: `sediment`
-- MCP server plus web portal and admin console
+- MCP server plus a knowledge base web UI and admin console
 - Hosted `ingest` / `tidy` job workflow with review queues
 - Support for multiple agent CLIs:
   - Claude Code CLI
@@ -206,9 +206,9 @@ If you prefer not to install the CLI yet, you can still run it directly from the
 uv run --project /path/to/Sediment sediment --help
 ```
 
-## Portal Workflow
+## Knowledge Base Web Workflow
 
-- Search is the primary surface: the portal is optimized for full-text lookup first, with entry content shown in a focused overlay instead of a permanent side panel.
+- Search is the primary surface: the knowledge base web UI is optimized for full-text lookup first, with entry content shown in a focused overlay instead of a permanent side panel.
 - Text submissions are analyzed against the current KB before they enter the review buffer, so committers can see suggested title, type, duplicate risk, and related entries immediately.
 - Document submissions support a single file, a folder, multiple files, or a `.zip` archive; Sediment will unpack supported documents and buffer the extracted text for review.
 - Quartz 4 is treated as an optional graph page, not a core runtime dependency. If a built Quartz site is present, Sediment embeds it at `/portal/graph-view`; otherwise the core install still works without Node/npm.

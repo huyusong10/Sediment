@@ -4,23 +4,24 @@
       <div class="brand">
         __LOGO_INLINE__
         <div class="brand-copy">
-          <span>Sediment</span>
           <strong>__KNOWLEDGE_NAME__</strong>
         </div>
       </div>
       <div data-shell-header-actions>
-        <div class="nav" data-shell-nav>
-          __HOME_LINK__
-          __SEARCH_LINK__
-          __SUBMIT_LINK__
-          __QUARTZ_LINK__
-        </div>
         <div class="nav" data-shell-utility></div>
       </div>
     </div>
-    <h1>__KNOWLEDGE_NAME__</h1>
-    <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">__ATTRIBUTION__</div>
+    <h1 class="page-title" data-testid="portal-page-title">__PAGE_TITLE__</h1>
+    <div class="nav hero-nav" data-shell-nav>
+      __HOME_LINK__
+      __SEARCH_LINK__
+      __TUTORIAL_LINK__
+      __SUBMIT_LINK__
+      __QUARTZ_LINK__
+    </div>
   </section>
+
+  <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">__ATTRIBUTION__</div>
 
   <section class="grid cols-2">
     <div class="panel">
@@ -36,10 +37,12 @@
           </select>
         </label>
         <label>__SUBMISSION_CONTENT_LABEL__<textarea id="submit-content"></textarea></label>
-        <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_BUTTON__</button>
-        <div id="submit-text-status" class="subtle" role="status" aria-live="polite"></div>
-        <div id="submit-text-analysis" class="empty"></div>
       </div>
+      <div class="form-actions">
+        <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_BUTTON__</button>
+      </div>
+      <div id="submit-text-status" class="subtle" role="status" aria-live="polite"></div>
+      <div id="submit-text-analysis" class="empty"></div>
     </div>
     <div class="panel">
       <h2>__DOCUMENT_UPLOAD_TITLE__</h2>
@@ -53,9 +56,11 @@
             <input id="upload-folder" data-testid="portal-upload-folder" type="file" webkitdirectory directory multiple />
           </label>
         </div>
-        <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_BUTTON__</button>
-        <div id="submit-file-status" class="subtle" role="status" aria-live="polite"></div>
       </div>
+      <div class="form-actions">
+        <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_BUTTON__</button>
+      </div>
+      <div id="submit-file-status" class="subtle" role="status" aria-live="polite"></div>
     </div>
   </section>
 </div>

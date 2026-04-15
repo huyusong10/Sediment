@@ -4,26 +4,26 @@
       <div class="brand">
         __LOGO_INLINE__
         <div class="brand-copy">
-          <span>Sediment</span>
           <strong>__KNOWLEDGE_NAME__</strong>
         </div>
       </div>
       <div data-shell-header-actions>
-        <div class="nav" data-shell-nav>
-          __OVERVIEW_LINK__
-          __KB_LINK__
-          __REVIEWS_LINK__
-          __USERS_LINK__
-          __SYSTEM_LINK__
-        </div>
         <div class="nav" data-shell-utility>
           __PORTAL_LINK__
-          <button id="admin-logout-button" data-testid="admin-logout-button">__LOGOUT_LABEL__</button>
+          <button class="utility-action" id="admin-logout-button" data-testid="admin-logout-button">__LOGOUT_LABEL__</button>
         </div>
       </div>
     </div>
-    <h1>__KNOWLEDGE_NAME__</h1>
-    <div class="notice" id="admin-message" data-testid="admin-message" role="status" aria-live="polite">__READY_MESSAGE__</div>
+    <h1 class="page-title" data-testid="admin-page-title">__PAGE_TITLE__</h1>
+    <div class="nav hero-nav" data-shell-nav>
+      __OVERVIEW_LINK__
+      __KB_LINK__
+      __FILES_LINK__
+      __REVIEWS_LINK__
+      __USERS_LINK__
+      __SYSTEM_LINK__
+    </div>
   </section>
+  <div class="notice" id="admin-message" data-testid="admin-message" role="status" aria-live="polite">__READY_MESSAGE__</div>
   __SECTION_MARKUP__
 </div>

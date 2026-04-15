@@ -18,7 +18,7 @@ Sediment 当前设计基线可以概括为：
 - [enterprise-governance.md](enterprise-governance.md)：企业部署时的角色、权限和审核责任
 - [platform-architecture.md](platform-architecture.md)：企业版 Sediment 的服务分层、存储边界和部署结构
 - [interfaces-and-review-flow.md](interfaces-and-review-flow.md)：MCP、REST、提交缓冲区、任务流和审核状态机
-- [web-surfaces.md](web-surfaces.md)：前台门户与管理后台的页面和功能边界
+- [web-surfaces.md](web-surfaces.md)：前台知识库界面与管理后台的页面和功能边界
 - [delivery-roadmap.md](delivery-roadmap.md)：按阶段落地企业平台的实施路径
 
 ## 2. 当前知识层布局
@@ -59,7 +59,7 @@ knowledge-base/
 当前企业接口分成两类：
 
 - MCP：面向 Agent 和自动化流程
-- REST / HTTP：面向 Web 门户和管理后台
+- REST / HTTP：面向知识库 Web 界面和管理后台
 - CLI：面向本地开发、运维和值班排障，统一入口为 `sediment`
 
 其中现有稳定读接口仍保持：

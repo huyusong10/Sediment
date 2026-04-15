@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tests.support.platform_harness import build_platform_project, configure_server
 
@@ -23,12 +24,20 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert page.status_code == 200
     assert 'data-testid="portal-search-input"' in page.text
     assert 'data-testid="portal-submit-text-button"' not in page.text
-    assert 'href="/quartz/?lang=en"' in page.text
+    assert 'href="/tutorial?lang=en"' in page.text
+    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in page.text
     assert '/portal/graph-view' not in page.text
+    assert 'href="/admin' not in page.text
     assert 'data-testid="portal-message"' in page.text
+    assert 'data-testid="portal-page-title"' in page.text
+    assert 'class="page-title sr-only"' in page.text
+    assert 'class="brand-lockup"' in page.text
     assert 'data-shell-header-actions' in page.text
     assert 'data-shell-utility' in page.text
+    assert 'class="button nav-link primary"' in page.text
+    assert 'class="button utility-action"' not in page.text
     assert 'class="stats stats-inline"' in page.text
+    assert 'class="subtle search-status-line"' in page.text
     assert page.text.index('data-testid="portal-stats"') < page.text.index('data-testid="portal-recent-updates"')
     assert page.text.count('href="/submit?lang=en"') == 1
     assert 'class="search-suggestions-popover"' in page.text
@@ -36,9 +45,36 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert 'src="/ui-assets/portal.js"' in page.text
     assert "const UI =" not in page.text
     assert "Browsing stays public and anonymous." not in page.text
+    assert "<title>Knowledge base overview | Test Knowledge Base</title>" in page.text
+
+    tutorial_page = client.get("/tutorial", headers={"accept-language": "en-US"})
+    assert tutorial_page.status_code == 200
+    assert 'data-testid="tutorial-skill-downloads"' in tutorial_page.text
+    assert 'data-testid="tutorial-tool-cards"' in tutorial_page.text
+    assert 'data-testid="tutorial-decision-cards"' in tutorial_page.text
+    assert 'data-testid="tutorial-agent-guides"' in tutorial_page.text
+    assert "Connect via MCP" in tutorial_page.text
+    assert "http://testserver/sediment/" in tutorial_page.text
+    assert "Download SKILL" in tutorial_page.text
+    assert "knowledge_ask" in tutorial_page.text
+    assert "knowledge_list" in tutorial_page.text
+    assert "knowledge_read" in tutorial_page.text
+    assert "sediment-mcp-explore-SKILL.md" in tutorial_page.text
+    assert "Transport" not in tutorial_page.text
+    assert "Public browsing stays anonymous by default" not in tutorial_page.text
+    assert "Recommended workflow" not in tutorial_page.text
+    assert "from agents import Agent" not in tutorial_page.text
+    assert "tools/call knowledge_list {}" not in tutorial_page.text
+
+    skill_download = client.get("/downloads/skills/mcp-explore", headers={"accept-language": "en-US"})
+    assert skill_download.status_code == 200
+    assert skill_download.headers["content-disposition"] == 'attachment; filename="sediment-mcp-explore-SKILL.md"'
+    assert "Sediment MCP Explore Skill" in skill_download.text
+    assert "If you only need a fast answer, call `knowledge_ask` directly." in skill_download.text
 
     submit_page = client.get("/submit", headers={"accept-language": "en-US"})
     assert submit_page.status_code == 200
+    assert 'data-testid="portal-page-title"' in submit_page.text
     assert 'data-testid="portal-submit-text-button"' in submit_page.text
 
     submit_page_zh = client.get("/submit", headers={"accept-language": "zh-CN"})
@@ -48,8 +84,10 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     search_page = client.get("/search?q=%E7%83%AD%E5%A4%87%E4%BB%BD", headers={"accept-language": "en-US"})
     assert search_page.status_code == 200
+    assert 'data-testid="portal-page-title"' in search_page.text
     assert 'data-testid="portal-search-results"' in search_page.text
     assert 'aria-haspopup="listbox"' in search_page.text
+    assert "<title>Full-text search | Test Knowledge Base</title>" in search_page.text
 
     shell_asset = client.get("/ui-assets/web-shell.js")
     assert shell_asset.status_code == 200
@@ -72,7 +110,7 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
         "/api/portal/submissions/text",
         json={
             "title": "网页提案",
-            "content": "这是一条来自门户的提案。",
+            "content": "这是一条来自知识库界面的提案。",
             "submitter_name": "Alice",
             "submission_type": "concept",
         },
@@ -87,6 +125,28 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert quartz_page.status_code == 200
     assert "Open Quartz" in quartz_page.text
     assert 'href="/admin/system?lang=en"' in quartz_page.text
+
+
+def test_portal_default_language_prefers_english_without_zh_signal(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+        locale="zh",
+    )
+
+    default_page = client.get("/")
+    assert default_page.status_code == 200
+    assert '<html lang="en"' in default_page.text
+    assert "Knowledge base overview" in default_page.text
+    assert "知识库概览" not in default_page.text
+
+    zh_page = client.get("/", headers={"accept-language": "zh-CN"})
+    assert zh_page.status_code == 200
+    assert '<html lang="zh-CN"' in zh_page.text
+    assert "知识库概览" in zh_page.text
 
 
 def test_portal_graph_page_uses_new_window_launcher_when_quartz_site_exists(
@@ -127,9 +187,11 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     login_page = client.get("/admin", headers={"accept-language": "en-US"})
     assert login_page.status_code == 200
+    assert 'data-testid="admin-page-title"' in login_page.text
     assert 'data-testid="admin-login-token"' in login_page.text
     assert 'data-testid="admin-login-button"' in login_page.text
     assert 'src="/ui-assets/admin-login.js"' in login_page.text
+    assert "<title>Admin sign in | Test Knowledge Base</title>" in login_page.text
 
     login = client.post("/api/admin/session", json={"token": "top-secret"})
     assert login.status_code == 200
@@ -137,15 +199,26 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     admin_page = client.get("/admin/overview", headers={"accept-language": "en-US"})
     assert admin_page.status_code == 200
+    assert 'data-testid="admin-page-title"' in admin_page.text
     assert 'data-testid="admin-message"' in admin_page.text
     assert 'data-testid="admin-stats"' in admin_page.text
     assert 'data-testid="admin-refresh-button"' not in admin_page.text
     assert 'src="/ui-assets/admin.js"' in admin_page.text
+    assert "<title>Overview | Test Knowledge Base</title>" in admin_page.text
 
     kb_page = client.get("/admin/kb", headers={"accept-language": "en-US"})
     assert kb_page.status_code == 200
     assert 'data-testid="admin-submission-list"' in kb_page.text
-    assert 'data-testid="admin-editor-content"' in kb_page.text
+    assert 'data-testid="admin-ingest-button"' in kb_page.text
+    assert 'data-testid="admin-doc-browser"' not in kb_page.text
+    assert 'data-testid="admin-editor-content"' not in kb_page.text
+
+    files_page = client.get("/admin/files", headers={"accept-language": "en-US"})
+    assert files_page.status_code == 200
+    assert 'data-testid="admin-file-index-tree"' in files_page.text
+    assert 'data-testid="admin-file-search"' in files_page.text
+    assert 'data-testid="admin-editor-content"' in files_page.text
+    assert "<title>File management | Test Knowledge Base</title>" in files_page.text
 
     review_page = client.get("/admin/reviews", headers={"accept-language": "en-US"})
     assert review_page.status_code == 200
@@ -162,6 +235,46 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     system_page = client.get("/admin/system", headers={"accept-language": "en-US"})
     assert system_page.status_code == 200
     assert 'data-testid="admin-system-status"' in system_page.text
+    assert 'data-testid="admin-settings-raw-text"' in system_page.text
+    assert 'data-testid="admin-settings-restart-button"' in system_page.text
+    assert "<title>Settings | Test Knowledge Base</title>" in system_page.text
+
+    kb_documents = client.get("/api/admin/kb/documents")
+    assert kb_documents.status_code == 200
+    assert kb_documents.json()["counts"]["formal"] >= 2
+
+    files_payload = client.get("/api/admin/files")
+    assert files_payload.status_code == 200
+    files_data = files_payload.json()
+    assert files_data["counts"]["index"] >= 1
+    assert files_data["top_indexes"]
+    assert "薄弱条目" in files_data["documents_by_name"]
+
+    file_suggestions = client.get("/api/admin/files/suggest?q=%E8%96%84%E5%BC%B1")
+    assert file_suggestions.status_code == 200
+    assert any(item["name"] == "薄弱条目" for item in file_suggestions.json()["suggestions"])
+
+    settings_payload = client.get("/api/admin/settings/config")
+    assert settings_payload.status_code == 200
+    settings_data = settings_payload.json()
+    assert "raw_text" in settings_data
+    config_doc = yaml.safe_load(settings_data["raw_text"])
+    config_doc["server"]["public_base_url"] = "https://kb.example.com/app"
+    updated_settings = client.put(
+        "/api/admin/settings/config",
+        json={"raw_text": yaml.safe_dump(config_doc, allow_unicode=True, sort_keys=False)},
+    )
+    assert updated_settings.status_code == 200
+    monkeypatch.setattr(
+        server_module,
+        "_schedule_admin_restart",
+        lambda: {"scheduled": True, "message": "restart scheduled"},
+    )
+    restart_response = client.post("/api/admin/settings/restart", json={})
+    assert restart_response.status_code == 202
+    assert restart_response.json()["scheduled"] is True
+    tutorial_after_settings = client.get("/tutorial", headers={"accept-language": "en-US"})
+    assert "https://kb.example.com/app/sediment/" in tutorial_after_settings.text
 
     owner_create = client.post("/api/admin/users", json={"name": "Spare Owner", "role": "owner"})
     assert owner_create.status_code == 400
@@ -222,5 +335,30 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     entry_page = client.get("/entries/%E8%96%84%E5%BC%B1%E6%9D%A1%E7%9B%AE", headers={"accept-language": "en-US"})
     assert entry_page.status_code == 200
+    assert 'data-testid="portal-entry-page-title"' in entry_page.text
     assert 'data-testid="portal-entry-sections-panel"' in entry_page.text
     assert 'data-testid="portal-entry-signals-panel"' in entry_page.text
+    assert "<title>薄弱条目 | Test Knowledge Base</title>" in entry_page.text
+
+
+def test_tutorial_endpoint_prefers_proxy_headers_when_trusted(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+    monkeypatch.setattr(server_module, "TRUST_PROXY_HEADERS", True)
+
+    tutorial_page = client.get(
+        "/tutorial",
+        headers={
+            "accept-language": "en-US",
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "kb.example.com",
+            "x-forwarded-prefix": "/sediment-ui",
+        },
+    )
+    assert tutorial_page.status_code == 200
+    assert "https://kb.example.com/sediment-ui/sediment/" in tutorial_page.text

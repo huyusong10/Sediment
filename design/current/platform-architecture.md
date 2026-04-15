@@ -27,12 +27,12 @@
 - Workflow Store：保存提交、审核、任务、审计和锁信息
 - Agent Runner：在知识库本地执行 ingest / tidy / explore 的托管 Agent
 - Search / Graph Projection：为全文搜索、图谱浏览和后台筛选提供查询投影
-- Web Apps：前台知识门户和后台管理界面
+- Web Apps：前台知识库界面和后台管理界面
 - Quartz Hosted Site：由 Sediment 服务层托管的静态 Quartz 站点
 
 ```mermaid
 flowchart LR
-    U["User Portal"] --> API["API Service"]
+    U["Knowledge Base UI"] --> API["API Service"]
     A["Admin Console"] --> API
     API --> CFG["Config Layer"]
     API --> REG["Instance Registry"]
@@ -166,14 +166,14 @@ flowchart LR
 
 职责：
 
-- 前台：浏览、搜索、查看概念、提交材料和意见
+- 前台：浏览知识库、搜索、查看概念、提交材料和意见
 - 后台：审核、编辑、健康面板、任务管理、diff 审阅
 - 两者共享基础 shell，但在导航、权限和配色上彻底独立
 
 当前 IA：
 
-- Public Portal：`/`、`/search`、`/entries/{name}`、`/submit`、`/quartz/`
-- Admin Console：`/admin/overview`、`/admin/kb`、`/admin/reviews`、`/admin/users`、`/admin/system`
+- Public Knowledge Base UI：`/`、`/search`、`/tutorial`、`/entries/{name}`、`/submit`、`/quartz/`
+- Admin Console：`/admin/overview`、`/admin/kb`（知识库管理）、`/admin/files`（文件管理）、`/admin/reviews`、`/admin/users`、`/admin/system`（设置）
 - 兼容路径：`/portal`、`/portal/graph-view`、`/admin`
 
 ## 4. 技术选择
@@ -196,9 +196,11 @@ flowchart LR
 
 当前继续使用 Python 服务栈内建的模板与前端脚本：
 
-- 前台门户和后台管理共享同一套 API
+- 前台知识库界面和后台管理共享同一套 API
 - Quartz 图谱不重写到主壳中，而是作为独立只读站点挂载
 - 在线编辑继续使用受控 textarea + 后端校验路径
+- 文件管理中的文档结构浏览优先使用 index 驱动的原生分组树与健康队列联动；当前不引入依赖 jQuery 的树形插件
+- 设置页提供 raw YAML + resolved config 双视图与 owner-only 一键重启；涉及监听地址的修改可在线保存，但仍需要重启服务生效
 
 ### 4.3 Quartz 取舍
 
@@ -220,7 +222,8 @@ flowchart LR
 - 由 Sediment 服务层负责 `exact file -> path.html -> path/index.html -> 404.html` 解析
 - 支持 clean URL 与 percent-encoded 中文 slug
 - Quartz 页面额外放宽到其实际需要的 CSP：允许 blob worker，以及 Quartz 自带 CDN 样式/脚本资源，避免关系图谱被浏览器策略拦截
-- Quartz build/status 留在后台 `/admin/system` owner-only 区域
+- Quartz build/status 留在后台 `/admin/system` owner-only 设置区
+- 后台的文档在线编辑从 `/admin/kb` 拆分到 `/admin/files`，避免提交治理与文件修订挤在同一工作区
 
 ## 5. 工作区隔离
 

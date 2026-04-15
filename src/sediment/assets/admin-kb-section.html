@@ -1,42 +1,39 @@
 <section class="grid cols-2">
   <div class="panel">
     <div class="row spread">
-      <h2>__EXPLORE_TITLE__</h2>
-      <span class="tabs-note">__EXPLORE_NOTE__</span>
+      <h2>__INGEST_TITLE__</h2>
+      <span class="tabs-note">__INGEST_NOTE__</span>
     </div>
     <div class="grid">
-      <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
-      <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
-      <div id="admin-explore-result" data-testid="admin-explore-result" class="markdown empty">__EXPLORE_RESULT_EMPTY__</div>
+      <div class="dropzone" id="admin-ingest-dropzone" data-testid="admin-ingest-dropzone">
+        <strong>__INGEST_DROPZONE_TITLE__</strong>
+        <p class="subtle">__INGEST_DROPZONE_BODY__</p>
+      </div>
+      <div class="upload-grid">
+        <label>__INGEST_FILE_LABEL__<input id="admin-ingest-file" data-testid="admin-ingest-file" type="file" multiple accept=".txt,.md,.docx,.pptx,.zip" /></label>
+        <label>__INGEST_FOLDER_LABEL__<input id="admin-ingest-folder" data-testid="admin-ingest-folder" type="file" webkitdirectory directory multiple /></label>
+      </div>
+      <div class="detail-block">
+        <strong>__INGEST_SELECTION_LABEL__</strong>
+        <p id="admin-ingest-selection" data-testid="admin-ingest-selection">__INGEST_SELECTION_EMPTY__</p>
+      </div>
+      <button class="primary" id="admin-ingest-button" data-testid="admin-ingest-button">__INGEST_BUTTON__</button>
+      <div id="admin-ingest-status" data-testid="admin-ingest-status" class="subtle" role="status" aria-live="polite">__INGEST_STATUS__</div>
+      <div class="list scroll-list" id="submission-list" data-testid="admin-submission-list"></div>
     </div>
   </div>
-  <div class="panel">
-    <div class="row spread">
-      <h2>__SUBMISSION_TITLE__</h2>
-      <span class="tabs-note">__SUBMISSION_NOTE__</span>
-    </div>
-    <div class="list" id="submission-list" data-testid="admin-submission-list"></div>
-  </div>
-</section>
 
-<section class="grid cols-2">
   <div class="panel">
     <div class="row spread">
       <h2>__TIDY_TITLE__</h2>
       <span class="tabs-note">__TIDY_NOTE__</span>
     </div>
     <div class="grid">
-      <label>__TIDY_SCOPE_LABEL__
-        <select id="tidy-scope">
-          <option value="full">__TIDY_SCOPE_FULL__</option>
-          <option value="graph">__TIDY_SCOPE_GRAPH__</option>
-          <option value="indexes">__TIDY_SCOPE_INDEXES__</option>
-          <option value="health_blocking">__TIDY_SCOPE_HEALTH_BLOCKING__</option>
-        </select>
-      </label>
-      <label>__TIDY_REASON_LABEL__<input id="tidy-reason" placeholder="__TIDY_REASON_PLACEHOLDER__" /></label>
-      <div class="row">
-        <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__TIDY_BUTTON__</button>
+      <label>__TIDY_REASON_LABEL__<input id="tidy-reason" data-testid="admin-tidy-reason" placeholder="__TIDY_REASON_PLACEHOLDER__" /></label>
+      <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__TIDY_BUTTON__</button>
+      <div class="detail-block">
+        <strong>__TIDY_HINT_TITLE__</strong>
+        <p>__TIDY_HINT_BODY__</p>
       </div>
     </div>
   </div>
@@ -44,21 +41,12 @@
 
 <section class="panel">
   <div class="row spread">
-    <h2>__ISSUE_TITLE__</h2>
-    <span class="tabs-note">__ISSUE_NOTE__</span>
+    <h2>__EXPLORE_TITLE__</h2>
+    <span class="tabs-note">__EXPLORE_NOTE__</span>
   </div>
-  <div class="list" id="issue-list" data-testid="admin-issue-list" style="margin-top:12px;"></div>
-</section>
-
-<section class="grid cols-2">
-  <div class="panel">
-    <h2>__EDITOR_TITLE__</h2>
-    <div class="grid">
-      <label>__EDITOR_NAME_LABEL__<input id="editor-name" data-testid="admin-editor-name" placeholder="__EDITOR_NAME_PLACEHOLDER__" /></label>
-      <button id="load-entry-button" data-testid="admin-load-entry-button">__LOAD_ENTRY_BUTTON__</button>
-      <label>__EDITOR_CONTENT_LABEL__<textarea id="editor-content" data-testid="admin-editor-content"></textarea></label>
-      <button class="primary" id="save-entry-button" data-testid="admin-save-entry-button">__SAVE_ENTRY_BUTTON__</button>
-      <div id="editor-status" data-testid="admin-editor-status" class="subtle" role="status" aria-live="polite">__EDITOR_STATUS__</div>
-    </div>
+  <div class="grid">
+    <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
+    <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
+    <div id="admin-explore-result" data-testid="admin-explore-result" class="markdown empty">__EXPLORE_RESULT_EMPTY__</div>
   </div>
 </section>

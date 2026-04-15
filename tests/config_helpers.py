@@ -18,6 +18,7 @@ def write_test_config(
     agent_command: str | list[str] | None = None,
     host: str = "127.0.0.1",
     port: int = 8000,
+    public_base_url: str | None = None,
     locale: str = "en",
     max_attempts: int = 2,
     stale_after_seconds: int = 1,
@@ -44,6 +45,7 @@ def write_test_config(
             "host": host,
             "port": port,
             "sse_path": "/sediment/",
+            "public_base_url": public_base_url or "",
             "run_jobs_in_process": False,
         },
         "jobs": {

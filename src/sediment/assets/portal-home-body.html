@@ -4,27 +4,26 @@
       <div class="brand">
         __LOGO_INLINE__
         <div class="brand-copy">
-          <span>Sediment</span>
           <strong>__KNOWLEDGE_NAME__</strong>
         </div>
       </div>
       <div data-shell-header-actions>
-        <div class="nav" data-shell-nav>
-          __HOME_LINK__
-          __SEARCH_LINK__
-          __SUBMIT_LINK__
-          __QUARTZ_LINK__
-        </div>
         <div class="nav" data-shell-utility></div>
       </div>
     </div>
-    <h1>__KNOWLEDGE_NAME__</h1>
+    <h1 class="__PAGE_TITLE_CLASS__" data-testid="portal-page-title">__PAGE_TITLE__</h1>
+    <div class="nav hero-nav" data-shell-nav>
+      __HOME_LINK__
+      __SEARCH_LINK__
+      __TUTORIAL_LINK__
+      __SUBMIT_LINK__
+      __QUARTZ_LINK__
+    </div>
   </section>
 
   <section class="panel">
     <div class="row spread">
       <h2>__PAGE_KICKER__</h2>
-      <span class="subtle" id="search-status"></span>
     </div>
     <div class="search-stage">
       <div class="search-field" data-search-popover-root>
@@ -48,10 +47,11 @@
         <button class="primary" id="search-button" data-testid="portal-search-button">__SEARCH_BUTTON_LABEL__</button>
       </div>
     </div>
+    <div id="search-status" class="subtle search-status-line" role="status" aria-live="polite"></div>
     <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite"></div>
   </section>
 
-  <section class="stack" style="margin-top:24px;">
+  <section class="stack">
     <div class="panel">
       <h2>__STATS_TITLE__</h2>
       <div class="stats stats-inline" id="portal-stats" data-testid="portal-stats"></div>

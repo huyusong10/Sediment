@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import uuid
 import zipfile
+from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -1247,6 +1248,256 @@ def get_health_payload(kb_path: str | Path) -> dict[str, Any]:
         "severity_counts": counts,
         "issues": issues,
     }
+
+
+def _issue_document_name(
+    issue: dict[str, Any],
+    *,
+    docs: dict[str, dict[str, Any]],
+    index_docs: dict[str, dict[str, Any]],
+) -> str | None:
+    evidence = issue.get("evidence") if isinstance(issue.get("evidence"), dict) else {}
+    candidates = [
+        issue.get("target"),
+        evidence.get("name"),
+        evidence.get("entry"),
+        evidence.get("index"),
+        evidence.get("source_file"),
+    ]
+    for raw_value in candidates:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        normalized = Path(value).stem if "/" in value or value.endswith(".md") else value
+        if normalized in docs or normalized in index_docs:
+            return normalized
+    return None
+
+
+def _admin_document_collections(
+    kb_path: str | Path,
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, list[dict[str, Any]]],
+    dict[str, dict[str, Any]],
+]:
+    root = Path(kb_path).resolve()
+    data = inventory(root)
+    docs = data["docs"]
+    index_docs = data["index_docs"]
+    issues = build_health_issue_queue(root)
+    issues_by_document: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    normalized_issues: list[dict[str, Any]] = []
+    for issue in issues:
+        enriched = dict(issue)
+        document_name = _issue_document_name(issue, docs=docs, index_docs=index_docs)
+        enriched["document_name"] = document_name
+        normalized_issues.append(enriched)
+        if document_name:
+            issues_by_document[document_name].append(enriched)
+
+    def build_document(name: str, doc: dict[str, Any], *, group: str) -> dict[str, Any]:
+        path = resolve_kb_document_path(root, name)
+        document_issues = issues_by_document.get(name, [])
+        relative_path = None
+        updated_at = 0
+        if path is not None and path.exists():
+            relative_path = str(path.resolve().relative_to(root))
+            updated_at = int(path.stat().st_mtime)
+        return {
+            "name": name,
+            "title": str(doc.get("title") or name),
+            "group": group,
+            "kind": str(doc.get("kind") or group),
+            "entry_type": str(doc.get("entry_type") or ("index" if group == "index" else "")),
+            "status": str(doc.get("status") or ("n/a" if group == "index" else "")),
+            "summary": str(doc.get("summary") or ""),
+            "relative_path": relative_path,
+            "updated_at": updated_at,
+            "aliases": list(doc.get("aliases") or []),
+            "links": list(doc.get("graph_links") or doc.get("links") or []),
+            "issue_count": len(document_issues),
+            "issue_summaries": [str(item.get("summary") or "") for item in document_issues[:3]],
+            "indexes": [],
+        }
+
+    documents_by_name: dict[str, dict[str, Any]] = {}
+    for name in data["entries"]:
+        documents_by_name[name] = build_document(name, docs[name], group="formal")
+    for name in data["placeholders"]:
+        documents_by_name[name] = build_document(name, docs[name], group="placeholder")
+    for name in data["indexes"]:
+        documents_by_name[name] = build_document(name, index_docs[name], group="index")
+    return data, normalized_issues, issues_by_document, documents_by_name
+
+
+def kb_document_browser_payload(kb_path: str | Path) -> dict[str, Any]:
+    data, normalized_issues, _issues_by_document, documents_by_name = _admin_document_collections(kb_path)
+    groups = {
+        "formal": [documents_by_name[name] for name in data["entries"]],
+        "placeholder": [documents_by_name[name] for name in data["placeholders"]],
+        "index": [documents_by_name[name] for name in data["indexes"]],
+    }
+    return {
+        "counts": {key: len(value) for key, value in groups.items()},
+        "groups": groups,
+        "health_issues": normalized_issues,
+    }
+
+
+def kb_file_management_payload(kb_path: str | Path) -> dict[str, Any]:
+    data, normalized_issues, _issues_by_document, documents_by_name = _admin_document_collections(kb_path)
+    index_docs = data["index_docs"]
+    index_names = set(data["indexes"])
+    document_names = set(documents_by_name) - index_names
+    parent_indexes: dict[str, set[str]] = defaultdict(set)
+    for name, record in index_docs.items():
+        for target in record.get("links") or []:
+            if target in index_names and target != name:
+                parent_indexes[target].add(name)
+
+    indexed_documents: dict[str, set[str]] = defaultdict(set)
+
+    def build_index_node(name: str, *, stack: tuple[str, ...] = ()) -> tuple[dict[str, Any], set[str]]:
+        record = documents_by_name[name]
+        direct_doc_targets: list[str] = []
+        child_index_targets: list[str] = []
+        for target in record.get("links") or []:
+            if target in index_names and target != name:
+                child_index_targets.append(target)
+            elif target in document_names:
+                direct_doc_targets.append(target)
+        direct_doc_targets = list(dict.fromkeys(direct_doc_targets))
+        child_index_targets = [
+            target for target in dict.fromkeys(child_index_targets) if target not in stack
+        ]
+
+        child_nodes: list[dict[str, Any]] = []
+        reachable_documents: set[str] = set(direct_doc_targets)
+        for child_name in child_index_targets:
+            child_node, child_documents = build_index_node(child_name, stack=(*stack, name))
+            child_nodes.append(child_node)
+            reachable_documents.update(child_documents)
+        for document_name in reachable_documents:
+            indexed_documents[document_name].add(name)
+        node = {
+            "name": record["name"],
+            "title": record["title"],
+            "summary": record["summary"],
+            "relative_path": record["relative_path"],
+            "issue_count": record["issue_count"],
+            "segment": str(index_docs[name].get("segment") or record["name"]),
+            "is_root": bool(index_docs[name].get("is_root")),
+            "entry_count": int(index_docs[name].get("entry_count") or 0),
+            "estimated_tokens": int(index_docs[name].get("estimated_tokens") or 0),
+            "last_tidied_at": str(index_docs[name].get("last_tidied_at") or ""),
+            "direct_documents": [documents_by_name[target] for target in direct_doc_targets],
+            "child_indexes": child_nodes,
+            "reachable_document_count": len(reachable_documents),
+        }
+        return node, reachable_documents
+
+    root_indexes = [
+        name
+        for name in data["indexes"]
+        if bool(index_docs[name].get("is_root")) or not parent_indexes.get(name)
+    ]
+    top_index_names = list(dict.fromkeys(root_indexes or data["indexes"]))
+    top_index_names.sort(
+        key=lambda name: (
+            not bool(index_docs[name].get("is_root")),
+            str(documents_by_name[name].get("title") or name).casefold(),
+        )
+    )
+    top_indexes: list[dict[str, Any]] = []
+    reachable_from_top: set[str] = set()
+    for name in top_index_names:
+        node, reachable_documents = build_index_node(name)
+        top_indexes.append(node)
+        reachable_from_top.update(reachable_documents)
+
+    for document_name, index_set in indexed_documents.items():
+        if document_name in documents_by_name:
+            documents_by_name[document_name]["indexes"] = sorted(index_set)
+
+    unindexed_documents = [
+        documents_by_name[name]
+        for name in sorted(document_names - reachable_from_top)
+    ]
+    return {
+        "counts": {
+            "formal": len(data["entries"]),
+            "placeholder": len(data["placeholders"]),
+            "index": len(data["indexes"]),
+            "indexed": len(reachable_from_top),
+            "unindexed": len(unindexed_documents),
+        },
+        "documents_by_name": documents_by_name,
+        "top_indexes": top_indexes,
+        "unindexed_documents": unindexed_documents,
+        "health_issues": normalized_issues,
+    }
+
+
+def search_kb_file_suggestions(
+    kb_path: str | Path,
+    query: str,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    raw_query = query.strip()
+    if not raw_query:
+        return []
+    payload = kb_file_management_payload(kb_path)
+    terms = [term for term in re.split(r"\s+", raw_query) if term]
+    suggestions: list[dict[str, Any]] = []
+    for document in payload["documents_by_name"].values():
+        score = 0
+        matched_field = ""
+        aliases = list(document.get("aliases") or [])
+        relative_path = str(document.get("relative_path") or "")
+        summary = str(document.get("summary") or "")
+        title = str(document.get("title") or "")
+        name = str(document.get("name") or "")
+        for term in terms:
+            lowered = term.casefold()
+            if title.casefold().startswith(lowered) or name.casefold().startswith(lowered):
+                score += 16
+                matched_field = matched_field or "title"
+            elif lowered in title.casefold():
+                score += 12
+                matched_field = matched_field or "title"
+            elif any(alias.casefold().startswith(lowered) for alias in aliases):
+                score += 10
+                matched_field = matched_field or "aliases"
+            elif lowered in " ".join(aliases).casefold():
+                score += 8
+                matched_field = matched_field or "aliases"
+            elif lowered in relative_path.casefold():
+                score += 6
+                matched_field = matched_field or "path"
+            elif lowered in summary.casefold():
+                score += 4
+                matched_field = matched_field or "summary"
+        if score <= 0:
+            continue
+        suggestions.append(
+            {
+                "name": name,
+                "title": title,
+                "group": str(document.get("group") or ""),
+                "kind": str(document.get("kind") or ""),
+                "entry_type": str(document.get("entry_type") or ""),
+                "status": str(document.get("status") or ""),
+                "summary": summary,
+                "relative_path": relative_path,
+                "indexes": list(document.get("indexes") or []),
+                "matched_field": matched_field or "summary",
+                "score": score + min(int(document.get("issue_count") or 0), 5),
+            }
+        )
+    return sorted(suggestions, key=lambda item: (-item["score"], item["name"]))[:limit]
 
 
 def content_hash(content: str) -> str:

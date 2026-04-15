@@ -258,6 +258,7 @@ def system_status_payload(
     host: str,
     port: int,
     sse_endpoint: str,
+    public_base_url: str,
     auth_required: bool,
     run_jobs_in_process: bool,
     submission_rate_limit_count: int,
@@ -273,6 +274,11 @@ def system_status_payload(
     jobs = store.list_jobs(limit=200)
     stale_jobs = store.list_stale_jobs(stale_after_seconds=job_stale_after_seconds)
     query_host = "127.0.0.1" if host in {"0.0.0.0", "::", "[::]"} else host
+    base_url = str(public_base_url or "").strip().rstrip("/") or f"http://{query_host}:{port}"
+
+    def public_url(path: str) -> str:
+        return f"{base_url}/{str(path or '/').lstrip('/')}"
+
     return {
         "instance": {
             "name": instance_name,
@@ -282,13 +288,13 @@ def system_status_payload(
         },
         "auth_required": auth_required,
         "urls": {
-            "portal": f"http://{query_host}:{port}/",
-            "admin": f"http://{query_host}:{port}/admin/overview",
-            "search": f"http://{query_host}:{port}/search",
-            "submit": f"http://{query_host}:{port}/submit",
-            "quartz": f"http://{query_host}:{port}/quartz/",
-            "health": f"http://{query_host}:{port}/healthz",
-            "mcp_sse": f"http://{query_host}:{port}{sse_endpoint}",
+            "portal": public_url("/"),
+            "admin": public_url("/admin/overview"),
+            "search": public_url("/search"),
+            "submit": public_url("/submit"),
+            "quartz": public_url("/quartz/"),
+            "health": public_url("/healthz"),
+            "mcp_sse": public_url(sse_endpoint),
             "bind_host": host,
         },
         "worker_mode": "in_process" if run_jobs_in_process else "queue",
@@ -366,6 +372,7 @@ def platform_status_payload(
     host: str,
     port: int,
     sse_endpoint: str,
+    public_base_url: str,
     auth_required: bool,
     run_jobs_in_process: bool,
     submission_rate_limit_count: int,
@@ -389,6 +396,7 @@ def platform_status_payload(
         host=host,
         port=port,
         sse_endpoint=sse_endpoint,
+        public_base_url=public_base_url,
         auth_required=auth_required,
         run_jobs_in_process=run_jobs_in_process,
         submission_rate_limit_count=submission_rate_limit_count,

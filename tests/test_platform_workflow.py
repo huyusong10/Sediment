@@ -234,6 +234,40 @@ def test_admin_save_entry_and_health_issue_queue(tmp_path: Path, monkeypatch) ->
     assert refreshed["validation"]["valid"] is True
 
 
+def test_admin_file_management_payload_and_restart_api(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+        admin_token="top-secret",
+    )
+
+    login = client.post("/api/admin/session", json={"token": "top-secret"})
+    assert login.status_code == 200
+
+    files_payload = client.get("/api/admin/files")
+    assert files_payload.status_code == 200
+    payload = files_payload.json()
+    assert payload["top_indexes"]
+    assert payload["documents_by_name"]["热备份"]["group"] == "formal"
+    assert payload["documents_by_name"]["index.root"]["group"] == "index"
+
+    suggestions = client.get("/api/admin/files/suggest?q=%E7%83%AD%E5%A4%87")
+    assert suggestions.status_code == 200
+    assert any(item["name"] == "热备份" for item in suggestions.json()["suggestions"])
+
+    monkeypatch.setattr(
+        server_module,
+        "_schedule_admin_restart",
+        lambda: {"scheduled": True, "message": "restart scheduled"},
+    )
+    restart = client.post("/api/admin/settings/restart", json={})
+    assert restart.status_code == 202
+    assert restart.json()["scheduled"] is True
+
+
 def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     state_dir = tmp_path / "state"
@@ -325,7 +359,7 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
     assert 'data-testid="admin-login-token"' in page.text
     assert 'data-testid="admin-login-button"' in page.text
     assert 'rel="icon"' in page.text
-    assert 'class="brand-mark"' in page.text
+    assert 'class="brand-lockup"' in page.text
     assert page.headers["cache-control"] == "no-store"
 
     unauthorized = client.get("/api/admin/overview")
@@ -345,7 +379,7 @@ def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -
     authed_page = client.get("/admin")
     assert 'data-testid="admin-message"' in authed_page.text
     assert 'data-testid="admin-refresh-button"' not in authed_page.text
-    assert 'class="brand-mark"' in authed_page.text
+    assert 'class="brand-lockup"' in authed_page.text
 
 
 def test_detect_submitter_ip_only_trusts_configured_proxy() -> None:

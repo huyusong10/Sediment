@@ -28,6 +28,7 @@ DEFAULT_CONFIG = {
         "host": "0.0.0.0",
         "port": 8000,
         "sse_path": "/sediment/",
+        "public_base_url": "",
         "run_jobs_in_process": False,
     },
     "auth": {
@@ -88,6 +89,7 @@ CONFIG_RELATIVE_PATH = Path("config") / "sediment" / "config.yaml"
 ENV_OVERRIDE_KEYS = {
     "SEDIMENT_HOST": ("server", "host"),
     "SEDIMENT_PORT": ("server", "port"),
+    "SEDIMENT_PUBLIC_BASE_URL": ("server", "public_base_url"),
     "SEDIMENT_KB_PATH": ("paths", "knowledge_base"),
     "SEDIMENT_STATE_DIR": ("paths", "state_dir"),
     "SEDIMENT_DB_PATH": ("paths", "db_path"),
@@ -207,6 +209,9 @@ def load_settings_for_path(
     merged["server"]["port"] = _to_int(merged["server"].get("port"), 8000)
     merged["server"]["sse_path"] = _normalize_sse_path(
         merged["server"].get("sse_path", "/sediment/")
+    )
+    merged["server"]["public_base_url"] = _normalize_public_base_url(
+        merged["server"].get("public_base_url", "")
     )
     merged["server"]["run_jobs_in_process"] = _to_bool(
         merged["server"].get("run_jobs_in_process"),
@@ -396,6 +401,13 @@ def _normalize_sse_path(value: str) -> str:
     if not raw.endswith("/"):
         raw += "/"
     return raw
+
+
+def _normalize_public_base_url(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return raw.rstrip("/")
 
 
 def _string_list(value: Any) -> list[str]:

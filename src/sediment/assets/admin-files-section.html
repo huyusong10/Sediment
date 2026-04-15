@@ -1,0 +1,76 @@
+<section class="panel">
+  <div class="row spread">
+    <h2>__FILE_BROWSER_TITLE__</h2>
+    <span class="tabs-note">__FILE_BROWSER_NOTE__</span>
+  </div>
+  <div class="stack files-workspace">
+    <div class="stats stats-inline" id="admin-file-counts" data-testid="admin-file-counts"></div>
+    <label>__FILE_SEARCH_LABEL__
+      <div class="search-field">
+        <input
+          id="admin-file-search"
+          data-testid="admin-file-search"
+          placeholder="__FILE_SEARCH_PLACEHOLDER__"
+          autocomplete="off"
+          spellcheck="false"
+          aria-autocomplete="list"
+          aria-expanded="false"
+          aria-haspopup="listbox"
+        />
+        <div
+          class="search-suggestions-popover"
+          id="admin-file-suggestions"
+          data-testid="admin-file-suggestions"
+          role="listbox"
+          hidden
+        ></div>
+      </div>
+    </label>
+    <div id="admin-file-search-status" data-testid="admin-file-search-status" class="subtle search-status-line" role="status" aria-live="polite">__FILE_SEARCH_STATUS__</div>
+    <div class="detail-block">
+      <strong>__FILE_BROWSE_HINT_TITLE__</strong>
+      <p>__FILE_BROWSE_HINT_BODY__</p>
+    </div>
+    <div>
+      <div class="row spread">
+        <h3>__DOC_STRUCTURE_TITLE__</h3>
+        <span class="tabs-note">__DOC_STRUCTURE_NOTE__</span>
+      </div>
+      <div class="stack doc-browser-groups scroll-list file-index-tree" id="admin-file-index-tree" data-testid="admin-file-index-tree"></div>
+    </div>
+    <div>
+      <div class="row spread">
+        <h3>__DOC_HEALTH_TITLE__</h3>
+        <span class="tabs-note">__DOC_HEALTH_NOTE__</span>
+      </div>
+      <div class="list scroll-list" id="admin-doc-health-list" data-testid="admin-doc-health-list"></div>
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="row spread">
+    <h2>__EDITOR_TITLE__</h2>
+    <span class="tabs-note">__EDITOR_NOTE__</span>
+  </div>
+  <div class="stack file-editor-workspace">
+    <div class="detail-meta-grid" id="admin-doc-meta" data-testid="admin-doc-meta"></div>
+    <div class="detail-block file-current-doc">
+      <strong>__EDITOR_CURRENT_LABEL__</strong>
+      <p id="admin-file-current-name" data-testid="admin-file-current-name">__EDITOR_CURRENT_EMPTY__</p>
+    </div>
+    <div class="action-row" data-testid="admin-editor-actions">
+      <button class="primary" id="save-entry-button" data-testid="admin-save-entry-button">__SAVE_ENTRY_BUTTON__</button>
+    </div>
+    <label>__EDITOR_CONTENT_LABEL__<textarea class="file-editor-area" id="editor-content" data-testid="admin-editor-content"></textarea></label>
+    <div id="editor-status" data-testid="admin-editor-status" class="subtle" role="status" aria-live="polite">__EDITOR_STATUS__</div>
+    <div class="panel panel-compact entry-markdown-panel">
+      <h3>__EDITOR_PREVIEW_TITLE__</h3>
+      <div id="editor-preview" data-testid="admin-editor-preview" class="markdown empty">__EDITOR_PREVIEW_EMPTY__</div>
+    </div>
+    <div class="panel panel-compact">
+      <h3>__EDITOR_LINKED_ISSUES_TITLE__</h3>
+      <div id="admin-doc-linked-issues" data-testid="admin-doc-linked-issues" class="list"></div>
+    </div>
+  </div>
+</section>

@@ -125,6 +125,8 @@ def configure_server(
     admin_token: str = "",
     startup_admin_token: str = "",
     submission_rate_limit_count: int | None = None,
+    locale: str = "en",
+    public_base_url: str | None = None,
 ) -> tuple[TestClient, object, object]:
     cli_path = Path(__file__).resolve().parent.parent / "fixtures" / "mock_workflow_cli.py"
     auth_users = None
@@ -143,6 +145,8 @@ def configure_server(
         project_root,
         kb_path=kb_path,
         state_dir=state_dir,
+        locale=locale,
+        public_base_url=public_base_url,
         agent_backend="claude-code",
         agent_command=[sys.executable, str(cli_path)],
         auth_users=auth_users,
@@ -167,7 +171,14 @@ def configure_server(
 
 
 @contextmanager
-def live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
+def live_server(
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    admin_token: str = "",
+    locale: str = "en",
+    public_base_url: str | None = None,
+):
     project_root, kb_path = build_platform_project(tmp_path)
     port = free_port()
     state_dir = tmp_path / "state"
@@ -188,10 +199,12 @@ def live_server(tmp_path: Path, monkeypatch, *, admin_token: str = ""):
         project_root,
         kb_path=kb_path,
         state_dir=state_dir,
+        locale=locale,
         agent_backend="claude-code",
         agent_command=[sys.executable, str(cli_path)],
         host="127.0.0.1",
         port=port,
+        public_base_url=public_base_url,
         auth_users=auth_users,
         session_secret="browser-e2e-session",
     )

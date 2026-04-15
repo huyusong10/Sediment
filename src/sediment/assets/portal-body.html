@@ -4,7 +4,6 @@
       <div class="brand">
         __LOGO_INLINE__
         <div class="brand-copy">
-          <span>Sediment</span>
           <strong>__KNOWLEDGE_NAME__</strong>
         </div>
       </div>
@@ -14,30 +13,32 @@
         __NAV_ADMIN__
       </div>
     </div>
-    <h1>__KNOWLEDGE_NAME__</h1>
-    <p class="subtle">__SUBTITLE__</p>
-    <p>__HERO_TEXT__</p>
+    <h1 class="page-title">__KNOWLEDGE_NAME__</h1>
   </section>
 
-  <section class="panel" style="margin-top:20px;">
+  <section class="panel">
     <div class="stats" id="portal-stats"></div>
     <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">__MESSAGE__</div>
   </section>
 
-  <section class="panel" style="margin-top:20px;">
+  <section class="panel">
     <div class="row spread">
       <h2>__SEARCH_TITLE__</h2>
       <span class="subtle">__SEARCH_HINT__</span>
     </div>
-    <div class="row">
-      <input id="search-input" data-testid="portal-search-input" placeholder="__SEARCH_PLACEHOLDER__" />
-      <button class="primary" id="search-button" data-testid="portal-search-button">__SEARCH_BUTTON__</button>
+    <div class="search-stage">
+      <div class="search-field">
+        <input id="search-input" data-testid="portal-search-input" placeholder="__SEARCH_PLACEHOLDER__" />
+      </div>
+      <div class="search-actions">
+        <button class="primary" id="search-button" data-testid="portal-search-button">__SEARCH_BUTTON__</button>
+      </div>
     </div>
-    <div id="search-status" class="subtle" style="margin-top:12px;" role="status" aria-live="polite">__SEARCH_IDLE__</div>
+    <div id="search-status" class="subtle search-status-line" role="status" aria-live="polite">__SEARCH_IDLE__</div>
     <div class="list" id="search-results" data-testid="portal-search-results" style="margin-top:14px;"></div>
   </section>
 
-  <section class="panel" style="margin-top:20px;">
+  <section class="panel">
     <div class="row spread">
       <h2>__UPDATES_TITLE__</h2>
       __UPDATES_LINK__
@@ -45,7 +46,7 @@
     <div class="list" id="recent-updates"></div>
   </section>
 
-  <section class="panel" style="margin-top:20px;">
+  <section class="panel">
     <h2>__BUFFER_TITLE__</h2>
     <p class="subtle">__BUFFER_NOTE__</p>
     <div class="grid cols-2">
@@ -62,10 +63,12 @@
             </select>
           </label>
           <label>__CONTENT_LABEL__<textarea id="submit-content" placeholder="__CONTENT_PLACEHOLDER__"></textarea></label>
-          <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_LABEL__</button>
-          <div id="submit-text-status" class="subtle" role="status" aria-live="polite">__TEXT_STATUS__</div>
-          <div id="submit-text-analysis" class="empty">__ANALYSIS_IDLE__</div>
         </div>
+        <div class="form-actions">
+          <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_LABEL__</button>
+        </div>
+        <div id="submit-text-status" class="subtle" role="status" aria-live="polite">__TEXT_STATUS__</div>
+        <div id="submit-text-analysis" class="empty">__ANALYSIS_IDLE__</div>
       </div>
       <div class="card">
         <h3>__UPLOAD_TITLE__</h3>
@@ -79,9 +82,11 @@
               <input id="upload-folder" data-testid="portal-upload-folder" type="file" webkitdirectory directory multiple />
             </label>
           </div>
-          <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_LABEL__</button>
-          <div id="submit-file-status" class="subtle" role="status" aria-live="polite">__FILE_STATUS__</div>
         </div>
+        <div class="form-actions">
+          <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_LABEL__</button>
+        </div>
+        <div id="submit-file-status" class="subtle" role="status" aria-live="polite">__FILE_STATUS__</div>
       </div>
     </div>
   </section>

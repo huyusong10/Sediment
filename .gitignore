@@ -37,4 +37,9 @@ config/sediment/config.yaml
 # Benchmarks and local evaluation data
 benchmark/
 benchmarks/results/
+benchmarks/results_smoke/
 testcase/results/
+
+# Liminal
+spec.md
+.liminal/

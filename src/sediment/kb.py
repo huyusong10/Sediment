@@ -1024,7 +1024,12 @@ def _strip_quote_prefixes(text: str) -> str:
 
 
 def _first_sentences(text: str, limit: int) -> str:
-    sentences = [segment.strip() for segment in re.split(r"[。！？.!?]", text) if segment.strip()]
+    protected = re.sub(r"(?<=[A-Za-z0-9])\.(?=[A-Za-z0-9])", "__SEDIMENT_DOT__", text)
+    sentences = [
+        segment.strip().replace("__SEDIMENT_DOT__", ".")
+        for segment in re.split(r"[。！？.!?]", protected)
+        if segment.strip()
+    ]
     chosen = "。".join(sentences[:limit])
     if chosen and not chosen.endswith("。"):
         chosen += "。"

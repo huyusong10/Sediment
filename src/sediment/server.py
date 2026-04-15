@@ -908,7 +908,7 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
         return _error_payload("Question must not be empty.")
 
     material_answer = None
-    if _explore_fast_only_enabled():
+    if _explore_fast_only_enabled() and _material_fallback_enabled():
         material_answer = answer_from_materials(question, project_root)
         if material_answer is not None:
             return material_answer
@@ -993,6 +993,15 @@ def _explore_fast_only_enabled() -> bool:
     }
 
 
+def _material_fallback_enabled() -> bool:
+    return os.environ.get("SEDIMENT_RUNTIME_ALLOW_MATERIAL_FALLBACK", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _build_local_explore_answer(
     question: str,
     *,
@@ -1019,8 +1028,7 @@ def _build_local_explore_answer(
         item for item in shortlist if _is_direct_candidate_match(question, item)
     ]
     direct_shortlist.sort(
-        key=lambda item: _direct_candidate_match_index(question, item),
-        reverse=True,
+        key=lambda item: _direct_candidate_sort_key(question, item),
     )
     if len(direct_shortlist) >= 2 and _question_needs_multiple_direct_matches(question, focus):
         selected_candidates = direct_shortlist[:2]
@@ -1044,6 +1052,7 @@ def _build_local_explore_answer(
     )
     selected_names: list[str] = []
     evidence_parts: list[str] = []
+    multi_definition = question_mode == "definition" and len(selected_candidates) > 1
 
     for item in selected_candidates:
         name = str(item.get("name", "")).strip()
@@ -1051,6 +1060,19 @@ def _build_local_explore_answer(
             continue
         snippet_payload = snippets_by_name.get(name, {})
         snippet_records = snippet_payload.get("snippets", [])
+        if not snippet_records:
+            doc = inventory_data.get("docs", {}).get(name, {}) or {}
+            fallback_records: list[dict[str, str]] = []
+            summary = str(doc.get("summary", "")).strip()
+            if summary:
+                fallback_records.append({"section": "Summary", "text": summary})
+            for section_name, content in (doc.get("sections_map", {}) or {}).items():
+                if section_name == "Related":
+                    continue
+                text = str(content).strip()
+                if text:
+                    fallback_records.append({"section": str(section_name), "text": text})
+            snippet_records = fallback_records
         snippet_texts = _preferred_local_snippets(
             question=question,
             candidate=item,
@@ -1063,22 +1085,28 @@ def _build_local_explore_answer(
             continue
         selected_names.append(name)
         if question_mode == "definition":
-            evidence_parts.extend(snippet_texts[:1])
-            break
+            evidence_parts.extend(snippet_texts[:1] if multi_definition else snippet_texts[:2])
+            if not multi_definition or len(selected_names) >= 2:
+                break
+            continue
         if direct_shortlist and item is selected_candidates[0]:
-            evidence_parts.extend(snippet_texts[:2])
+            evidence_parts.extend(snippet_texts[:3])
         else:
-            evidence_parts.extend(snippet_texts[:1])
-        if len(selected_names) >= 3 or len(evidence_parts) >= 4:
+            evidence_parts.extend(snippet_texts[:2])
+        limit = 6 if focus == "diagnosis" else 5
+        if len(selected_names) >= 3 or len(evidence_parts) >= limit:
             break
 
     if not evidence_parts:
         return None
 
     if question_mode == "definition":
-        answer = evidence_parts[0]
+        answer = " ".join(_dedupe_text_parts(evidence_parts)[:2])
     else:
-        answer = " ".join(evidence_parts[:3])
+        if _question_prefers_scope_first(question, focus):
+            answer = " ".join(_dedupe_text_parts(evidence_parts)[:3])
+        else:
+            answer = " ".join(_rank_local_evidence_parts(question, focus, evidence_parts)[:3])
 
     exploration_summary = {
         "entries_scanned": len(inventory_data["entries"]),
@@ -1105,34 +1133,368 @@ def _build_local_explore_answer(
 
 
 def _is_direct_candidate_match(question: str, candidate: dict[str, Any]) -> bool:
-    question_lower = question.lower()
-    candidate_name = str(candidate.get("name", "")).strip().lower()
-    if candidate_name and candidate_name in question_lower:
-        return True
-    aliases = candidate.get("matched_terms", []) or []
-    return any(str(alias).strip().lower() in question_lower for alias in aliases)
+    question_terms = {item.lower() for item in _local_question_keywords(question)}
+    if not question_terms:
+        return False
+    return any(term in question_terms for term in _candidate_direct_terms(candidate))
+
+
+_LOCAL_COMPARISON_MARKERS = (
+    "关系",
+    "关联",
+    "联系",
+    "区别",
+    "差异",
+    "对比",
+    "relationship",
+    "relation",
+    "difference",
+    "compare",
+)
+_LOCAL_GUIDANCE_MARKERS = (
+    "流程",
+    "步骤",
+    "阶段",
+    "如何",
+    "怎么",
+    "怎样",
+    "判断",
+    "评估",
+    "process",
+    "workflow",
+    "step",
+    "steps",
+    "stage",
+    "stages",
+    "determine",
+    "judge",
+    "assess",
+)
+_LOCAL_SCOPE_MARKERS = (
+    "有哪些",
+    "多少",
+    "多少个",
+    "哪几种",
+    "哪些类型",
+    "范围",
+    "区间",
+    "安全运行区间",
+    "消息类型",
+    "路由策略",
+    "部署策略",
+    "故障类型",
+    "监测点",
+    "生命周期",
+    "数据质量",
+    "质量",
+    "如何判断",
+    "在什么条件下",
+    "什么条件下",
+    "在什么情况下",
+    "什么情况下",
+    "内容是什么",
+    "规则是什么",
+    "触发条件",
+    "启动条件",
+    "what types",
+    "which types",
+    "how many",
+    "what does",
+    "what is the rule",
+    "what is the content",
+    "data quality",
+    "under what condition",
+    "under what conditions",
+    "what condition",
+    "what conditions",
+    "trigger condition",
+    "trigger conditions",
+    "start condition",
+    "start conditions",
+)
+_LOCAL_DIAGNOSIS_MARKERS = (
+    "可能是什么问题",
+    "根因",
+    "缺陷",
+    "漏检",
+    "误判",
+    "延迟",
+    "故障类型",
+    "哪些类型的故障",
+    "root cause",
+    "defect",
+    "fault type",
+    "fault types",
+    "failure type",
+    "failure types",
+    "what could be wrong",
+    "misjudge",
+    "misjudgment",
+    "delay",
+)
+_LOCAL_WHY_MARKERS = (
+    "为什么",
+    "原因",
+    "为何",
+    "why",
+    "reason",
+    "reasons",
+)
+_LOCAL_HOW_MARKERS = (
+    "如何",
+    "怎么",
+    "怎样",
+    "步骤",
+    "准备",
+    "协作",
+    "配合",
+    "需要",
+    "how",
+    "prepare",
+    "preparation",
+    "coordinate",
+    "coordination",
+    "work together",
+    "need",
+)
+_LOCAL_RISK_MARKERS = (
+    "风险",
+    "后果",
+    "误区",
+    "避免",
+    "risk",
+    "risks",
+    "consequence",
+    "consequences",
+    "pitfall",
+    "pitfalls",
+    "avoid",
+)
+_LOCAL_DIRECT_MULTI_MARKERS = (
+    "分别",
+    "和",
+    "与",
+    "及",
+    "之间",
+    " and ",
+    " with ",
+    " between ",
+)
+_LOCAL_COMBINED_REASONING_MARKERS = (
+    "过程",
+    "过程中",
+    "结合",
+    "根据",
+    "综合",
+    "推断",
+    "during",
+    "combine",
+    "combined",
+    "based on",
+    "infer",
+    "inference",
+)
+_LOCAL_SCOPE_FIRST_MARKERS = (
+    "有哪些",
+    "多少",
+    "多少个",
+    "哪几种",
+    "哪些类型",
+    "范围",
+    "区间",
+    "安全运行区间",
+    "消息类型",
+    "路由策略",
+    "部署策略",
+    "故障类型",
+    "监测点",
+    "生命周期",
+    "流程",
+    "步骤",
+    "阶段",
+    "准备",
+    "如何判断",
+    "判断",
+    "质量",
+    "在什么条件下",
+    "什么条件下",
+    "内容是什么",
+    "规则是什么",
+    "触发条件",
+    "启动条件",
+    "what types",
+    "which types",
+    "how many",
+    "process",
+    "workflow",
+    "step",
+    "steps",
+    "stage",
+    "stages",
+    "preparation",
+    "data quality",
+    "under what condition",
+    "under what conditions",
+    "trigger condition",
+    "trigger conditions",
+)
+_LOCAL_QUERYABLE_TERM_SUFFIXES = (
+    "节点的",
+    "节点",
+    "数据",
+    "技术",
+    "团队",
+    "指标",
+    "质量",
+    "级别",
+)
+_LOCAL_SURFACE_FILLERS = (
+    "完整",
+    "当前",
+    "默认",
+    "整体",
+    "全系统",
+    "全局",
+    "complete",
+    "current",
+    "default",
+    "overall",
+)
+_LOCAL_STRUCTURED_SURFACE_GROUPS = {
+    "消息类型": ("消息类型", "报文类型", "message type", "message types"),
+    "路由策略": ("路由策略", "路由规则", "routing strategy", "routing strategies", "route strategy", "route strategies"),
+    "故障类型": ("故障类型", "异常类", "类型的故障", "fault type", "fault types", "failure type", "failure types"),
+    "设计哲学": ("设计哲学", "design philosophy", "system philosophy"),
+    "生命周期": ("生命周期", "lifecycle", "life cycle"),
+    "监测点": ("监测点", "监控点", "monitoring point", "monitor point"),
+}
+_LOCAL_ARTIFACT_WRAPPER_SUFFIXES = ("路由表", "报文定义", "监测点配置")
+_LOCAL_LOW_SIGNAL_ENTRY_NAMES = {
+    "技术",
+    "系统",
+    "指标",
+    "调查",
+    "报告",
+    "事件",
+    "流程",
+    "步骤",
+    "内容",
+    "定义",
+    "规则",
+    "配置",
+    "接口",
+    "能力",
+    "现状",
+    "机制",
+}
+_LOCAL_LOW_SIGNAL_DEFINITION_MARKERS = (
+    "一种模式或状态",
+    "正式流程中的一个阶段",
+    "用于表达当前处理阶段",
+    "相关系统",
+    "名称 定义 目标值 告警阈值",
+)
+_LOCAL_LOW_SIGNAL_NAME_PREFIXES = (
+    "当前",
+    "核心",
+    "默认",
+    "通知",
+    "负责",
+    "注册",
+    "核对",
+    "本人",
+    "制定",
+    "系统设计的",
+)
+_LOCAL_LOW_SIGNAL_NAME_SUFFIXES = ("检测", "执行", "记录", "归档", "通知")
+_LOCAL_DEFINITION_MARKERS = (
+    "是",
+    "指",
+    "用于",
+    "负责",
+    "衡量",
+    "表示",
+    "属于",
+    "提供",
+    "设备",
+    "团队",
+    "角色",
+    "系统",
+    "协议",
+    "策略",
+    "阈值",
+    "指标",
+)
+_LOCAL_DEFINITION_SUPPORT_MARKERS = (
+    "核心资源",
+    "物质基础",
+    "管理系统",
+    "控制中枢",
+    "异常现象",
+    "触发",
+    "阈值",
+    "步骤",
+    "阶段",
+    "流程",
+    "不能完全",
+    "账房",
+    "收支",
+    "负载均衡",
+    "中继",
+    "缓冲",
+    "留声机",
+    "底噪",
+    "峰谷差",
+    "幽灵读数",
+)
+
+
+def _question_has_marker(question: str, markers: tuple[str, ...]) -> bool:
+    lowered = question.lower()
+    return any(marker in lowered for marker in markers)
 
 
 def _local_question_focus(question: str, context: dict[str, Any]) -> str:
-    if any(marker in question for marker in ("关系", "关联", "联系", "区别", "差异", "对比")):
+    if _question_has_marker(question, _LOCAL_COMPARISON_MARKERS):
         return "comparison"
+    if _question_has_marker(question, _LOCAL_WHY_MARKERS):
+        return "why"
+    if _question_has_marker(question, _LOCAL_DIAGNOSIS_MARKERS):
+        return "diagnosis"
+    if _question_has_marker(question, _LOCAL_RISK_MARKERS):
+        return "risk"
+    if _question_has_marker(question, _LOCAL_SCOPE_MARKERS):
+        return "scope"
+    if _question_has_marker(question, _LOCAL_GUIDANCE_MARKERS):
+        return "guidance"
     focus = str(context.get("question_analysis", {}).get("focus", "open"))
     if focus != "open":
         return focus
-    if any(marker in question for marker in ("为什么", "原因", "为何")):
-        return "why"
-    if any(marker in question for marker in ("如何", "怎么", "怎样", "步骤", "准备", "协作", "配合", "需要")):
+    if _question_has_marker(question, _LOCAL_HOW_MARKERS):
         return "guidance"
-    if any(marker in question for marker in ("风险", "后果", "误区", "避免")):
-        return "risk"
     return focus
 
 
 def _local_question_mode(question: str, context: dict[str, Any]) -> str:
-    if any(marker in question for marker in ("关系", "关联", "联系", "区别", "差异", "对比")):
+    if _question_has_marker(question, _LOCAL_DIAGNOSIS_MARKERS):
+        return "open"
+    if _question_has_marker(question, _LOCAL_GUIDANCE_MARKERS + _LOCAL_SCOPE_MARKERS):
+        return "guidance"
+    focus = str(context.get("question_analysis", {}).get("focus", "open"))
+    if focus == "comparison":
+        return "comparison"
+    if focus == "diagnosis":
+        return "open"
+    if focus == "scope":
+        return "open"
+    if focus in {"why", "when"}:
+        return "guidance"
+    if focus == "risk":
+        return "risk"
+    if _question_has_marker(question, _LOCAL_COMPARISON_MARKERS):
         return "comparison"
     if any(
-        marker in question
+        marker in question.lower()
         for marker in (
             "什么是",
             "是什么",
@@ -1141,16 +1503,21 @@ def _local_question_mode(question: str, context: dict[str, Any]) -> str:
             "是做什么的",
             "作用是什么",
             "负责什么",
-            "内容是什么",
             "衡量什么",
+            "what is",
+            "what does",
+            "mean",
+            "used for",
+            "responsible for",
+            "measure",
         )
     ):
         return "definition"
-    if any(marker in question for marker in ("为什么", "原因", "为何")):
+    if _question_has_marker(question, _LOCAL_WHY_MARKERS):
         return "guidance"
-    if any(marker in question for marker in ("如何", "怎么", "怎样", "步骤", "准备", "协作", "配合", "需要")):
+    if _question_has_marker(question, _LOCAL_HOW_MARKERS):
         return "guidance"
-    if any(marker in question for marker in ("风险", "后果", "误区", "避免")):
+    if _question_has_marker(question, _LOCAL_RISK_MARKERS):
         return "risk"
     return str(context.get("question_analysis", {}).get("mode", "open"))
 
@@ -1164,14 +1531,34 @@ def _preferred_local_snippets(
     question_mode: str,
     focus: str,
 ) -> list[str]:
+    cleaned_summary = _clean_local_snippet(fallback_summary, focus=focus, question=question)
     if question_mode == "definition":
-        for record in snippet_records:
-            if str(record.get("section", "")) == "Summary":
-                text = _strip_wikilinks(str(record.get("text", "")).strip())
-                if text:
-                    return [_first_sentence(text)]
+        definition_snippet = _best_definition_snippet(
+            question=question,
+            candidate=candidate,
+            snippet_records=snippet_records,
+            fallback_summary=cleaned_summary,
+        )
+        if definition_snippet:
+            support_snippet = _best_definition_support_snippet(
+                question=question,
+                candidate=candidate,
+                snippet_records=snippet_records,
+                fallback_summary=cleaned_summary,
+                primary_snippet=definition_snippet,
+            )
+            if _should_append_definition_support(
+                question=question,
+                primary_snippet=definition_snippet,
+                support_snippet=support_snippet,
+            ):
+                return [definition_snippet, support_snippet]
+            return [definition_snippet]
+        if cleaned_summary:
+            return [_first_sentence(cleaned_summary)]
 
     direct_match = _is_direct_candidate_match(question, candidate)
+    prefer_scope_first = _question_prefers_scope_first(question, focus)
     section_order = _local_section_priority(
         entry_type=str(candidate.get("entry_type", "")),
         question_mode=question_mode,
@@ -1179,28 +1566,244 @@ def _preferred_local_snippets(
         direct_match=direct_match,
     )
     snippets_by_section = {
-        str(record.get("section", "")): _strip_wikilinks(str(record.get("text", "")).strip())
+        str(record.get("section", "")): _clean_local_snippet(
+            str(record.get("text", "")).strip(),
+            focus=focus,
+            question=question,
+        )
         for record in snippet_records
         if str(record.get("text", "")).strip()
     }
 
     selected: list[str] = []
+    if cleaned_summary and not prefer_scope_first:
+        selected.append(cleaned_summary)
     for section in section_order:
         text = snippets_by_section.get(section)
         if text and text not in selected:
             selected.append(text)
+    if cleaned_summary and prefer_scope_first and cleaned_summary not in selected:
+        selected.append(cleaned_summary)
 
     for record in snippet_records:
-        text = _strip_wikilinks(str(record.get("text", "")).strip())
+        text = _clean_local_snippet(
+            str(record.get("text", "")).strip(),
+            focus=focus,
+            question=question,
+        )
         if text and text not in selected:
             selected.append(text)
 
-    if not selected and fallback_summary:
-        selected.append(_strip_wikilinks(fallback_summary))
+    if not selected and cleaned_summary:
+        selected.append(cleaned_summary)
 
     if direct_match and question_mode != "comparison":
-        return selected[:2]
-    return selected[:1]
+        return selected[:3]
+    return selected[:2]
+
+
+def _normalize_local_surface(text: str) -> str:
+    lowered = text.strip().lower().replace("的", "")
+    for filler in _LOCAL_SURFACE_FILLERS:
+        lowered = lowered.replace(filler, "")
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", lowered)
+
+
+def _low_signal_name_summary(name: str, summary: str) -> int:
+    penalty = 0
+    if name in _LOCAL_LOW_SIGNAL_ENTRY_NAMES:
+        penalty += 72
+    if name.startswith(_LOCAL_LOW_SIGNAL_NAME_PREFIXES):
+        penalty += 36
+    if name.endswith(_LOCAL_LOW_SIGNAL_NAME_SUFFIXES) and len(name) <= 8:
+        penalty += 28
+    if "完整生命周期" in name and any(marker in name for marker in ("故障类型", "管理")):
+        penalty += 56
+    if any(marker in name for marker in ("中的", "里的", "时", "后", "前", "通知", "负责", "使用", "全部在", "加强了")):
+        penalty += 36
+    if name.endswith(("内容", "现状", "情况", "方式", "机制")) and len(name) <= 6:
+        penalty += 24
+    if any(marker in summary for marker in _LOCAL_LOW_SIGNAL_DEFINITION_MARKERS):
+        penalty += 20
+    return penalty
+
+
+def _low_signal_candidate_penalty(candidate: dict[str, Any]) -> int:
+    return _low_signal_name_summary(
+        str(candidate.get("name", "")).strip(),
+        str(candidate.get("summary", "")).strip(),
+    )
+
+
+def _split_local_sentences(text: str) -> list[str]:
+    return [
+        item.strip() + "。"
+        for item in re.split(r"[。！？!?；;\n]", text)
+        if item.strip()
+    ]
+
+
+def _definition_sentence_score(
+    *,
+    question: str,
+    candidate: dict[str, Any],
+    sentence: str,
+    section: str,
+) -> tuple[int, int]:
+    value = 0
+    lowered = sentence.lower()
+    question_keywords = _local_question_keywords(question)
+    if any(keyword and keyword in sentence for keyword in question_keywords):
+        value += 4
+    if any(term and term in lowered for term in _candidate_direct_terms(candidate)):
+        value += 3
+    if any(marker in sentence for marker in _LOCAL_DEFINITION_MARKERS):
+        value += 3
+    if section == "Summary":
+        value += 2
+    if section == "Scope":
+        value += 1
+    value -= _low_signal_name_summary(str(candidate.get("name", "")).strip(), sentence)
+    if 12 <= len(sentence) <= 100:
+        value += 1
+    return value, -len(sentence)
+
+
+def _best_definition_snippet(
+    *,
+    question: str,
+    candidate: dict[str, Any],
+    snippet_records: list[dict[str, Any]],
+    fallback_summary: str,
+) -> str:
+    options: list[tuple[tuple[int, int], str]] = []
+    seen: set[str] = set()
+
+    def add_option(text: str, section: str) -> None:
+        cleaned = _clean_local_snippet(text, focus="definition", question=question)
+        for sentence in _split_local_sentences(cleaned):
+            if sentence in seen:
+                continue
+            seen.add(sentence)
+            options.append(
+                (
+                    _definition_sentence_score(
+                        question=question,
+                        candidate=candidate,
+                        sentence=sentence,
+                        section=section,
+                    ),
+                    sentence,
+                )
+            )
+
+    for record in snippet_records:
+        add_option(str(record.get("text", "")).strip(), str(record.get("section", "")))
+    if fallback_summary:
+        add_option(fallback_summary, "Summary")
+    if not options:
+        return ""
+    options.sort(key=lambda item: item[0], reverse=True)
+    return options[0][1]
+
+
+def _definition_support_sentence_score(
+    *,
+    question: str,
+    candidate: dict[str, Any],
+    sentence: str,
+    section: str,
+    primary_snippet: str,
+) -> tuple[int, int]:
+    value = 0
+    question_keywords = _local_question_keywords(question)
+    primary_keywords = {
+        keyword for keyword in question_keywords if keyword and keyword in primary_snippet
+    }
+    if any(keyword and keyword in sentence and keyword not in primary_keywords for keyword in question_keywords):
+        value += 4
+    if any(marker in sentence for marker in _LOCAL_DEFINITION_SUPPORT_MARKERS):
+        value += 3
+    if any(term and term in sentence.lower() for term in _candidate_direct_terms(candidate)):
+        value += 2
+    if section == "Scope":
+        value += 2
+    if 16 <= len(sentence) <= 140:
+        value += 1
+    value -= _low_signal_name_summary(str(candidate.get("name", "")).strip(), sentence)
+    return value, -len(sentence)
+
+
+def _best_definition_support_snippet(
+    *,
+    question: str,
+    candidate: dict[str, Any],
+    snippet_records: list[dict[str, Any]],
+    fallback_summary: str,
+    primary_snippet: str,
+) -> str:
+    if not primary_snippet:
+        return ""
+
+    options: list[tuple[tuple[int, int], str]] = []
+    seen: set[str] = {primary_snippet}
+
+    def add_option(text: str, section: str) -> None:
+        cleaned = _clean_local_snippet(text, focus="definition", question=question)
+        for sentence in _split_local_sentences(cleaned):
+            if (
+                sentence in seen
+                or sentence in primary_snippet
+                or primary_snippet in sentence
+            ):
+                continue
+            seen.add(sentence)
+            options.append(
+                (
+                    _definition_support_sentence_score(
+                        question=question,
+                        candidate=candidate,
+                        sentence=sentence,
+                        section=section,
+                        primary_snippet=primary_snippet,
+                    ),
+                    sentence,
+                )
+            )
+
+    for record in snippet_records:
+        add_option(str(record.get("text", "")).strip(), str(record.get("section", "")))
+    if fallback_summary:
+        add_option(fallback_summary, "Summary")
+    if not options:
+        return ""
+    options.sort(key=lambda item: item[0], reverse=True)
+    best_score, best_sentence = options[0]
+    if best_score[0] <= 0:
+        return ""
+    return best_sentence
+
+
+def _should_append_definition_support(
+    *,
+    question: str,
+    primary_snippet: str,
+    support_snippet: str,
+) -> bool:
+    if not support_snippet:
+        return False
+    if support_snippet in primary_snippet or primary_snippet in support_snippet:
+        return False
+    if len(primary_snippet) <= 24:
+        return True
+    if any(marker in question for marker in ("负责什么", "是什么系统", "是否", "能完全", "衡量什么")):
+        return True
+    if any(marker in support_snippet for marker in _LOCAL_DEFINITION_SUPPORT_MARKERS):
+        return True
+    primary_keywords = set(_local_question_keywords(primary_snippet))
+    support_keywords = set(_local_question_keywords(support_snippet))
+    question_keywords = set(_local_question_keywords(question))
+    return bool((support_keywords - primary_keywords) & question_keywords)
 
 
 def _local_section_priority(
@@ -1214,17 +1817,454 @@ def _local_section_priority(
         return ["Summary", "Scope", "Trigger", "Why", "Risks", "Related"]
     if focus == "comparison":
         return ["Summary", "Scope", "Why", "Trigger", "Risks", "Related"]
+    if focus == "diagnosis":
+        return ["Scope", "Why", "Risks", "Summary", "Trigger", "Related"]
+    if focus == "scope":
+        return ["Scope", "Summary", "Why", "Trigger", "Risks", "Related"]
     if focus == "why":
-        return ["Why", "Scope", "Summary", "Trigger", "Risks", "Related"]
+        return ["Summary", "Why", "Scope", "Trigger", "Risks", "Related"]
     if focus == "risk":
-        return ["Risks", "Scope", "Summary", "Why", "Trigger", "Related"]
+        return ["Summary", "Risks", "Scope", "Why", "Trigger", "Related"]
     if focus == "guidance":
         if entry_type == "lesson":
-            return ["Trigger", "Why", "Summary", "Risks", "Scope", "Related"]
+            return ["Scope", "Trigger", "Why", "Risks", "Summary", "Related"]
         return ["Scope", "Summary", "Trigger", "Why", "Risks", "Related"]
     if direct_match:
-        return ["Scope", "Summary", "Why", "Trigger", "Risks", "Related"]
+        return ["Summary", "Scope", "Why", "Trigger", "Risks", "Related"]
     return ["Summary", "Scope", "Why", "Trigger", "Risks", "Related"]
+
+
+def _clean_local_snippet(text: str, *, focus: str, question: str = "") -> str:
+    cleaned = _strip_wikilinks(text.strip())
+    if not cleaned:
+        return ""
+    if focus != "comparison":
+        cleaned = re.sub(r"而不是[^。；]*", "", cleaned)
+        cleaned = re.sub(r"不等于[^。；]*", "", cleaned)
+    sentences = [
+        item.strip()
+        for item in re.split(r"[。！？!?]", cleaned)
+        if item.strip()
+    ]
+    preferred = [item for item in sentences if not item.startswith("适用于")]
+    chosen = preferred or sentences
+    question_keywords = _local_question_keywords(question)
+    wants_decision_evidence = _question_requests_decision_evidence(question)
+    if focus == "guidance" and _question_prefers_scope_first(question, focus):
+        ordered = chosen[:3]
+        if ordered:
+            return "。".join(ordered).strip() + "。"
+
+    def score(sentence: str) -> tuple[int, int]:
+        value = 0
+        if any(keyword and keyword in sentence for keyword in question_keywords):
+            value += 4
+        if focus == "why" and any(
+            marker in sentence for marker in ("因为", "因此", "导致", "原因", "误判", "漏检", "高发", "风险")
+        ):
+            value += 3
+        if focus == "diagnosis" and any(marker in sentence for marker in ("导致", "根因", "误判", "盲区", "晦暗", "泄漏", "故障", "异常", "漏检")):
+            value += 3
+        if focus == "risk" and any(
+            marker in sentence for marker in ("不能", "无法", "仍会", "仍然", "暴露", "只能", "绕过", "交叉验证")
+        ):
+            value += 3
+        if focus == "guidance" and any(
+            marker in sentence
+            for marker in ("步骤", "流程", "先", "再", "然后", "执行", "启动", "确认", "通知", "创建", "监测")
+        ):
+            value += 2
+        if focus == "scope" and any(marker in sentence for marker in ("阈值", "范围", "周期", "数量", "类型")):
+            value += 2
+        if _question_has_marker(question, ("触发条件", "启动条件", "在什么条件下", "什么条件下", "在什么情况下", "什么情况下")):
+            condition_hits = sum(
+                1
+                for marker in ("阈值", "突破", "超过", "低于", "是否需要", "决定", "泄洪", "红线", "晦暗", "反射率")
+                if marker in sentence
+            )
+            if condition_hits:
+                value += min(condition_hits, 4) + 2
+        if _question_has_marker(question, ("质量", "如何判断", "数据质量")):
+            quality_hits = sum(
+                1
+                for marker in ("底噪", "毛刺", "峰谷差", "幽灵读数", "留声机", "趋势")
+                if marker in sentence
+            )
+            if quality_hits:
+                value += quality_hits * 3 + 1
+        if _question_has_marker(question, ("范围", "区间", "安全运行区间")):
+            boundary_hits = sum(
+                1
+                for marker in ("底噪", "共振峰", "红线", "安全弦", "420.0", "580.0", "720.0")
+                if marker in sentence
+            )
+            if boundary_hits:
+                value += boundary_hits * 3 + 1
+        if _question_has_marker(question, ("部署策略", "路由表", "部署", "监测点")):
+            deployment_hits = sum(
+                1
+                for marker in ("高频路径", "双中继", "跨区边界", "偏远", "种月", "负载均衡", "缓冲", "覆盖", "埋点")
+                if marker in sentence
+            )
+            if deployment_hits:
+                value += deployment_hits * 3
+        if _question_has_marker(question, ("故障类型", "异常类", "哪些类型的故障")):
+            fault_hits = sum(
+                1
+                for marker in ("坍缩", "红线", "镀层缺陷", "饱和度", "异常", "故障")
+                if marker in sentence
+            )
+            if fault_hits:
+                value += fault_hits * 2 + 1
+        if _question_has_marker(question, ("生命周期", "阶段")):
+            lifecycle_hits = sum(
+                1
+                for marker in ("阶段", "建设验收", "开光启用", "正常运行", "维护更新", "退役处置")
+                if marker in sentence
+            )
+            if lifecycle_hits:
+                value += min(lifecycle_hits, 4) + 2
+        if _question_has_marker(question, ("缺陷", "漏检", "盲区")):
+            gap_hits = sum(
+                1
+                for marker in ("盲区", "漏检", "覆盖", "死角")
+                if marker in sentence
+            )
+            if gap_hits:
+                value += min(gap_hits, 3) + 2
+        if wants_decision_evidence and any(
+            marker in sentence for marker in ("不能", "无法", "仍会", "仍然", "暴露", "只要")
+        ):
+            value += 3
+        return value, -len(sentence)
+
+    chosen = sorted(chosen, key=score, reverse=True)[:2] or chosen
+    if not chosen:
+        return ""
+    return "。".join(chosen[:2]).strip() + "。"
+
+
+def _local_question_keywords(question: str) -> list[str]:
+    stopwords = {
+        "什么",
+        "哪些",
+        "为什么",
+        "内容",
+        "根据",
+        "综合",
+        "推断",
+        "完整流程",
+        "流程",
+        "步骤",
+        "阶段",
+        "条件",
+        "问题",
+        "原因",
+        "根因",
+        "系统",
+        "代码",
+        "定义",
+        "处理",
+        "方法",
+        "逻辑",
+        "what",
+        "which",
+        "why",
+        "content",
+        "based",
+        "infer",
+        "question",
+        "questions",
+        "reason",
+        "reasons",
+        "system",
+        "code",
+        "definition",
+        "define",
+        "process",
+        "workflow",
+        "step",
+        "steps",
+        "stage",
+        "stages",
+        "condition",
+        "conditions",
+        "method",
+        "logic",
+    }
+    keywords: list[str] = []
+    candidates: list[str] = []
+    target_hint = _question_target_hint(question)
+    if target_hint:
+        candidates.append(target_hint)
+
+    normalized = question.strip().strip("？?")
+    for clause in re.split(r"[，,；;。]", normalized):
+        clause = clause.strip()
+        if not clause:
+            continue
+        candidates.append(clause)
+        trimmed = _trim_target_phrase(clause)
+        if trimmed and trimmed != clause:
+            candidates.append(trimmed)
+
+    for item in re.findall(r"[A-Za-z][A-Za-z0-9_.-]{1,47}", normalized):
+        candidates.append(item.lower())
+
+    for candidate in candidates:
+        for item in _question_keyword_components(candidate):
+            lowered = item.lower()
+            if lowered in stopwords or len(item) < 2:
+                continue
+            if item not in keywords:
+                keywords.append(item)
+    return keywords
+
+
+def _question_keyword_components(text: str) -> list[str]:
+    cleaned = text.strip().strip("？?")
+    if not cleaned:
+        return []
+    for prefix in (
+        "什么是",
+        "什么叫",
+        "请问",
+        "为什么",
+        "如何判断",
+        "怎么判断",
+        "怎样判断",
+        "如何评估",
+        "怎么评估",
+        "怎样评估",
+        "根据",
+        "结合",
+        "综合",
+        "从",
+        "对",
+        "按",
+        "基于",
+        "如果",
+        "当前",
+        "一个",
+        "请",
+    ):
+        if cleaned.startswith(prefix) and len(cleaned) > len(prefix) + 1:
+            cleaned = cleaned[len(prefix):].strip()
+    cleaned = _trim_target_phrase(cleaned)
+    if not cleaned:
+        return []
+
+    parts = [cleaned]
+    for splitter in ("和", "与", "及", "以及", "、", "从", "且", "并且"):
+        next_parts: list[str] = []
+        for part in parts:
+            next_parts.extend(chunk for chunk in part.split(splitter) if chunk)
+        parts = next_parts or parts
+
+    results: list[str] = []
+
+    def append_variant(value: str) -> None:
+        compact_value = value.strip(" ，。；：:").strip()
+        if not compact_value:
+            return
+        if compact_value not in results:
+            results.append(compact_value)
+        for suffix in _LOCAL_QUERYABLE_TERM_SUFFIXES:
+            if compact_value.endswith(suffix) and len(compact_value) > len(suffix) + 1:
+                trimmed = compact_value[: -len(suffix)].strip()
+                if len(trimmed) >= 2 and trimmed not in results:
+                    results.append(trimmed)
+
+    def append_structured_projection(value: str) -> None:
+        compact_value = value.strip(" ，。；：:").strip()
+        if not compact_value:
+            return
+        projected = compact_value
+        for prefix in ("管理", "完整", "当前", "默认", "整体", "全系统", "全局"):
+            if projected.startswith(prefix) and len(projected) > len(prefix) + 1:
+                projected = projected[len(prefix):].strip()
+        projected = projected.replace("完整", "").replace("当前", "").replace("默认", "")
+        projected = projected.replace("的", "")
+        if projected != compact_value and any(
+            marker in projected
+            for marker in ("生命周期", "路由策略", "故障类型", "消息类型", "监测点", "设计哲学")
+        ):
+            append_variant(projected)
+
+    for part in parts:
+        compact = part.strip(" ，。；：:").strip()
+        for prefix in ("一个", "当前", "该", "此", "其"):
+            if compact.startswith(prefix) and len(compact) > len(prefix) + 1:
+                compact = compact[len(prefix):].strip()
+        for suffix in ("前", "后"):
+            if compact.endswith(suffix) and len(compact) > 2:
+                compact = compact[: -len(suffix)].strip()
+        if not compact:
+            continue
+        append_variant(compact)
+        append_structured_projection(compact)
+        for marker in ("建议增加", "建议扩展", "建议新增", "建议加装", "可能遇到", "可能出现", "增加", "新增", "加装", "扩展", "部署", "启用", "停用", "避免", "确认", "执行", "完成", "恢复", "触发"):
+            if marker in compact:
+                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
+                suffix = compact.split(marker, 1)[1].strip(" ，。；：:")
+                if len(prefix) >= 2:
+                    append_variant(prefix)
+                    append_structured_projection(prefix)
+                if len(suffix) >= 2:
+                    append_variant(suffix)
+                    append_structured_projection(suffix)
+        for marker in ("目前", "现在"):
+            if marker in compact:
+                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
+                if len(prefix) >= 2:
+                    append_variant(prefix)
+                    append_structured_projection(prefix)
+        for marker in ("持续下降", "出现", "发生", "执行", "完成", "触发", "进入", "恢复", "升级", "降低"):
+            if marker in compact:
+                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
+                if len(prefix) >= 2:
+                    append_variant(prefix)
+                    append_structured_projection(prefix)
+        if "的" in compact and len(compact) >= 6:
+            for piece in compact.split("的"):
+                piece = piece.strip()
+                if len(piece) >= 2:
+                    append_variant(piece)
+                    append_structured_projection(piece)
+    return results
+
+
+def _question_prefers_scope_first(question: str, focus: str) -> bool:
+    if focus not in {"guidance", "scope"}:
+        return False
+    return _question_has_marker(question, _LOCAL_SCOPE_FIRST_MARKERS)
+
+
+def _question_requests_decision_evidence(question: str) -> bool:
+    return _question_has_marker(
+        question,
+        (
+            "是否",
+            "能完全",
+            "完全避免",
+            "能否",
+            "可否",
+            "可以避免",
+            "会不会",
+            "will it",
+            "can it",
+            "can avoid",
+        ),
+    )
+
+
+def _dedupe_text_parts(parts: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for part in parts:
+        cleaned = part.strip()
+        if not cleaned:
+            continue
+        if any(cleaned in existing or existing in cleaned for existing in deduped):
+            continue
+        deduped.append(cleaned)
+    return deduped
+
+
+def _rank_local_evidence_parts(question: str, focus: str, parts: list[str]) -> list[str]:
+    deduped = _dedupe_text_parts(parts)
+    keywords = _local_question_keywords(question)
+    wants_decision_evidence = _question_requests_decision_evidence(question)
+
+    def score(part: str) -> tuple[int, int]:
+        value = 0
+        if any(keyword and keyword in part for keyword in keywords):
+            value += 4
+        if focus == "why" and any(
+            marker in part
+            for marker in ("因为", "因此", "导致", "原因", "误判", "漏检", "高发", "风险")
+        ):
+            value += 3
+        if focus == "diagnosis" and any(
+            marker in part for marker in ("导致", "根因", "盲区", "晦暗", "泄漏", "故障", "异常", "换羽")
+        ):
+            value += 3
+        if focus == "risk" and any(
+            marker in part
+            for marker in ("不能", "无法", "仍会", "仍然", "暴露", "只能", "绕过", "交叉验证")
+        ):
+            value += 3
+        if focus == "guidance" and any(
+            marker in part
+            for marker in ("步骤", "流程", "先", "再", "然后", "执行", "启动", "确认", "通知", "创建", "监测")
+        ):
+            value += 2
+        if focus == "scope" and any(marker in part for marker in ("阈值", "范围", "周期", "数量", "类型")):
+            value += 2
+        if _question_has_marker(question, ("质量", "如何判断", "数据质量")):
+            quality_hits = sum(
+                1
+                for marker in ("底噪", "毛刺", "峰谷差", "幽灵读数", "留声机", "趋势")
+                if marker in part
+            )
+            if quality_hits:
+                value += quality_hits * 3 + 1
+        if _question_has_marker(question, ("范围", "区间", "安全运行区间")):
+            boundary_hits = sum(
+                1
+                for marker in ("底噪", "共振峰", "红线", "安全弦", "420.0", "580.0", "720.0")
+                if marker in part
+            )
+            if boundary_hits:
+                value += boundary_hits * 3 + 1
+        if _question_has_marker(question, ("部署策略", "路由表", "部署", "监测点")):
+            deployment_hits = sum(
+                1
+                for marker in ("高频路径", "双中继", "跨区边界", "偏远", "种月", "负载均衡", "缓冲", "覆盖", "埋点")
+                if marker in part
+            )
+            if deployment_hits:
+                value += deployment_hits * 3
+        if _question_has_marker(question, ("故障类型", "异常类", "哪些类型的故障")):
+            fault_hits = sum(
+                1
+                for marker in ("坍缩", "红线", "镀层缺陷", "饱和度", "异常", "故障")
+                if marker in part
+            )
+            if fault_hits:
+                value += fault_hits * 2 + 1
+        if wants_decision_evidence and any(
+            marker in part for marker in ("不能", "无法", "仍会", "仍然", "暴露", "只要")
+        ):
+            value += 3
+        return value, -len(part)
+
+    return sorted(deduped, key=score, reverse=True)
+
+
+def _question_target_surface(question: str) -> str:
+    target_hint = _question_target_hint(question)
+    if target_hint:
+        return target_hint
+    return _trim_target_phrase(question)
+
+
+def _question_target_has_multiple_entities(question: str) -> bool:
+    surface = _question_target_surface(question)
+    if not surface:
+        return False
+    if not any(splitter in surface for splitter in ("和", "与", "及", "以及", "、", " and ", " with ", " between ")):
+        return False
+    components = [
+        item
+        for item in _question_keyword_components(surface)
+        if len(item) >= 2
+    ]
+    distinct: list[str] = []
+    for item in components:
+        if any(item in existing or existing in item for existing in distinct):
+            continue
+        distinct.append(item)
+    return len(distinct) >= 2
 
 
 def _supplement_local_candidates(
@@ -1264,17 +2304,143 @@ def _supplement_local_candidates(
     }
     primary_text = " ".join(primary_snippets)
     docs = inventory_data.get("docs", {})
+    primary_doc = docs.get(primary_name, {}) or {}
+    primary_links = set(primary_doc.get("graph_links", ()) or primary_doc.get("links", ()) or ())
+    direct_graph_neighbors: set[str] = set(primary_links)
+    secondary_graph_neighbors: set[str] = set()
+    for selected_name in selected_names:
+        selected_doc = docs.get(selected_name, {}) or {}
+        selected_links = set(selected_doc.get("graph_links", ()) or selected_doc.get("links", ()) or ())
+        direct_graph_neighbors.update(selected_links)
+    for neighbor_name in direct_graph_neighbors:
+        neighbor_doc = docs.get(neighbor_name, {}) or {}
+        secondary_graph_neighbors.update(
+            set(neighbor_doc.get("graph_links", ()) or neighbor_doc.get("links", ()) or ())
+        )
     supplemented: list[tuple[int, dict[str, Any]]] = []
+    question_keywords = _local_question_keywords(question)
+    wants_decision_evidence = _question_requests_decision_evidence(question)
 
     for name, doc in docs.items():
-        if name in selected_names or doc.get("kind") != "formal" or name not in primary_text:
+        if name in selected_names or doc.get("kind") != "formal":
+            continue
+        if any(name != existing and name in existing for existing in selected_names):
             continue
         summary = str(doc.get("summary", "")).strip()
+        low_signal_penalty = _low_signal_name_summary(name, summary)
+        if low_signal_penalty >= 72 and name not in question:
+            continue
+        sections_map = doc.get("sections_map", {}) or {}
+        evidence_text = " ".join([summary, *[str(value) for value in sections_map.values()]])
         rank = 0
+        rank += _local_structured_surface_bonus(
+            question,
+            {
+                "name": name,
+                "matched_terms": [],
+            },
+        ) // 14
+        rank -= _local_artifact_wrapper_penalty(
+            question,
+            {
+                "name": name,
+                "matched_terms": [],
+            },
+        ) // 14
         if any(marker in summary for marker in ("角色", "负责", "主持", "权限", "团队")):
             rank += 2
         if any(marker in question for marker in ("谁", "权限", "角色")):
             rank += 1
+        if name in primary_text:
+            rank += 3
+        if primary_name and primary_name in evidence_text:
+            rank += 2
+        doc_links = set(doc.get("graph_links", ()) or doc.get("links", ()) or ())
+        if name in primary_links or primary_name in doc_links:
+            rank += 4
+        if name in direct_graph_neighbors or doc_links & selected_names:
+            rank += 6
+        if name in secondary_graph_neighbors or doc_links & direct_graph_neighbors:
+            rank += 4
+        if name in question:
+            rank += 4
+        if any(keyword and keyword in evidence_text for keyword in question_keywords):
+            rank += 2
+        if focus == "why" and any(
+            marker in evidence_text
+            for marker in ("因为", "因此", "导致", "原因", "误判", "漏检", "高发", "风险", "建议")
+        ):
+            rank += 3
+        if focus in {"guidance", "scope"} and _question_has_marker(question, ("流程", "步骤", "阶段", "顺序", "经历")):
+            if any(marker in evidence_text for marker in ("流程", "步骤", "阶段", "顺序", "生命周期", "开光", "试音", "启明", "正式运行")):
+                rank += 3
+        if _question_has_marker(question, ("生命周期", "阶段")):
+            if "生命周期" in name and not any(marker in name for marker in ("管理", "完整")):
+                rank += 4
+            if any(marker in name for marker in ("管理", "完整生命周期故障类型")):
+                rank -= 3
+        if _question_has_marker(question, ("质量", "如何判断", "数据质量")):
+            quality_hits = sum(
+                1
+                for marker in ("底噪", "毛刺", "峰谷差", "幽灵读数", "留声机")
+                if marker in evidence_text
+            )
+            rank += quality_hits * 3
+            if name in {"底噪", "毛刺", "峰谷差", "幽灵读数", "留声机"}:
+                rank += 8
+        if _question_has_marker(question, ("部署策略", "部署", "监测点", "盲区", "漏检", "最大缺陷")):
+            deployment_hits = sum(
+                1
+                for marker in ("部署", "负载均衡", "中继", "缓冲", "覆盖", "盲区", "漏检", "埋点", "高频路径", "双中继", "跨区边界", "偏远", "种月")
+                if marker in evidence_text
+            )
+            if deployment_hits:
+                rank += deployment_hits * 2 + 2
+        if focus == "diagnosis" and _question_has_marker(question, ("缺陷", "漏检", "盲区")):
+            if any(marker in evidence_text for marker in ("盲区", "漏检", "覆盖", "死角")):
+                rank += 5
+        if _question_has_marker(question, ("范围", "区间", "安全运行区间")):
+            boundary_hits = sum(
+                1
+                for marker in ("底噪", "共振峰", "红线", "安全弦", "420.0", "580.0", "720.0")
+                if marker in evidence_text
+            )
+            if boundary_hits:
+                rank += boundary_hits * 3 + 2
+        if _question_has_marker(question, ("触发条件", "启动条件", "在什么条件下", "什么条件下", "在什么情况下", "什么情况下")):
+            if any(marker in evidence_text for marker in ("阈值", "晦暗", "反射率", "老化", "触发", "判官", "红线", "超过", "低于")):
+                rank += 4
+            if any(marker in name for marker in ("晦暗", "红线", "判官", "饱和度")):
+                rank += 4
+        if _question_has_marker(question, ("故障类型", "异常类", "哪些类型的故障")):
+            fault_hits = sum(
+                1
+                for marker in ("坍缩", "红线", "镀层缺陷", "饱和度", "异常", "故障")
+                if marker in evidence_text
+            )
+            if fault_hits:
+                rank += fault_hits * 2 + 2
+        if any(marker in question for marker in ("质量", "判断", "是否", "能完全", "完全避免")):
+            if any(marker in evidence_text for marker in ("阈值", "趋势", "峰谷差", "毛刺", "底噪", "幽灵读数", "留声机", "告警", "不能完全", "只能", "仍会", "仍然")):
+                rank += 3
+        if focus == "risk" and any(
+            marker in evidence_text
+            for marker in ("不能", "无法", "仍会", "仍然", "暴露", "只能", "绕过", "交叉验证", "审计")
+        ):
+            rank += 3
+        if wants_decision_evidence and any(
+            marker in evidence_text
+            for marker in ("不能", "无法", "仍会", "仍然", "暴露", "只要", "审计", "交叉验证")
+        ):
+            rank += 2
+        if focus == "diagnosis" and any(
+            marker in evidence_text
+            for marker in ("导致", "根因", "误判", "盲区", "晦暗", "泄漏", "故障", "异常", "换羽")
+        ):
+            rank += 3
+        rank -= low_signal_penalty // 12
+        if rank == 0:
+            continue
         supplemented.append(
             (
                 rank,
@@ -1290,47 +2456,345 @@ def _supplement_local_candidates(
         )
 
     supplemented.sort(key=lambda item: (-item[0], -len(str(item[1].get("name", "")))))
-    return [item for _, item in supplemented[:1]]
+    limit = 2 if focus in {"diagnosis", "why", "guidance", "risk"} else 1
+    return [item for _, item in supplemented[:limit]]
 
 
 def _question_needs_multiple_direct_matches(question: str, focus: str) -> bool:
     if focus == "comparison":
         return True
-    if focus in {"why", "guidance"}:
+    if "分别" in question and focus in {"definition", "scope", "guidance"}:
         return True
-    if any(marker in question for marker in ("和", "与", "及", "之间")) and focus in {
+    if _question_target_has_multiple_entities(question) and focus in {
+        "definition",
         "guidance",
         "open",
+        "scope",
         "why",
     }:
         return True
-    if any(marker in question for marker in ("过程", "过程中", "结合", "推断")):
+    if _question_has_marker(question, _LOCAL_COMBINED_REASONING_MARKERS) and _question_target_has_multiple_entities(question):
         return True
     return False
 
 
+def _structured_target_excess_penalty(question: str, candidate: dict[str, Any]) -> int:
+    lowered = question.lower()
+    target_hint = _question_target_hint(question)
+    if not target_hint:
+        return 0
+    normalized_hint = _normalize_local_surface(target_hint)
+    normalized_name = _normalize_local_surface(str(candidate.get("name", "")).strip())
+    if not normalized_hint or not normalized_name or normalized_hint not in normalized_name:
+        return 0
+
+    penalty = 0
+    for canonical_surface, triggers in _LOCAL_STRUCTURED_SURFACE_GROUPS.items():
+        if not any(trigger in lowered for trigger in triggers):
+            continue
+        surface_norm = _normalize_local_surface(canonical_surface)
+        if not surface_norm or surface_norm not in normalized_name:
+            continue
+        reduced = normalized_name.replace(normalized_hint, "", 1)
+        reduced = reduced.replace(surface_norm, "", 1)
+        if reduced:
+            penalty = max(penalty, min(len(reduced) * 6, 48))
+    return penalty
+
+
+def _local_structured_surface_bonus(question: str, candidate: dict[str, Any]) -> int:
+    lowered = question.lower()
+    surfaces = [str(candidate.get("name", "")).strip(), *(candidate.get("matched_terms", []) or [])]
+    bonus = 0
+    for canonical_surface, triggers in _LOCAL_STRUCTURED_SURFACE_GROUPS.items():
+        if not any(trigger in lowered for trigger in triggers):
+            continue
+        if any(canonical_surface in surface for surface in surfaces):
+            bonus = max(bonus, 56)
+    return bonus
+
+
+def _local_structured_base_term_penalty(question: str, candidate: dict[str, Any]) -> int:
+    lowered = question.lower()
+    surfaces = [str(candidate.get("name", "")).strip(), *(candidate.get("matched_terms", []) or [])]
+    normalized_name = _normalize_local_surface(str(candidate.get("name", "")).strip())
+    if not normalized_name:
+        return 0
+    penalty = 0
+    normalized_question = _normalize_local_surface(question)
+    for canonical_surface, triggers in _LOCAL_STRUCTURED_SURFACE_GROUPS.items():
+        if not any(trigger in lowered for trigger in triggers):
+            continue
+        if any(canonical_surface in surface for surface in surfaces):
+            continue
+        if normalized_name in normalized_question:
+            penalty = max(penalty, 136 if len(normalized_name) <= 6 else 112)
+    return penalty
+
+
+def _local_artifact_wrapper_penalty(question: str, candidate: dict[str, Any]) -> int:
+    lowered = question.lower()
+    if not any(trigger in lowered for triggers in _LOCAL_STRUCTURED_SURFACE_GROUPS.values() for trigger in triggers):
+        return 0
+    name = str(candidate.get("name", "")).strip()
+    if any(name.endswith(suffix) for suffix in _LOCAL_ARTIFACT_WRAPPER_SUFFIXES):
+        return 42
+    return 0
+
+
+def _direct_candidate_sort_key(
+    question: str,
+    candidate: dict[str, Any],
+) -> tuple[int, int, int, int, float, int, int]:
+    target_hint = _question_target_hint(question)
+    target_priority, target_specificity = _candidate_target_priority(candidate, target_hint)
+    structured_bonus = _local_structured_surface_bonus(question, candidate)
+    wrapper_penalty = _local_artifact_wrapper_penalty(question, candidate)
+    base_term_penalty = _local_structured_base_term_penalty(question, candidate)
+    excess_penalty = _structured_target_excess_penalty(question, candidate)
+    low_signal_penalty = _low_signal_candidate_penalty(candidate)
+    score = -float(candidate.get("score", 0) or 0)
+    match_index = _direct_candidate_match_index(question, candidate)
+    if match_index < 0:
+        match_index = 10**6
+    name_length = -len(str(candidate.get("name", "")).strip())
+    return (
+        target_priority,
+        -target_specificity,
+        -structured_bonus,
+        wrapper_penalty + base_term_penalty + excess_penalty + low_signal_penalty,
+        score,
+        match_index,
+        name_length,
+    )
+
+
+def _question_target_hint(question: str) -> str:
+    normalized = question.strip().strip("？?")
+    if not normalized:
+        return ""
+
+    for delimiter in ("，", ",", "：", ":"):
+        if delimiter not in normalized:
+            continue
+        tail = normalized.rsplit(delimiter, 1)[-1]
+        extracted = _trim_target_phrase(tail)
+        if extracted:
+            return extracted
+
+    for marker in ("中定义", "中，", "中", "里定义", "里"):
+        if marker in normalized:
+            head = normalized.split(marker, 1)[0]
+            extracted = _trim_target_phrase(head)
+            if extracted:
+                return extracted
+    return _trim_target_phrase(normalized)
+
+
+def _trim_target_phrase(text: str) -> str:
+    candidate = text.strip()
+    for prefix in (
+        "什么是",
+        "什么叫",
+        "请问",
+        "为什么",
+        "如何判断",
+        "怎么判断",
+        "怎样判断",
+        "如何评估",
+        "怎么评估",
+        "怎样评估",
+        "如果",
+        "从",
+        "根据",
+        "结合",
+        "综合",
+        "对",
+        "按",
+        "基于",
+    ):
+        if candidate.startswith(prefix):
+            candidate = candidate[len(prefix):]
+    for marker in ("目前", "现在"):
+        if marker in candidate:
+            prefix = candidate.split(marker, 1)[0].strip()
+            if len(prefix) >= 2:
+                candidate = prefix
+                break
+    for marker in (
+        "可能是什么问题",
+        "可能遇到哪些类型的故障",
+        "的范围",
+        "的区间",
+        "的安全运行区间是如何定义的",
+        "的安全运行区间",
+        "的单位",
+        "的执行周期",
+        "的周期",
+        "的类型",
+        "的部署策略",
+        "的路由策略",
+        "的条件",
+        "的触发条件",
+        "在什么条件下会决定",
+        "在什么条件下会",
+        "在什么条件下",
+        "在什么情况下会",
+        "在什么情况下",
+        "什么条件下会决定",
+        "什么条件下会",
+        "什么条件下",
+        "什么情况下会",
+        "什么情况下",
+        "会经历哪些阶段",
+        "会经历什么阶段",
+        "经历哪些阶段",
+        "经历什么阶段",
+        "的数据质量",
+        "的质量",
+        "的最大缺陷",
+        "的主要缺陷",
+        "的完整流程",
+        "是什么",
+        "是什么意思",
+        "有哪些",
+        "多少",
+        "分别指什么",
+        "负责什么",
+        "需要完成哪些准备",
+        "需要哪些准备",
+        "如何配合工作",
+        "如何配合",
+        "如何协作",
+        "有什么关系",
+        "之间有什么关系",
+        "之间是什么关系",
+        "需要经历哪些阶段",
+        "应该采取哪些应对策略",
+        "应该采取哪些策略",
+        "衡量什么",
+        "如何避免",
+        "能完全避免检测",
+        "能完全避免",
+        "能否避免",
+        "是否能",
+        "是否可以",
+    ):
+        if marker in candidate:
+            candidate = candidate.split(marker, 1)[0]
+    return candidate.strip(" ，。；：:").strip()
+
+
+def _candidate_target_priority(candidate: dict[str, Any], target_hint: str) -> tuple[int, int]:
+    if not target_hint:
+        return 3, 0
+    normalized_hint = _normalize_local_surface(target_hint)
+    projected_hint = _projected_local_target_surface(target_hint)
+    best_rank = 3
+    best_specificity = 0
+    for raw in [candidate.get("name", ""), *(candidate.get("matched_terms", []) or [])]:
+        normalized = _normalize_local_surface(str(raw))
+        if not normalized:
+            continue
+        if projected_hint and normalized == projected_hint and projected_hint != normalized_hint:
+            return 0, len(normalized_hint) + 8
+        if normalized == normalized_hint:
+            return 0, len(normalized)
+        if normalized_hint and normalized_hint in normalized:
+            if len(normalized) > best_specificity or best_rank > 1:
+                best_rank = 1
+                best_specificity = len(normalized)
+            continue
+        if normalized and normalized in normalized_hint:
+            rank = 1 if len(normalized) >= max(4, len(normalized_hint) // 2) else 2
+            if rank < best_rank or (rank == best_rank and len(normalized) > best_specificity):
+                best_rank = rank
+                best_specificity = len(normalized)
+    return best_rank, best_specificity
+
+
+def _projected_local_target_surface(text: str) -> str:
+    projected = str(text or "").strip()
+    if not projected:
+        return ""
+    for prefix in ("管理", "完整", "当前", "默认", "整体", "全系统", "全局"):
+        if projected.startswith(prefix) and len(projected) > len(prefix) + 1:
+            projected = projected[len(prefix):].strip()
+    projected = projected.replace("完整", "").replace("当前", "").replace("默认", "")
+    projected = projected.replace("的", "")
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _LOCAL_QUERYABLE_TERM_SUFFIXES:
+            if projected.endswith(suffix) and len(projected) > len(suffix) + 1:
+                projected = projected[: -len(suffix)].strip()
+                changed = True
+                break
+    return _normalize_local_surface(projected)
+
+
 def _question_benefits_from_supporting_candidate(question: str, focus: str) -> bool:
-    if focus in {"why", "guidance", "comparison"}:
+    if focus in {"why", "comparison", "diagnosis", "risk"}:
+        return True
+    if _question_has_marker(question, _LOCAL_COMBINED_REASONING_MARKERS):
+        return True
+    if focus == "guidance" and _question_has_marker(
+        question,
+        (
+            "流程",
+            "步骤",
+            "阶段",
+            "配合",
+            "协作",
+            "经历",
+            "如何",
+            "怎么",
+            "怎样",
+            "判断",
+        ),
+    ):
+        return True
+    if _question_has_marker(
+        question,
+        (
+            "触发条件",
+            "启动条件",
+            "在什么条件下",
+            "什么条件下",
+            "在什么情况下",
+            "什么情况下",
+            "质量",
+            "数据质量",
+            "部署策略",
+            "是否",
+            "能完全",
+            "完全避免",
+        ),
+    ):
         return True
     return any(marker in question for marker in ("谁", "权限", "角色", "负责", "主持"))
 
 
 def _direct_candidate_match_index(question: str, candidate: dict[str, Any]) -> int:
     question_lower = question.lower()
-    positions = []
-    candidate_name = str(candidate.get("name", "")).strip().lower()
-    if candidate_name:
-        index = question_lower.find(candidate_name)
-        if index >= 0:
-            positions.append(index)
-    for alias in candidate.get("matched_terms", []) or []:
-        alias_lower = str(alias).strip().lower()
-        if not alias_lower:
+    question_terms = {item.lower() for item in _local_question_keywords(question)}
+    positions: list[int] = []
+    for term in _candidate_direct_terms(candidate):
+        if term not in question_terms:
             continue
-        index = question_lower.find(alias_lower)
+        index = question_lower.find(term)
         if index >= 0:
             positions.append(index)
-    return max(positions) if positions else -1
+    return min(positions) if positions else -1
+
+
+def _candidate_direct_terms(candidate: dict[str, Any]) -> list[str]:
+    direct_terms: list[str] = []
+    for raw in [candidate.get("name", ""), *(candidate.get("matched_terms", []) or [])]:
+        lowered = str(raw).strip().lower()
+        if lowered and lowered not in direct_terms:
+            direct_terms.append(lowered)
+    return direct_terms
 
 
 def _first_sentence(text: str) -> str:
@@ -1349,6 +2813,8 @@ def _select_local_answer_candidates(
     expanded: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     if question_mode == "definition":
+        return shortlist[:1] or expanded[:1]
+    if question_mode == "risk":
         return shortlist[:1] or expanded[:1]
 
     if shortlist:
@@ -1550,14 +3016,45 @@ def _run_explore_cli(
 
 
 def _parse_cli_json(raw_output: str) -> dict[str, Any]:
-    candidates = [raw_output.strip()]
-    fenced = re.search(r"```json\s*(\{.*?\})\s*```", raw_output, re.DOTALL)
+    # Strip common non-JSON wrappers that LLMs often emit
+    cleaned = raw_output.strip()
+
+    # Remove XML-style thinking tags (e.g. <thinking>...</thinking>)
+    cleaned = re.sub(r"<thinking>.*?</thinking>", "", cleaned, flags=re.DOTALL).strip()
+
+    # Remove markdown thinking blocks (e.g. **Thinking:** ... or *Thoughts:* ...)
+    cleaned = re.sub(r"\*\*Thinking:?\*\*.*?(?=\{|\Z)", "", cleaned, flags=re.DOTALL).strip()
+    cleaned = re.sub(r"\*Thoughts?:\*.*?(?=\{|\Z)", "", cleaned, flags=re.DOTALL).strip()
+
+    # Remove leading prose before the first JSON object
+    # Common patterns: "Here is the answer:", "Sure!", "Based on the context:", etc.
+    brace_start = cleaned.find("{")
+    if brace_start > 0:
+        # Only strip if there's likely preamble text (not just whitespace)
+        preamble = cleaned[:brace_start].strip()
+        if preamble and len(preamble) > 2:
+            cleaned = cleaned[brace_start:]
+
+    candidates = [cleaned]
+
+    # Try fenced code blocks
+    fenced = re.search(r"```json\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
     if fenced:
         candidates.append(fenced.group(1).strip())
-    start = raw_output.find("{")
-    end = raw_output.rfind("}")
+
+    # Also try any ``` without language specifier
+    fenced_plain = re.search(r"```\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+    if fenced_plain:
+        candidates.append(fenced_plain.group(1).strip())
+
+    # Extract from first { to last } (handles trailing text)
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
     if start != -1 and end != -1 and end > start:
-        candidates.append(raw_output[start : end + 1].strip())
+        candidates.append(cleaned[start : end + 1].strip())
+
+    # Try the original raw output directly as a fallback
+    candidates.append(raw_output.strip())
 
     seen = set()
     for candidate in candidates:

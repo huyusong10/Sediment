@@ -26,10 +26,341 @@ from sediment.kb import (
 from sediment.settings import load_settings
 
 LANGUAGE_RULES = query_language_rules()
+_LOW_SIGNAL_ENTRY_NAMES = {
+    "技术",
+    "系统",
+    "指标",
+    "调查",
+    "报告",
+    "事件",
+    "流程",
+    "步骤",
+    "内容",
+    "定义",
+    "规则",
+    "配置",
+    "接口",
+    "能力",
+    "现状",
+    "机制",
+}
+_LOW_SIGNAL_SUMMARY_MARKERS = (
+    "一种模式或状态",
+    "正式流程中的一个阶段",
+    "用于表达当前处理阶段",
+    "相关系统",
+    "名称 定义 目标值 告警阈值",
+)
+_LOW_SIGNAL_NAME_PREFIXES = (
+    "当前",
+    "核心",
+    "默认",
+    "通知",
+    "负责",
+    "注册",
+    "核对",
+    "本人",
+    "制定",
+    "系统设计的",
+)
+_LOW_SIGNAL_NAME_SUFFIXES = ("检测", "执行", "记录", "归档", "通知")
+_QUESTION_PREFIXES = (
+    "什么是",
+    "什么叫",
+    "请问",
+    "为什么",
+    "从",
+    "根据",
+    "结合",
+    "综合",
+    "如果",
+    "基于",
+    "当前",
+    "一个",
+    "请",
+)
+_QUESTION_SUFFIX_MARKERS = (
+    "是什么",
+    "是什么意思",
+    "有哪些",
+    "多少",
+    "的范围",
+    "的区间",
+    "的安全运行区间",
+    "的部署策略",
+    "的路由策略",
+    "的触发条件",
+    "分别指什么",
+    "负责什么",
+    "作用是什么",
+    "衡量什么",
+    "如何判断",
+    "需要经历哪些阶段",
+    "需要哪些步骤",
+    "需要完成哪些准备",
+    "应该采取哪些应对策略",
+    "可能是什么问题",
+    "可能遇到哪些类型的故障",
+    "是否",
+    "吗",
+)
+_QUERYABLE_TERM_SUFFIXES = (
+    "节点的",
+    "节点",
+    "数据",
+    "技术",
+    "团队",
+    "指标",
+    "质量",
+    "级别",
+)
+_SURFACE_FILLERS = (
+    "完整",
+    "当前",
+    "默认",
+    "整体",
+    "全系统",
+    "全局",
+    "complete",
+    "current",
+    "default",
+    "overall",
+)
+_STRUCTURED_SURFACE_GROUPS = {
+    "消息类型": ("消息类型", "报文类型", "message type", "message types"),
+    "路由策略": ("路由策略", "路由规则", "routing strategy", "routing strategies", "route strategy", "route strategies"),
+    "故障类型": ("故障类型", "异常类", "类型的故障", "fault type", "fault types", "failure type", "failure types"),
+    "设计哲学": ("设计哲学", "design philosophy", "system philosophy"),
+    "生命周期": ("生命周期", "lifecycle", "life cycle"),
+    "监测点": ("监测点", "监控点", "monitoring point", "monitor point"),
+}
+_ARTIFACT_WRAPPER_SUFFIXES = ("路由表", "报文定义", "监测点配置")
 
 
 def inventory(kb_path: str | Path) -> dict[str, Any]:
     return core_inventory(kb_path)
+
+
+def _normalize_target_surface(text: str) -> str:
+    lowered = text.strip().lower().replace("的", "")
+    for filler in _SURFACE_FILLERS:
+        lowered = lowered.replace(filler, "")
+    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", lowered)
+
+
+def _projected_target_surface(text: str) -> str:
+    projected = text.strip()
+    if not projected:
+        return ""
+    for prefix in ("管理", "完整", "当前", "默认", "整体", "全系统", "全局"):
+        if projected.startswith(prefix) and len(projected) > len(prefix) + 1:
+            projected = projected[len(prefix):].strip()
+    projected = projected.replace("完整", "").replace("当前", "").replace("默认", "")
+    projected = projected.replace("的", "")
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _QUERYABLE_TERM_SUFFIXES:
+            if projected.endswith(suffix) and len(projected) > len(suffix) + 1:
+                projected = projected[: -len(suffix)].strip()
+                changed = True
+                break
+    return _normalize_target_surface(projected)
+
+
+def _trim_question_target(text: str) -> str:
+    candidate = text.strip().strip("？?")
+    for prefix in _QUESTION_PREFIXES:
+        if candidate.startswith(prefix) and len(candidate) > len(prefix) + 1:
+            candidate = candidate[len(prefix):].strip()
+    for marker in _QUESTION_SUFFIX_MARKERS:
+        if marker in candidate:
+            candidate = candidate.split(marker, 1)[0]
+    return candidate.strip(" ，。；：:").strip()
+
+
+def _question_target_phrases(question: str) -> list[str]:
+    normalized = question.strip().strip("？?")
+    if not normalized:
+        return []
+    phrases: list[str] = []
+    candidates = [normalized]
+    candidates.extend(
+        part.strip()
+        for part in re.split(r"[，,；;。:：]", normalized)
+        if part.strip()
+    )
+    for candidate in candidates:
+        trimmed = _trim_question_target(candidate)
+        if trimmed and trimmed not in phrases:
+            phrases.append(trimmed)
+    return phrases
+
+
+def _question_term_components(text: str) -> list[str]:
+    cleaned = _trim_question_target(text)
+    if not cleaned:
+        return []
+
+    parts = [cleaned]
+    for splitter in ("和", "与", "及", "以及", "、", "从", "且", "并且"):
+        next_parts: list[str] = []
+        for part in parts:
+            next_parts.extend(chunk for chunk in part.split(splitter) if chunk)
+        parts = next_parts or parts
+
+    results: list[str] = []
+
+    def append_variant(value: str) -> None:
+        compact_value = value.strip(" ，。；：:").strip()
+        if not compact_value:
+            return
+        if compact_value not in results:
+            results.append(compact_value)
+        for suffix in _QUERYABLE_TERM_SUFFIXES:
+            if compact_value.endswith(suffix) and len(compact_value) > len(suffix) + 1:
+                trimmed = compact_value[: -len(suffix)].strip()
+                if len(trimmed) >= 2 and trimmed not in results:
+                    results.append(trimmed)
+
+    def append_structured_projection(value: str) -> None:
+        compact_value = value.strip(" ，。；：:").strip()
+        if not compact_value:
+            return
+        projected = compact_value
+        for prefix in ("管理", "完整", "当前", "默认", "整体", "全系统", "全局"):
+            if projected.startswith(prefix) and len(projected) > len(prefix) + 1:
+                projected = projected[len(prefix):].strip()
+        projected = projected.replace("完整", "").replace("当前", "").replace("默认", "")
+        projected = projected.replace("的", "")
+        if projected != compact_value and any(
+            marker in projected
+            for marker in ("生命周期", "路由策略", "故障类型", "消息类型", "监测点", "设计哲学")
+        ):
+            append_variant(projected)
+
+    for part in parts:
+        compact = part.strip(" ，。；：:").strip()
+        if not compact:
+            continue
+        append_variant(compact)
+        append_structured_projection(compact)
+        for marker in ("建议增加", "建议扩展", "建议新增", "建议加装", "可能遇到", "可能出现", "增加", "新增", "加装", "扩展", "部署", "启用", "停用", "避免", "确认", "执行", "完成", "恢复", "触发"):
+            if marker in compact:
+                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
+                suffix = compact.split(marker, 1)[1].strip(" ，。；：:")
+                if len(prefix) >= 2:
+                    append_variant(prefix)
+                    append_structured_projection(prefix)
+                if len(suffix) >= 2:
+                    append_variant(suffix)
+                    append_structured_projection(suffix)
+        for marker in ("目前", "现在"):
+            if marker in compact:
+                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
+                if len(prefix) >= 2:
+                    append_variant(prefix)
+                    append_structured_projection(prefix)
+        if "的" in compact and len(compact) >= 6:
+            for piece in compact.split("的"):
+                piece = piece.strip()
+                if len(piece) >= 2:
+                    append_variant(piece)
+                    append_structured_projection(piece)
+    return results
+
+
+def _target_phrase_bonus(entry: ParsedEntry, target_phrases: list[str]) -> int:
+    normalized_name = _normalize_target_surface(entry.name)
+    if not normalized_name:
+        return 0
+    normalized_aliases = [
+        _normalize_target_surface(alias)
+        for alias in entry.aliases
+        if _normalize_target_surface(alias)
+    ]
+    bonus = 0
+    for phrase in target_phrases:
+        normalized_phrase = _normalize_target_surface(phrase)
+        projected_phrase = _projected_target_surface(phrase)
+        if not normalized_phrase:
+            continue
+        if normalized_name == normalized_phrase:
+            bonus = max(bonus, 160 + min(len(normalized_name), 12) * 4)
+            continue
+        if projected_phrase and normalized_name == projected_phrase and projected_phrase != normalized_phrase:
+            bonus = max(bonus, 168 + min(len(normalized_name), 12) * 4)
+            continue
+        if normalized_name and normalized_name in normalized_phrase and len(normalized_name) >= 3:
+            bonus = max(bonus, 16 + min(len(normalized_name), 12) * 3)
+        for alias in normalized_aliases:
+            if alias == normalized_phrase:
+                bonus = max(bonus, 120 + min(len(alias), 12) * 3)
+            elif projected_phrase and alias == projected_phrase and projected_phrase != normalized_phrase:
+                bonus = max(bonus, 132 + min(len(alias), 12) * 3)
+            elif alias and alias in normalized_phrase and len(alias) >= 3:
+                bonus = max(bonus, 14 + min(len(alias), 12) * 2)
+    return bonus
+
+
+def _structured_surface_bonus(entry: ParsedEntry, question: str) -> int:
+    lowered = question.lower()
+    surfaces = [entry.name, *entry.aliases]
+    bonus = 0
+    for canonical_surface, triggers in _STRUCTURED_SURFACE_GROUPS.items():
+        if not any(trigger in lowered for trigger in triggers):
+            continue
+        if any(canonical_surface in surface for surface in surfaces):
+            bonus = max(bonus, 56)
+    return bonus
+
+
+def _structured_base_term_penalty(entry: ParsedEntry, question: str) -> int:
+    lowered = question.lower()
+    surfaces = [entry.name, *entry.aliases]
+    normalized_name = _normalize_target_surface(entry.name)
+    if not normalized_name:
+        return 0
+    penalty = 0
+    normalized_question = _normalize_target_surface(question)
+    for canonical_surface, triggers in _STRUCTURED_SURFACE_GROUPS.items():
+        if not any(trigger in lowered for trigger in triggers):
+            continue
+        if any(canonical_surface in surface for surface in surfaces):
+            continue
+        if normalized_name in normalized_question:
+            penalty = max(penalty, 136 if len(normalized_name) <= 6 else 112)
+    return penalty
+
+
+def _artifact_wrapper_penalty(entry: ParsedEntry, question: str) -> int:
+    lowered = question.lower()
+    if not any(trigger in lowered for triggers in _STRUCTURED_SURFACE_GROUPS.values() for trigger in triggers):
+        return 0
+    if any(entry.name.endswith(suffix) for suffix in _ARTIFACT_WRAPPER_SUFFIXES):
+        return 42
+    return 0
+
+
+def _low_signal_entry_penalty(entry: ParsedEntry) -> int:
+    name = entry.name.strip()
+    summary = entry.summary.strip()
+    penalty = 0
+    if name in _LOW_SIGNAL_ENTRY_NAMES:
+        penalty += 72
+    if name.startswith(_LOW_SIGNAL_NAME_PREFIXES):
+        penalty += 36
+    if name.endswith(_LOW_SIGNAL_NAME_SUFFIXES) and len(name) <= 8:
+        penalty += 28
+    if "完整生命周期" in name and any(marker in name for marker in ("故障类型", "管理")):
+        penalty += 56
+    if any(marker in name for marker in ("中的", "里的", "时", "后", "前", "通知", "负责", "使用", "全部在", "加强了")):
+        penalty += 36
+    if name.endswith(("内容", "现状", "情况", "方式", "机制")) and len(name) <= 6:
+        penalty += 24
+    if any(marker in summary for marker in _LOW_SIGNAL_SUMMARY_MARKERS):
+        penalty += 20
+    return penalty
 
 
 def shortlist(
@@ -45,6 +376,7 @@ def shortlist(
     question_lower = question.lower()
     question_mode = _question_mode(question)
     terms = _extract_terms(question)
+    target_phrases = _question_target_phrases(question)
     results: list[RetrievalCandidate] = []
 
     for entry in entries.values():
@@ -84,10 +416,18 @@ def shortlist(
                 evidence_score += 10
                 matched_fields.add("body")
 
-        if evidence_score <= 0 and entry.name not in preferred:
+        target_bonus = _target_phrase_bonus(entry, target_phrases)
+        structured_bonus = _structured_surface_bonus(entry, question)
+
+        if evidence_score <= 0 and target_bonus <= 0 and structured_bonus <= 0 and entry.name not in preferred:
             continue
 
         score = evidence_score + min(entry.inbound_count, 8)
+        score += target_bonus
+        score += structured_bonus
+        score -= _low_signal_entry_penalty(entry)
+        score -= _structured_base_term_penalty(entry, question)
+        score -= _artifact_wrapper_penalty(entry, question)
         if entry.kind == "placeholder":
             score -= 22
         elif entry.entry_type == "concept":
@@ -568,6 +908,13 @@ def _extract_terms(question: str) -> list[str]:
                 continue
             if part not in results:
                 results.append(part)
+    for phrase in _question_target_phrases(question):
+        for component in _question_term_components(phrase):
+            lowered = component.casefold()
+            if len(component) < 2 or lowered in stop_words:
+                continue
+            if component not in results:
+                results.append(component)
     return results
 
 

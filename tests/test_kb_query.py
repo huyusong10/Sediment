@@ -285,6 +285,30 @@ def test_inventory_shortlist_neighbors_and_snippets(tmp_path: Path) -> None:
     assert "Scope" in sections
 
 
+def test_inventory_preserves_dotted_numbers_and_versions_in_summary(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+    _write(
+        kb_path / "entries" / "红线.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - system_config.yaml
+        ---
+        # 红线
+
+        红线是嗡鸣度绝对不可超过的安全阈值，标准腔默认值为 720.0Hz，判官配置版本为 v3.2.1。
+        """,
+    )
+
+    data = inventory(kb_path)
+
+    assert "720.0Hz" in data["docs"]["红线"]["summary"]
+    assert "v3.2.1" in data["docs"]["红线"]["summary"]
+
+
 def test_snippets_prioritize_why_for_lesson_queries(tmp_path: Path) -> None:
     kb_path = _build_sample_kb(tmp_path)
     excerpt_map = snippets(
@@ -324,6 +348,287 @@ def test_multilingual_query_support_for_shortlist_and_focus(tmp_path: Path, monk
         inventory_data=data,
     )
     assert excerpt_map["泄洪前先确认热备份"]["snippets"][0]["section"] == "Why"
+
+
+def test_shortlist_prefers_specific_targets_over_generic_fragments(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+
+    _write(
+        kb_path / "entries" / "技术.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - glossary.md
+        ---
+        # 技术
+
+        技术是相关系统中的一种模式或状态。
+
+        ## Scope
+        这里只提供泛化说明，不直接回答任何具体能力边界。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "隐身衣.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - security.md
+        ---
+        # 隐身衣
+
+        隐身衣是用于隐藏暗流轨迹的伪装技术。
+
+        ## Scope
+        隐身衣只能绕过回音壁等常规监测，不能完全避免照妖镜与账房审计的联合检测。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "哈基米.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - glossary.md
+        ---
+        # 哈基米
+
+        哈基米是系统运转依赖的基础能量单元。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "哈基米系统设计哲学.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: [设计哲学]
+        sources:
+          - system_config.yaml
+        ---
+        # 哈基米系统设计哲学
+
+        哈基米系统设计哲学强调稳定性优先、全链路可追溯和冗余容错。
+
+        ## Scope
+        设计哲学要求把安全阈值、审计链路和热备切换统一纳入系统骨架，而不是依赖单点经验。
+        """,
+    )
+
+    data = inventory(kb_path)
+
+    ranked = shortlist(
+        "从暗流调查报告和渡鸦守则看，隐身衣技术目前能完全避免检测吗？",
+        inventory_data=data,
+        limit=4,
+    )
+    ranked_names = [item["name"] for item in ranked]
+    assert ranked_names.index("隐身衣") < ranked_names.index("技术")
+
+    design_ranked = shortlist(
+        "从全系统角度推断，哈基米系统的设计哲学是什么？",
+        inventory_data=data,
+        limit=4,
+    )
+    assert design_ranked[0]["name"] == "哈基米系统设计哲学"
+
+
+def test_shortlist_prefers_fault_taxonomy_over_generic_or_wrapped_entries(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+
+    _write(
+        kb_path / "entries" / "谐振腔.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - resonator.md
+        ---
+        # 谐振腔
+
+        谐振腔是存储哈基米的容器。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "管理谐振腔的完整生命周期故障类型.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - lifecycle.txt
+        ---
+        # 管理谐振腔的完整生命周期故障类型
+
+        管理谐振腔的完整生命周期故障类型是泛化整理残留条目。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "谐振腔故障类型.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: [异常类]
+        sources:
+          - resonator.py
+        ---
+        # 谐振腔故障类型
+
+        谐振腔故障类型包括坍缩、红线异常和镀层缺陷等运行时故障。
+        """,
+    )
+
+    ranked = shortlist(
+        "从代码的异常类定义推断，谐振腔可能遇到哪些类型的故障？",
+        inventory_data=inventory(kb_path),
+        limit=4,
+    )
+
+    assert ranked[0]["name"] == "谐振腔故障类型"
+
+
+def test_shortlist_prefers_canonical_monitoring_surface_over_q3_wrapper_phrase(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+
+    _write(
+        kb_path / "entries" / "回音壁监测点.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: [回音壁监测点配置, 回音壁监测点配置.xml]
+        sources:
+          - monitoring.xml
+        ---
+        # 回音壁监测点
+
+        回音壁监测点定义了固定式、嵌入式和移动式回音壁在关键区域的部署位置与采样参数。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "复盘.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - review.md
+        ---
+        # 复盘
+
+        复盘是历史事件的回顾整理。
+        """,
+    )
+
+    ranked = shortlist(
+        "为什么Q3事故复盘建议增加回音壁监测点？",
+        inventory_data=inventory(kb_path),
+        limit=4,
+    )
+
+    assert ranked[0]["name"] == "回音壁监测点"
+
+
+def test_shortlist_prefers_canonical_bare_term_from_node_wrapper_surface(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+
+    _write(
+        kb_path / "entries" / "驿站.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: [驿站节点]
+        sources:
+          - topology.md
+        ---
+        # 驿站
+
+        驿站是传输链路中的中继与缓冲节点。
+
+        ## Scope
+        驿站优先部署在高频路径、跨区边界和偏远接入区，用于负载均衡和分段缓存。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "信使路由策略.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: [信使路由表]
+        sources:
+          - routes.yaml
+        ---
+        # 信使路由策略
+
+        信使路由策略定义了走线、接力、分流和合流等转发方式。
+        """,
+    )
+
+    ranked = shortlist(
+        "从部署拓扑和路由表看，驿站节点的部署策略是什么？",
+        inventory_data=inventory(kb_path),
+        limit=4,
+    )
+
+    assert ranked[0]["name"] == "驿站"
+
+
+def test_shortlist_normalizes_complete_target_surface(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+
+    _write(
+        kb_path / "entries" / "谐振腔生命周期.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - lifecycle.txt
+        ---
+        # 谐振腔生命周期
+
+        谐振腔生命周期包括五个阶段：建设验收、开光启用、正常运行、维护更新、退役处置。
+        """,
+    )
+    _write(
+        kb_path / "entries" / "生命周期.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - glossary.md
+        ---
+        # 生命周期
+
+        生命周期是正式流程中的一个阶段。
+        """,
+    )
+
+    ranked = shortlist(
+        "谐振腔的完整生命周期需要经历哪些阶段？",
+        inventory_data=inventory(kb_path),
+        limit=4,
+    )
+
+    assert ranked[0]["name"] == "谐振腔生命周期"
 
 
 def test_validate_entry_supports_v4_types(tmp_path: Path) -> None:

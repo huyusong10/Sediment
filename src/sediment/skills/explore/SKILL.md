@@ -40,6 +40,8 @@ Sources are provenance metadata, not graph nodes. Do not treat source names as c
    - definition question: answer with a short positive definition first
    - guidance/risk question: answer with the recommendation or warning first
    - comparison question: name the difference directly before background detail
+   - structured-fact question (`范围`, `单位`, `周期`, `数量`, `类型`, `阈值`): answer with the requested fact first, then the surrounding definition or boundary
+   - diagnostic question (`根因`, `缺陷`, `漏检`, `可能是什么问题`, `故障类型`): answer with the most likely cause or failure family first, then cite the symptom chain and required follow-up action
 
 2. Prefer the right entry type.
    - use `concept` entries for direct definitions and stable rules
@@ -52,6 +54,11 @@ Sources are provenance metadata, not graph nodes. Do not treat source names as c
    - cause and consequence
    - concept-to-lesson relationships
    - boundary conditions and exceptions
+   - for diagnostic questions, prefer entries that expose causal links, failure taxonomies, and remediation steps over generic top-level definitions
+   - when the question target contains wrapper words such as `管理`、`完整`、`节点`、`技术`、`数据质量`, first recover the canonical subject and check whether the KB already has a better bare-term or canonical entry
+   - when the question names an artifact wrapper (`路由表`, `报文定义`, `配置.xml`) but the KB contains a clearer canonical subject (`路由策略`, `消息类型`, `监测点`), answer from the canonical entry and treat the wrapper as an alias
+   - for list / count / structured-surface questions (`有哪些类型`, `多少个`, `路由策略`, `消息类型`, `故障类型`, `监测点`), prefer `Scope` evidence that enumerates the facts instead of stopping at a generic summary
+   - for `范围/区间`、`部署策略`、`质量判断`、`故障类型` 这类 structured-fact 问题, prefer the sentences that carry thresholds, deployment placement, quality signals, or failure enumerations; do not let generic definition sentences or wrapper titles dominate the answer
 
 4. Be honest about uncertainty.
    - if the KB lacks enough formal evidence, lower confidence
@@ -59,7 +66,13 @@ Sources are provenance metadata, not graph nodes. Do not treat source names as c
 
 ## Output Rules
 
-Return **JSON only** with this schema:
+Return **JSON only** with this schema. **No other output is acceptable.**
+
+**Critical formatting rules:**
+- Do NOT wrap the JSON in markdown code fences (no ```json blocks).
+- Do NOT include any text before or after the JSON object.
+- Do NOT include thinking tags, reasoning blocks, or any non-JSON content.
+- The output must be parseable as a single JSON object from start to finish.
 
 ```json
 {
@@ -83,10 +96,20 @@ Return **JSON only** with this schema:
 }
 ```
 
+**Field requirements:**
+- `answer`: Must be a non-empty string. For definition questions ("什么是X?"), the answer must directly define X in the first sentence.
+- `sources`: Must reference entry names that exist in the KB (check against prepared context).
+- `confidence`: Must be exactly one of: "high", "medium", "low".
+- `exploration_summary`: All four fields are required. Use realistic integers. `mode` must be one of the listed values.
+- `gaps`: List any areas where the KB lacks evidence. Can be empty if the answer is well-supported.
+- `contradictions`: List any conflicting evidence. Can be empty if evidence is coherent.
+
 ## Quality Bar
 
 - Answer the user's question directly, not the search process.
 - Prefer a small set of strong formal sources over a noisy list.
 - Use `high` confidence only when the formal evidence is coherent.
 - Keep the first sentence maximally queryable and low-noise.
+- When the question asks for a quantitative or categorical fact, prefer the `Scope` fact that answers it over a generic summary.
 - If the KB is sparse, say so plainly.
+- **Never** output anything outside the JSON object — the response will be rejected if it contains extra text.

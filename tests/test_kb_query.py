@@ -875,6 +875,18 @@ def test_prepare_explore_context_prefers_index_routed_entries(tmp_path: Path) ->
     assert any("index" in item["matched_fields"] for item in context["initial_shortlist"])
 
 
+def test_prepare_explore_context_keeps_shortlist_priority_in_expanded_candidates(
+    tmp_path: Path,
+) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    data = inventory(kb_path)
+
+    context = prepare_explore_context("什么是热备份？", inventory_data=data)
+
+    assert context["initial_shortlist"][0]["name"] == "热备份"
+    assert context["expanded_candidates"][0]["name"] == "热备份"
+
+
 def test_audit_kb_reports_invalid_index_contracts(tmp_path: Path) -> None:
     kb_path = _build_sample_kb(tmp_path)
     _write(

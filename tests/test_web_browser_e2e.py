@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import re
 from contextlib import contextmanager
 from pathlib import Path
@@ -213,12 +214,25 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             search_input = page.get_by_test_id("admin-file-search")
             search_input.fill("薄弱")
             expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
-            page.locator('#admin-file-suggestions button[data-name="薄弱条目"]').click()
+            expect(page.locator("#admin-file-suggestion-0")).to_have_attribute(
+                "aria-selected", "true"
+            )
+            search_input.press("ArrowDown")
+            expect(page.locator("#admin-file-suggestion-1")).to_have_attribute(
+                "aria-selected", "true"
+            )
+            search_input.press("Enter")
             tree_box = page.get_by_test_id("admin-file-index-tree").bounding_box()
             editor = page.get_by_test_id("admin-editor-content")
             editor_box = editor.bounding_box()
             assert tree_box is not None and editor_box is not None
             assert editor_box["y"] > tree_box["y"]
+            expect(page.get_by_test_id("admin-file-current-name")).to_have_text("index.root")
+            expect(editor).to_have_value(re.compile("entry_count"))
+            search_input.fill("薄弱条目")
+            expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
+            search_input.press("Enter")
+            expect(page.get_by_test_id("admin-file-current-name")).to_have_text("薄弱条目")
             expect(editor).to_have_value(re.compile("单一关系"))
             original = editor.input_value()
             updated = original.replace(
@@ -259,7 +273,10 @@ def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypat
         quartz_index = live["server_module"].QUARTZ_SITE_DIR / "index.html"
         quartz_index.parent.mkdir(parents=True, exist_ok=True)
         quartz_index.write_text(
-            "<!doctype html><html><head><title>Quartz Ready</title></head><body><h1>Quartz Ready</h1></body></html>",
+            (
+                "<!doctype html><html><head><title>Quartz Ready</title></head>"
+                "<body><h1>Quartz Ready</h1></body></html>"
+            ),
             encoding="utf-8",
         )
 

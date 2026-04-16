@@ -13,6 +13,7 @@
     revealedTokens: {},
     documents: { counts: {}, documents_by_name: {}, top_indexes: [], unindexed_documents: [], health_issues: [] },
     fileSuggestions: [],
+    activeFileSuggestionIndex: -1,
     selectedDocumentName: null,
     selectedDocumentDetail: null,
     ingestFiles: [],
@@ -723,11 +724,23 @@
   function hideFileSuggestions() {
     const node = document.getElementById("admin-file-suggestions");
     const input = document.getElementById("admin-file-search");
+    window.clearTimeout(fileSearchAutoLoadTimer);
+    fileSearchAutoLoadTimer = 0;
     if (node) {
       node.hidden = true;
       node.innerHTML = "";
     }
-    if (input) input.setAttribute("aria-expanded", "false");
+    if (input) {
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+    }
+  }
+
+  function activeFileSuggestion() {
+    if (!state.fileSuggestions.length) return null;
+    const index =
+      state.activeFileSuggestionIndex >= 0 ? state.activeFileSuggestionIndex : 0;
+    return state.fileSuggestions[index] || null;
   }
 
   function renderFileSuggestions(suggestions) {
@@ -735,20 +748,41 @@
     const input = document.getElementById("admin-file-search");
     if (!node || !input) return;
     const items = Array.isArray(suggestions) ? suggestions : [];
+    const keepSelection =
+      items.length === state.fileSuggestions.length &&
+      items.every((item, index) => item.name === state.fileSuggestions[index]?.name);
+    state.fileSuggestions = items;
     if (!items.length) {
+      state.activeFileSuggestionIndex = -1;
       hideFileSuggestions();
       return;
     }
+    if (keepSelection && state.activeFileSuggestionIndex >= 0) {
+      state.activeFileSuggestionIndex = Math.min(
+        state.activeFileSuggestionIndex,
+        items.length - 1
+      );
+    } else {
+      state.activeFileSuggestionIndex = 0;
+    }
     node.hidden = false;
     input.setAttribute("aria-expanded", "true");
+    input.setAttribute(
+      "aria-activedescendant",
+      `admin-file-suggestion-${state.activeFileSuggestionIndex}`
+    );
     node.innerHTML = `
       <div class="list">
-        ${items.map((item) => `
+        ${items.map((item, index) => `
           <button
             type="button"
             class="search-suggestion"
+            id="admin-file-suggestion-${index}"
             data-action="open-document"
             data-name="${escapeHtml(item.name || "")}"
+            data-index="${index}"
+            role="option"
+            aria-selected="${index === state.activeFileSuggestionIndex ? "true" : "false"}"
           >
             <span class="doc-button-label">
               <span class="doc-button-title">${escapeHtml(item.title || item.name || "")}</span>
@@ -758,6 +792,19 @@
         `).join("")}
       </div>
     `;
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`admin-file-suggestion-${state.activeFileSuggestionIndex}`)
+        ?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function moveActiveFileSuggestion(step) {
+    if (!state.fileSuggestions.length) return;
+    const total = state.fileSuggestions.length;
+    const current = state.activeFileSuggestionIndex >= 0 ? state.activeFileSuggestionIndex : 0;
+    state.activeFileSuggestionIndex = (current + step + total) % total;
+    renderFileSuggestions(state.fileSuggestions);
   }
 
   async function updateFileSuggestions() {
@@ -775,8 +822,7 @@
     }
     const payload = await fetchAdmin(`/api/admin/files/suggest?q=${encodeURIComponent(query)}`);
     if (requestId !== fileSuggestionRequestId) return;
-    state.fileSuggestions = payload.suggestions || [];
-    renderFileSuggestions(state.fileSuggestions);
+    renderFileSuggestions(payload.suggestions || []);
     if (!state.fileSuggestions.length) {
       setSectionStatus("admin-file-search-status", UI.file_search_empty || "");
       return;
@@ -1015,6 +1061,8 @@
     if (!name) {
       throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
     }
+    window.clearTimeout(fileSearchAutoLoadTimer);
+    fileSearchAutoLoadTimer = 0;
     const payload = await fetchAdmin(`/api/admin/entries/${encodeURIComponent(name)}`);
     state.selectedDocumentName = payload.name || name;
     state.selectedDocumentDetail = payload;
@@ -1321,14 +1369,26 @@
       hideFileSuggestions();
       return;
     }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveActiveFileSuggestion(1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveActiveFileSuggestion(-1);
+      return;
+    }
     if (event.key !== "Enter") return;
     event.preventDefault();
     const query = String(event.target.value || "").trim().toLowerCase();
     const exactMatch = state.fileSuggestions.find((item) => {
-      const candidates = [item.name, item.title].filter(Boolean).map((value) => String(value).toLowerCase());
+      const candidates = [item.name, item.title]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
       return candidates.includes(query);
     });
-    const selected = exactMatch || state.fileSuggestions[0];
+    const selected = exactMatch || activeFileSuggestion();
     if (selected) {
       openDocument(selected.name).catch(showAdminError);
     }

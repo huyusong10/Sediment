@@ -52,6 +52,7 @@
 12. **admin-file-management-surface**：后台文件管理页必须作为独立一级功能存在，并提供 index 驱动的结构浏览、自动建议搜索、健康联动和大尺寸 Markdown 编辑区。
 13. **admin-settings-owner-only**：后台设置页必须 owner-only，并提供 raw YAML 编辑、resolved config 只读视图，以及一键重启服务入口。
 14. **overview-scroll-caps**：后台总览中的治理焦点列表和最近活动列表都必须限制最大高度并改为滚动容器，避免页面被长队列无限拉长。
+15. **admin-file-search-keyboard-nav**：后台文件搜索建议必须支持上下键切换高亮项，Enter 打开当前高亮项，且显式选择不能被 exact-match 自动载入覆盖。
 
 对应实现文件：`tests/test_web_e2e.py`、`tests/test_web_browser_e2e.py`、`tests/test_web_ui_style.py`。
 

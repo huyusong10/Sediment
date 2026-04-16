@@ -511,8 +511,9 @@ def neighbors(
             if target in entries:
                 queue.append((target, current_depth + 1, current))
 
-    ordered = sorted(visited.values(), key=lambda item: (item["depth"], item["name"]))
-    return ordered[:limit]
+    # Preserve BFS discovery order so direct shortlist hits stay ahead of
+    # alphabetically earlier but less relevant graph neighbors.
+    return list(visited.values())[:limit]
 
 
 def snippets(

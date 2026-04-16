@@ -49,8 +49,8 @@ sources:
 **Aliases**: Every concept must have at least 2 aliases (unless it truly has none). Include:
 - Common abbreviations or shorthand used in the materials
 - Alternative phrasings that mean the same thing
-- Related compound terms that contain this concept (e.g. if concept is "嗡鸣度", alias might include "嗡鸣度指标")
-- The concept name suffixed with common nouns from context (e.g. "系统", "协议", "设备")
+- Related compound terms that contain this concept, such as metric, incident, lifecycle, or policy variants of the same subject
+- The concept name suffixed with stable contextual nouns when people may query that fuller surface directly
 - Descriptive phrases that users might query instead of the exact concept name
 - Aliases must stay same-entity: do not add neighboring teams, incidents, or co-occurring concepts as aliases just because they appear in the same sentence
 
@@ -135,13 +135,13 @@ Drop:
 
 ## Canonical Bare-Term Coverage
 
-When a concept has a short, standalone name that users will query directly (e.g. "潮涌", "嗡鸣度", "暗流"):
-- The entry title MUST be that exact bare term — do not add suffixes like "机制", "现象", "操作" unless the term itself includes them.
+When a concept has a short, standalone name that users will query directly:
+- The entry title MUST be that exact bare term. Do not add generic wrapper suffixes such as mechanism, phenomenon, process, or operation unless the source term itself includes them.
 - The first sentence of the entry body must be a direct, self-contained definition of that term. Do not assume the reader already knows what the term means.
-- If the concept appears as part of a compound phrase in materials (e.g. "潮涌事故", "嗡鸣度指标"), create the bare-term entry and list the compound as an alias.
-- If the source title wraps a canonical subject in packaging words such as "管理", "标准", or "指南", project the queryable subject into the KB (`谐振腔生命周期管理` -> `谐振腔生命周期`) instead of preserving the wrapper as the primary entry title.
-- If a stable capability only appears embedded inside a longer sentence (`内置了定海针算法`, `由渡鸦团队介入调查`), still promote the bare public subject (`定海针`, `渡鸦团队`) rather than storing the whole sentence fragment as a title.
-- If a structural wrapper only exists to describe the canonical subject (`驿站节点`, `隐身衣技术`, `嗡鸣度数据质量`, `管理谐振腔的完整生命周期`), project it back to the bare or canonical target (`驿站`, `隐身衣`, `嗡鸣度`, `谐振腔生命周期`) and keep the wrapper as alias / support evidence instead of a competing shallow entry.
+- If the concept appears as part of a compound phrase in materials, create the bare-term entry and list the compound as an alias.
+- If the source title wraps a canonical subject in packaging words such as management, standard, guide, or handbook, project the queryable subject into the KB instead of preserving the wrapper as the primary entry title.
+- If a stable capability only appears embedded inside a longer sentence, still promote the bare public subject rather than storing the whole sentence fragment as a title.
+- If a structural wrapper only exists to describe the canonical subject, project it back to the bare or canonical target and keep the wrapper as alias / support evidence instead of a competing shallow entry.
 
 ## Definition Quality
 
@@ -154,14 +154,14 @@ Every concept entry must have a definition that could stand alone as an answer t
 
 When the material exposes a stable public surface such as a config file, route table, protocol definition, schedule, topology, or metric schema:
 - Promote the reusable fact into a formal KB entry instead of leaving it buried in prose.
-- Keep the canonical entry human-facing (`信使路由策略`, `旋涡协议消息类型`, `部署拓扑`), but preserve the stable artifact name as an alias when users may query it directly (`信使路由表`, `旋涡协议报文定义`, `deployment_topology.json`).
+- Keep the canonical entry human-facing, but preserve the stable artifact name as an alias when users may query it directly.
 - Put quantitative facts that answer real operational questions in the first sentence when they are central: ranges, units, counts, periods, thresholds, or routing types.
 - Do not keep the raw wrapper title as a competing formal entry when a clearer canonical subject is known; the wrapper should survive as alias / provenance, not as a second low-signal node.
-- If a wrapper or section title is only supporting an existing canonical subject (`启明执行`, `潮涌处理流程`, `听风者周报模板`, `账房审计系统`), merge its facts back into the canonical entry instead of keeping a parallel shallow node.
-- Report templates, scorecards, and ops tables must backfill canonical metric entries with quality criteria (`底噪`, `峰谷差`, `毛刺`, `覆盖率`, `达标率`) rather than producing generic nodes like `指标` or `核心指标`.
+- If a wrapper or section title is only supporting an existing canonical subject, merge its facts back into the canonical entry instead of keeping a parallel shallow node.
+- Report templates, scorecards, and ops tables must backfill canonical metric entries with quality criteria rather than producing generic metric-wrapper nodes.
 
 When the material exposes stable code or workflow surfaces:
-- Promote exception families and failure taxonomies into formal entries (`谐振腔故障类型`, `旋涡协议异常处理`) instead of leaving them buried in class names.
+- Promote exception families and failure taxonomies into formal entries instead of leaving them buried in class names.
 - Promote TODO / not-yet-implemented notes into an auditable entry only when they describe real product gaps that operators or reviewers may query.
 - Promote named procedures from headings, checklists, tables, and step lists into canonical bare-term entries or directly queryable procedure entries.
 - Promote explicit symptom -> cause -> action chains into formal entries or high-signal `Scope` content, so later explore can answer diagnostic questions without reading raw source materials.
@@ -171,7 +171,7 @@ When the material exposes stable code or workflow surfaces:
 ## Fragment Rejection
 
 Do not emit formal entries whose title is just a structural fragment or a generic workflow word.
-- Reject titles like bare “建议”, “执行”, “以下”, “事件编号”, or sentence fragments led by pronouns.
+- Reject titles that are only generic action words, placeholder bullets, event IDs, or sentence fragments led by pronouns.
 - If a sentence is only supporting evidence for another concept, keep it in `Scope` instead of turning it into its own entry.
 
 ## Workflow

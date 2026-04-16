@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -135,6 +136,65 @@ def _prepare_workspace(
         knowledge_name=knowledge_name,
         locale=locale,
     )
+    _normalize_workspace_layout(workspace_root=workspace_root)
+    _normalize_workspace_graph_runtime(workspace_root=workspace_root)
+
+
+def _normalize_workspace_graph_runtime(*, workspace_root: Path) -> None:
+    graph_script = workspace_root / "quartz" / "components" / "scripts" / "graph.inline.ts"
+    if not graph_script.exists():
+        return
+    source = graph_script.read_text(encoding="utf-8")
+    updated = re.sub(r'preference:\s*"webgpu"', 'preference: "webgl"', source)
+    if "function includeInGraph(details: ContentDetails): boolean" not in updated:
+        marker = "type TweenNode = {\n  update: (time: number) => void\n  stop: () => void\n}\n\n"
+        helper = (
+            "function includeInGraph(details: ContentDetails): boolean {\n"
+            '  const filePath = `${details.filePath ?? ""}`.replace(/^\\.\\/+/, "")\n'
+            '  return filePath !== "index.md" && !filePath.startsWith("indexes/")\n'
+            "}\n\n"
+        )
+        updated = updated.replace(marker, marker + helper)
+    updated = updated.replace(
+        '  const data: Map<SimpleSlug, ContentDetails> = new Map(\n'
+        '    Object.entries<ContentDetails>(await fetchData).map(([k, v]) => [\n'
+        '      simplifySlug(k as FullSlug),\n'
+        '      v,\n'
+        '    ]),\n'
+        '  )\n',
+        '  const data: Map<SimpleSlug, ContentDetails> = new Map(\n'
+        '    Object.entries<ContentDetails>(await fetchData)\n'
+        '      .filter(([, details]) => includeInGraph(details))\n'
+        '      .map(([k, v]) => [simplifySlug(k as FullSlug), v]),\n'
+        '  )\n',
+    )
+    updated = updated.replace(
+        '  const neighbourhood = new Set<SimpleSlug>()\n'
+        '  const wl: (SimpleSlug | "__SENTINEL")[] = [slug, "__SENTINEL"]\n',
+        '  const neighbourhood = new Set<SimpleSlug>()\n'
+        '  const wl: (SimpleSlug | "__SENTINEL")[] = data.has(slug) ? [slug, "__SENTINEL"] : []\n',
+    )
+    if updated != source:
+        graph_script.write_text(updated, encoding="utf-8")
+
+
+def _normalize_workspace_layout(*, workspace_root: Path) -> None:
+    layout_script = workspace_root / "quartz.layout.ts"
+    if not layout_script.exists():
+        return
+    source = layout_script.read_text(encoding="utf-8")
+    updated = source
+    if 'condition: (page) => page.fileData.frontmatter?.kind !== "index"' not in updated:
+        updated = updated.replace(
+            "  right: [\n    Component.Graph(),\n",
+            '  right: [\n'
+            "    Component.ConditionalRender({\n"
+            "      component: Component.Graph(),\n"
+            '      condition: (page) => page.fileData.frontmatter?.kind !== "index",\n'
+            "    }),\n",
+        )
+    if updated != source:
+        layout_script.write_text(updated, encoding="utf-8")
 
 
 def _link_node_modules(*, runtime_root: Path, workspace_root: Path) -> None:

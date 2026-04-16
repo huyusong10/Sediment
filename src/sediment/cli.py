@@ -817,38 +817,31 @@ def _write_instance_scaffold(
     index_root = kb_root / "index.root.md"
     if not index_root.exists():
         index_root.write_text(
-            "\n".join(
-                [
-                    "---",
-                    "kind: index",
-                    "segment: root",
-                    "---",
-                    "# Index Root",
-                    "",
-                    "- [[index.core]]",
-                    "",
-                ]
-            ),
-            encoding="utf-8",
-        )
-    core_index = kb_root / "indexes" / "index.core.md"
-    if not core_index.exists():
-        core_index.write_text(
-            "\n".join(
-                [
-                    "---",
-                    "kind: index",
-                    "segment: core",
-                    "---",
-                    f"# {knowledge_label}",
-                    "",
-                    "Add your first formal entries here.",
-                    "",
-                ]
-            ),
+            _default_root_index_scaffold(knowledge_label=knowledge_label, locale=payload["locale"]),
             encoding="utf-8",
         )
     return payload
+
+
+def _default_root_index_scaffold(*, knowledge_label: str, locale: str) -> str:
+    is_zh = str(locale).strip().lower() == "zh"
+    summary = (
+        "把正式条目或后续分段索引链接到这里，作为知识库的顶层入口。"
+        if is_zh
+        else "Link formal entries or future segment indexes here to define the top-level entry points."
+    )
+    return "\n".join(
+        [
+            "---",
+            "kind: index",
+            "segment: root",
+            "---",
+            f"# {knowledge_label}",
+            "",
+            summary,
+            "",
+        ]
+    )
 
 
 def _looks_like_kb_root(path: Path) -> bool:

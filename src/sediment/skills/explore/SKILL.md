@@ -40,8 +40,8 @@ Sources are provenance metadata, not graph nodes. Do not treat source names as c
    - definition question: answer with a short positive definition first
    - guidance/risk question: answer with the recommendation or warning first
    - comparison question: name the difference directly before background detail
-   - structured-fact question (`范围`, `单位`, `周期`, `数量`, `类型`, `阈值`): answer with the requested fact first, then the surrounding definition or boundary
-   - diagnostic question (`根因`, `缺陷`, `漏检`, `可能是什么问题`, `故障类型`): answer with the most likely cause or failure family first, then cite the symptom chain and required follow-up action
+   - structured-fact question (range, unit, period, count, category, threshold): answer with the requested fact first, then the surrounding definition or boundary
+   - diagnostic question (root cause, defect class, missed coverage, likely failure family): answer with the most likely cause or failure family first, then cite the symptom chain and required follow-up action
 
 2. Prefer the right entry type.
    - use `concept` entries for direct definitions and stable rules
@@ -49,16 +49,18 @@ Sources are provenance metadata, not graph nodes. Do not treat source names as c
    - use placeholders only to explain gaps, never as sole proof
 
 3. Follow relationships, not just keywords.
-   - start from the root / segment index routing when it is present
+   - start from the root index routing when it is present
+   - if the KB also has segment indexes, use them as optional routing layers rather than assuming they always exist
+   - if the root index links directly to formal entries, treat those links as valid first-hop evidence
    - prerequisite chains
    - cause and consequence
    - concept-to-lesson relationships
    - boundary conditions and exceptions
    - for diagnostic questions, prefer entries that expose causal links, failure taxonomies, and remediation steps over generic top-level definitions
-   - when the question target contains wrapper words such as `管理`、`完整`、`节点`、`技术`、`数据质量`, first recover the canonical subject and check whether the KB already has a better bare-term or canonical entry
-   - when the question names an artifact wrapper (`路由表`, `报文定义`, `配置.xml`) but the KB contains a clearer canonical subject (`路由策略`, `消息类型`, `监测点`), answer from the canonical entry and treat the wrapper as an alias
-   - for list / count / structured-surface questions (`有哪些类型`, `多少个`, `路由策略`, `消息类型`, `故障类型`, `监测点`), prefer `Scope` evidence that enumerates the facts instead of stopping at a generic summary
-   - for `范围/区间`、`部署策略`、`质量判断`、`故障类型` 这类 structured-fact 问题, prefer the sentences that carry thresholds, deployment placement, quality signals, or failure enumerations; do not let generic definition sentences or wrapper titles dominate the answer
+   - when the question target contains wrapper words such as management, completeness, node, technology, or data-quality labels, first recover the canonical subject and check whether the KB already has a better bare-term or canonical entry
+   - when the question names an artifact wrapper such as a route table, message definition, or config file but the KB contains a clearer canonical subject such as a routing strategy, message type, or monitoring point, answer from the canonical entry and treat the wrapper as an alias
+   - for list / count / structured-surface questions such as category lists, counts, routing strategies, message types, fault types, or monitoring points, prefer `Scope` evidence that enumerates the facts instead of stopping at a generic summary
+   - for structured-fact questions about ranges, deployment strategy, quality judgment, or fault categories, prefer the sentences that carry thresholds, deployment placement, quality signals, or failure enumerations; do not let generic definition sentences or wrapper titles dominate the answer
 
 4. Be honest about uncertainty.
    - if the KB lacks enough formal evidence, lower confidence
@@ -97,7 +99,7 @@ Return **JSON only** with this schema. **No other output is acceptable.**
 ```
 
 **Field requirements:**
-- `answer`: Must be a non-empty string. For definition questions ("什么是X?"), the answer must directly define X in the first sentence.
+- `answer`: Must be a non-empty string. For direct definition questions, the answer must directly define the target in the first sentence.
 - `sources`: Must reference entry names that exist in the KB (check against prepared context).
 - `confidence`: Must be exactly one of: "high", "medium", "low".
 - `exploration_summary`: All four fields are required. Use realistic integers. `mode` must be one of the listed values.

@@ -8,7 +8,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from sediment.i18n import query_language_rules
+from sediment.i18n import kb_query_heuristic_rules, query_language_rules
 from sediment.kb import (
     ParsedEntry,
     RetrievalCandidate,
@@ -26,142 +26,100 @@ from sediment.kb import (
 from sediment.settings import load_settings
 
 LANGUAGE_RULES = query_language_rules()
+QUERY_HEURISTICS = kb_query_heuristic_rules()
 _LOW_SIGNAL_ENTRY_NAMES = {
-    "技术",
-    "系统",
-    "指标",
-    "调查",
-    "报告",
-    "事件",
-    "流程",
-    "步骤",
-    "内容",
-    "定义",
-    "规则",
-    "配置",
-    "接口",
-    "能力",
-    "现状",
-    "机制",
+    str(value).casefold() for value in QUERY_HEURISTICS["low_signal_entry_names"]
 }
-_LOW_SIGNAL_SUMMARY_MARKERS = (
-    "一种模式或状态",
-    "正式流程中的一个阶段",
-    "用于表达当前处理阶段",
-    "相关系统",
-    "名称 定义 目标值 告警阈值",
+_LOW_SIGNAL_SUMMARY_MARKERS = tuple(QUERY_HEURISTICS["low_signal_summary_markers"])
+_LOW_SIGNAL_NAME_PREFIXES = tuple(QUERY_HEURISTICS["low_signal_name_prefixes"])
+_LOW_SIGNAL_NAME_SUFFIXES = tuple(QUERY_HEURISTICS["low_signal_name_suffixes"])
+_LOW_SIGNAL_NAME_CONTAINS_MARKERS = tuple(
+    QUERY_HEURISTICS["low_signal_name_contains_markers"]
 )
-_LOW_SIGNAL_NAME_PREFIXES = (
-    "当前",
-    "核心",
-    "默认",
-    "通知",
-    "负责",
-    "注册",
-    "核对",
-    "本人",
-    "制定",
-    "系统设计的",
+_LOW_SIGNAL_NAME_TERMINAL_SUFFIXES = tuple(
+    QUERY_HEURISTICS["low_signal_name_terminal_suffixes"]
 )
-_LOW_SIGNAL_NAME_SUFFIXES = ("检测", "执行", "记录", "归档", "通知")
-_QUESTION_PREFIXES = (
-    "什么是",
-    "什么叫",
-    "请问",
-    "为什么",
-    "从",
-    "根据",
-    "结合",
-    "综合",
-    "如果",
-    "基于",
-    "当前",
-    "一个",
-    "请",
-)
-_QUESTION_SUFFIX_MARKERS = (
-    "是什么",
-    "是什么意思",
-    "有哪些",
-    "多少",
-    "的范围",
-    "的区间",
-    "的安全运行区间",
-    "的部署策略",
-    "的路由策略",
-    "的触发条件",
-    "分别指什么",
-    "负责什么",
-    "作用是什么",
-    "衡量什么",
-    "如何判断",
-    "需要经历哪些阶段",
-    "需要哪些步骤",
-    "需要完成哪些准备",
-    "应该采取哪些应对策略",
-    "可能是什么问题",
-    "可能遇到哪些类型的故障",
-    "是否",
-    "吗",
-)
-_QUERYABLE_TERM_SUFFIXES = (
-    "节点的",
-    "节点",
-    "数据",
-    "技术",
-    "团队",
-    "指标",
-    "质量",
-    "级别",
-)
-_SURFACE_FILLERS = (
-    "完整",
-    "当前",
-    "默认",
-    "整体",
-    "全系统",
-    "全局",
-    "complete",
-    "current",
-    "default",
-    "overall",
-)
-_STRUCTURED_SURFACE_GROUPS = {
-    "消息类型": ("消息类型", "报文类型", "message type", "message types"),
-    "路由策略": ("路由策略", "路由规则", "routing strategy", "routing strategies", "route strategy", "route strategies"),
-    "故障类型": ("故障类型", "异常类", "类型的故障", "fault type", "fault types", "failure type", "failure types"),
-    "设计哲学": ("设计哲学", "design philosophy", "system philosophy"),
-    "生命周期": ("生命周期", "lifecycle", "life cycle"),
-    "监测点": ("监测点", "监控点", "monitoring point", "monitor point"),
-}
-_ARTIFACT_WRAPPER_SUFFIXES = ("路由表", "报文定义", "监测点配置")
+_OVERLOADED_COMPLETE_MARKERS = tuple(QUERY_HEURISTICS["overloaded_complete_markers"])
+_OVERLOADED_WRAPPER_MARKERS = tuple(QUERY_HEURISTICS["overloaded_wrapper_markers"])
+_QUESTION_PREFIXES = tuple(QUERY_HEURISTICS["question_prefixes"])
+_QUESTION_SUFFIX_MARKERS = tuple(QUERY_HEURISTICS["question_suffix_markers"])
+_QUERYABLE_TERM_SUFFIXES = tuple(QUERY_HEURISTICS["queryable_term_suffixes"])
+_SURFACE_FILLERS = tuple(QUERY_HEURISTICS["surface_fillers"])
+_PROJECTION_PREFIXES = tuple(QUERY_HEURISTICS["projection_prefixes"])
+_COORDINATION_SPLITTERS = tuple(QUERY_HEURISTICS["coordination_splitters"])
+_ACTION_SPLIT_MARKERS = tuple(QUERY_HEURISTICS["action_split_markers"])
+_TEMPORAL_MARKERS = tuple(QUERY_HEURISTICS["temporal_markers"])
+_POSSESSIVE_MARKERS = tuple(QUERY_HEURISTICS["possessive_markers"])
+_POSSESSIVE_SPLIT_MARKERS = tuple(QUERY_HEURISTICS["possessive_split_markers"])
+_STRUCTURED_SURFACE_GROUPS = QUERY_HEURISTICS["structured_surface_groups"]
+_ARTIFACT_WRAPPER_SUFFIXES = tuple(QUERY_HEURISTICS["artifact_wrapper_suffixes"])
 
 
 def inventory(kb_path: str | Path) -> dict[str, Any]:
     return core_inventory(kb_path)
 
 
+def _startswith_marker(text: str, marker: str) -> bool:
+    return text.casefold().startswith(marker.casefold())
+
+
+def _endswith_marker(text: str, marker: str) -> bool:
+    return text.casefold().endswith(marker.casefold())
+
+
+def _split_once_on_marker(text: str, marker: str) -> tuple[str, str] | None:
+    index = text.casefold().find(marker.casefold())
+    if index < 0:
+        return None
+    return text[:index], text[index + len(marker):]
+
+
+def _split_chunks(text: str, marker: str) -> list[str]:
+    if not marker:
+        return [text]
+    return [chunk for chunk in re.split(re.escape(marker), text, flags=re.IGNORECASE) if chunk]
+
+
+def _surface_group_matches_question(question: str, group: dict[str, tuple[str, ...]]) -> bool:
+    lowered = question.casefold()
+    return any(term.casefold() in lowered for term in group["question_terms"])
+
+
+def _surface_group_matches_entry(entry: ParsedEntry, group: dict[str, tuple[str, ...]]) -> bool:
+    surfaces = [entry.name, *entry.aliases]
+    lowered_surfaces = [surface.casefold() for surface in surfaces]
+    return any(
+        term.casefold() in surface
+        for term in group["surface_terms"]
+        for surface in lowered_surfaces
+    )
+
+
 def _normalize_target_surface(text: str) -> str:
-    lowered = text.strip().lower().replace("的", "")
+    lowered = text.strip().casefold()
+    for marker in _POSSESSIVE_MARKERS:
+        lowered = lowered.replace(marker.casefold(), "")
     for filler in _SURFACE_FILLERS:
-        lowered = lowered.replace(filler, "")
-    return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", lowered)
+        lowered = lowered.replace(filler.casefold(), "")
+    return "".join(char for char in lowered if char.isalnum())
 
 
 def _projected_target_surface(text: str) -> str:
     projected = text.strip()
     if not projected:
         return ""
-    for prefix in ("管理", "完整", "当前", "默认", "整体", "全系统", "全局"):
-        if projected.startswith(prefix) and len(projected) > len(prefix) + 1:
+    for prefix in _PROJECTION_PREFIXES:
+        if _startswith_marker(projected, prefix) and len(projected) > len(prefix) + 1:
             projected = projected[len(prefix):].strip()
-    projected = projected.replace("完整", "").replace("当前", "").replace("默认", "")
-    projected = projected.replace("的", "")
+    for filler in _SURFACE_FILLERS:
+        projected = re.sub(re.escape(filler), "", projected, flags=re.IGNORECASE)
+    for marker in _POSSESSIVE_MARKERS:
+        projected = projected.replace(marker, "")
     changed = True
     while changed:
         changed = False
         for suffix in _QUERYABLE_TERM_SUFFIXES:
-            if projected.endswith(suffix) and len(projected) > len(suffix) + 1:
+            if _endswith_marker(projected, suffix) and len(projected) > len(suffix) + 1:
                 projected = projected[: -len(suffix)].strip()
                 changed = True
                 break
@@ -171,11 +129,12 @@ def _projected_target_surface(text: str) -> str:
 def _trim_question_target(text: str) -> str:
     candidate = text.strip().strip("？?")
     for prefix in _QUESTION_PREFIXES:
-        if candidate.startswith(prefix) and len(candidate) > len(prefix) + 1:
+        if _startswith_marker(candidate, prefix) and len(candidate) > len(prefix) + 1:
             candidate = candidate[len(prefix):].strip()
     for marker in _QUESTION_SUFFIX_MARKERS:
-        if marker in candidate:
-            candidate = candidate.split(marker, 1)[0]
+        chunks = _split_once_on_marker(candidate, marker)
+        if chunks:
+            candidate = chunks[0]
     return candidate.strip(" ，。；：:").strip()
 
 
@@ -203,10 +162,10 @@ def _question_term_components(text: str) -> list[str]:
         return []
 
     parts = [cleaned]
-    for splitter in ("和", "与", "及", "以及", "、", "从", "且", "并且"):
+    for splitter in _COORDINATION_SPLITTERS:
         next_parts: list[str] = []
         for part in parts:
-            next_parts.extend(chunk for chunk in part.split(splitter) if chunk)
+            next_parts.extend(_split_chunks(part, splitter))
         parts = next_parts or parts
 
     results: list[str] = []
@@ -218,7 +177,7 @@ def _question_term_components(text: str) -> list[str]:
         if compact_value not in results:
             results.append(compact_value)
         for suffix in _QUERYABLE_TERM_SUFFIXES:
-            if compact_value.endswith(suffix) and len(compact_value) > len(suffix) + 1:
+            if _endswith_marker(compact_value, suffix) and len(compact_value) > len(suffix) + 1:
                 trimmed = compact_value[: -len(suffix)].strip()
                 if len(trimmed) >= 2 and trimmed not in results:
                     results.append(trimmed)
@@ -228,14 +187,17 @@ def _question_term_components(text: str) -> list[str]:
         if not compact_value:
             return
         projected = compact_value
-        for prefix in ("管理", "完整", "当前", "默认", "整体", "全系统", "全局"):
-            if projected.startswith(prefix) and len(projected) > len(prefix) + 1:
+        for prefix in _PROJECTION_PREFIXES:
+            if _startswith_marker(projected, prefix) and len(projected) > len(prefix) + 1:
                 projected = projected[len(prefix):].strip()
-        projected = projected.replace("完整", "").replace("当前", "").replace("默认", "")
-        projected = projected.replace("的", "")
+        for filler in _SURFACE_FILLERS:
+            projected = re.sub(re.escape(filler), "", projected, flags=re.IGNORECASE)
+        for marker in _POSSESSIVE_MARKERS:
+            projected = projected.replace(marker, "")
         if projected != compact_value and any(
-            marker in projected
-            for marker in ("生命周期", "路由策略", "故障类型", "消息类型", "监测点", "设计哲学")
+            term.casefold() in projected.casefold()
+            for group in _STRUCTURED_SURFACE_GROUPS.values()
+            for term in group["surface_terms"]
         ):
             append_variant(projected)
 
@@ -245,28 +207,31 @@ def _question_term_components(text: str) -> list[str]:
             continue
         append_variant(compact)
         append_structured_projection(compact)
-        for marker in ("建议增加", "建议扩展", "建议新增", "建议加装", "可能遇到", "可能出现", "增加", "新增", "加装", "扩展", "部署", "启用", "停用", "避免", "确认", "执行", "完成", "恢复", "触发"):
-            if marker in compact:
-                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
-                suffix = compact.split(marker, 1)[1].strip(" ，。；：:")
+        for marker in _ACTION_SPLIT_MARKERS:
+            chunks = _split_once_on_marker(compact, marker)
+            if chunks:
+                prefix = chunks[0].strip(" ，。；：:")
+                suffix = chunks[1].strip(" ，。；：:")
                 if len(prefix) >= 2:
                     append_variant(prefix)
                     append_structured_projection(prefix)
                 if len(suffix) >= 2:
                     append_variant(suffix)
                     append_structured_projection(suffix)
-        for marker in ("目前", "现在"):
-            if marker in compact:
-                prefix = compact.split(marker, 1)[0].strip(" ，。；：:")
+        for marker in _TEMPORAL_MARKERS:
+            chunks = _split_once_on_marker(compact, marker)
+            if chunks:
+                prefix = chunks[0].strip(" ，。；：:")
                 if len(prefix) >= 2:
                     append_variant(prefix)
                     append_structured_projection(prefix)
-        if "的" in compact and len(compact) >= 6:
-            for piece in compact.split("的"):
-                piece = piece.strip()
-                if len(piece) >= 2:
-                    append_variant(piece)
-                    append_structured_projection(piece)
+        for marker in _POSSESSIVE_SPLIT_MARKERS:
+            if marker in compact and len(compact) >= 6:
+                for piece in compact.split(marker):
+                    piece = piece.strip()
+                    if len(piece) >= 2:
+                        append_variant(piece)
+                        append_structured_projection(piece)
     return results
 
 
@@ -304,29 +269,25 @@ def _target_phrase_bonus(entry: ParsedEntry, target_phrases: list[str]) -> int:
 
 
 def _structured_surface_bonus(entry: ParsedEntry, question: str) -> int:
-    lowered = question.lower()
-    surfaces = [entry.name, *entry.aliases]
     bonus = 0
-    for canonical_surface, triggers in _STRUCTURED_SURFACE_GROUPS.items():
-        if not any(trigger in lowered for trigger in triggers):
+    for group in _STRUCTURED_SURFACE_GROUPS.values():
+        if not _surface_group_matches_question(question, group):
             continue
-        if any(canonical_surface in surface for surface in surfaces):
+        if _surface_group_matches_entry(entry, group):
             bonus = max(bonus, 56)
     return bonus
 
 
 def _structured_base_term_penalty(entry: ParsedEntry, question: str) -> int:
-    lowered = question.lower()
-    surfaces = [entry.name, *entry.aliases]
     normalized_name = _normalize_target_surface(entry.name)
     if not normalized_name:
         return 0
     penalty = 0
     normalized_question = _normalize_target_surface(question)
-    for canonical_surface, triggers in _STRUCTURED_SURFACE_GROUPS.items():
-        if not any(trigger in lowered for trigger in triggers):
+    for group in _STRUCTURED_SURFACE_GROUPS.values():
+        if not _surface_group_matches_question(question, group):
             continue
-        if any(canonical_surface in surface for surface in surfaces):
+        if _surface_group_matches_entry(entry, group):
             continue
         if normalized_name in normalized_question:
             penalty = max(penalty, 136 if len(normalized_name) <= 6 else 112)
@@ -334,31 +295,39 @@ def _structured_base_term_penalty(entry: ParsedEntry, question: str) -> int:
 
 
 def _artifact_wrapper_penalty(entry: ParsedEntry, question: str) -> int:
-    lowered = question.lower()
-    if not any(trigger in lowered for triggers in _STRUCTURED_SURFACE_GROUPS.values() for trigger in triggers):
+    if not any(
+        _surface_group_matches_question(question, group)
+        for group in _STRUCTURED_SURFACE_GROUPS.values()
+    ):
         return 0
-    if any(entry.name.endswith(suffix) for suffix in _ARTIFACT_WRAPPER_SUFFIXES):
+    if any(_endswith_marker(entry.name, suffix) for suffix in _ARTIFACT_WRAPPER_SUFFIXES):
         return 42
     return 0
 
 
 def _low_signal_entry_penalty(entry: ParsedEntry) -> int:
     name = entry.name.strip()
+    lowered_name = name.casefold()
     summary = entry.summary.strip()
+    lowered_summary = summary.casefold()
     penalty = 0
-    if name in _LOW_SIGNAL_ENTRY_NAMES:
+    if lowered_name in _LOW_SIGNAL_ENTRY_NAMES:
         penalty += 72
-    if name.startswith(_LOW_SIGNAL_NAME_PREFIXES):
+    if any(_startswith_marker(name, prefix) for prefix in _LOW_SIGNAL_NAME_PREFIXES):
         penalty += 36
-    if name.endswith(_LOW_SIGNAL_NAME_SUFFIXES) and len(name) <= 8:
+    if any(_endswith_marker(name, suffix) for suffix in _LOW_SIGNAL_NAME_SUFFIXES) and len(name) <= 16:
         penalty += 28
-    if "完整生命周期" in name and any(marker in name for marker in ("故障类型", "管理")):
+    if any(marker.casefold() in lowered_name for marker in _OVERLOADED_COMPLETE_MARKERS) and any(
+        marker.casefold() in lowered_name for marker in _OVERLOADED_WRAPPER_MARKERS
+    ):
         penalty += 56
-    if any(marker in name for marker in ("中的", "里的", "时", "后", "前", "通知", "负责", "使用", "全部在", "加强了")):
+    if any(marker.casefold() in lowered_name for marker in _LOW_SIGNAL_NAME_CONTAINS_MARKERS):
         penalty += 36
-    if name.endswith(("内容", "现状", "情况", "方式", "机制")) and len(name) <= 6:
+    if any(
+        _endswith_marker(name, suffix) for suffix in _LOW_SIGNAL_NAME_TERMINAL_SUFFIXES
+    ) and len(name) <= 16:
         penalty += 24
-    if any(marker in summary for marker in _LOW_SIGNAL_SUMMARY_MARKERS):
+    if any(marker.casefold() in lowered_summary for marker in _LOW_SIGNAL_SUMMARY_MARKERS):
         penalty += 20
     return penalty
 

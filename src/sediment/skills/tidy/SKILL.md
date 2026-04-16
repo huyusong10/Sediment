@@ -34,7 +34,7 @@ Sources live in frontmatter `sources` and must remain plain text.
 ## Provenance Hygiene
 
 - Source names are not KB concepts by default.
-- `Source/来源` content must not create placeholders or graph edges.
+- Source-style headings must not create placeholders or graph edges.
 - Placeholder notes such as `Appears in` / `Referenced in` are context only, not evidence.
 
 ## Available Checks
@@ -84,6 +84,7 @@ python -c "from sediment.skills.tidy.scripts.tidy_utils import plan_index_repair
 
 - Start from `audit-kb` and `plan_index_repairs()`.
 - Keep `index.root.md` present and usable as the default navigation entry.
+- Treat segment indexes as optional structure; create or keep them only when they improve routing quality.
 - Split overloaded index segments when they exceed the configured entry/token thresholds.
 - Repair broken index links and add coverage for formal entries that are not reachable from any index.
 - Consider merges only for low-density, highly overlapping non-root indexes.

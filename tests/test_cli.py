@@ -483,6 +483,51 @@ def test_init_scaffold_writes_owner_user_and_token(monkeypatch, tmp_path: Path, 
     assert "id: owner" in config
 
 
+def test_init_scaffold_creates_single_root_index_without_default_segment_index(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    registry = tmp_path / "registry" / "instances.yaml"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    rc = cli.main(
+        [
+            "--registry",
+            str(registry),
+            "init",
+            "--instance-name",
+            "single-root",
+            "--knowledge-name",
+            "Sample KB",
+            "--backend",
+            "codex",
+            "--no-interactive",
+        ]
+    )
+
+    assert rc == 0
+    capsys.readouterr()
+    kb_root = workspace / "knowledge-base"
+    index_root = kb_root / "index.root.md"
+    assert index_root.is_file()
+    assert index_root.read_text(encoding="utf-8") == "\n".join(
+        [
+            "---",
+            "kind: index",
+            "segment: root",
+            "---",
+            "# Sample KB",
+            "",
+            "Link formal entries or future segment indexes here to define the top-level entry points.",
+            "",
+        ]
+    )
+    assert not (kb_root / "indexes" / "index.core.md").exists()
+
+
 def test_user_commands_manage_configured_users(tmp_path: Path, capsys) -> None:
     configure_cli_config(tmp_path)
 
@@ -546,7 +591,7 @@ def test_auth_normalization_keeps_single_owner(monkeypatch, tmp_path: Path, caps
     assert any(item["name"] == "Shadow Owner" for item in committers)
 
 
-def test_init_works_with_preexisting_standard_kb_layout(
+def test_init_works_with_preexisting_legacy_multi_index_kb_layout(
     monkeypatch,
     tmp_path: Path,
     capsys,

@@ -875,6 +875,70 @@ def test_prepare_explore_context_prefers_index_routed_entries(tmp_path: Path) ->
     assert any("index" in item["matched_fields"] for item in context["initial_shortlist"])
 
 
+def test_prepare_explore_context_supports_root_only_index_routing(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+    _write(
+        kb_path / "entries" / "热备份.md",
+        """
+        ---
+        type: concept
+        status: fact
+        aliases: []
+        sources:
+          - sample.md
+        ---
+        # 热备份
+
+        热备份是在主链路失效前准备好的可接管路径能力。
+
+        ## Scope
+        适用于需要连续服务、不能接受长时间中断的核心系统。
+
+        ## Related
+        - [[回音壁]] - 同步观测链路
+        """,
+    )
+    _write(
+        kb_path / "placeholders" / "回音壁.md",
+        """
+        ---
+        type: placeholder
+        aliases: []
+        ---
+        # 回音壁
+
+        等待补充定义。
+        """,
+    )
+    _write(
+        kb_path / "index.root.md",
+        """
+        ---
+        kind: index
+        segment: root
+        ---
+        # 根索引
+
+        直接把常用正式条目挂在根索引下。
+
+        - [[热备份]]
+        """,
+    )
+    write_test_config(
+        tmp_path,
+        kb_path=kb_path,
+        state_dir=tmp_path / "state",
+    )
+    data = inventory(kb_path)
+
+    context = prepare_explore_context("什么是热备份？", inventory_data=data)
+
+    assert context["index_routing"]["selected_indexes"]
+    assert context["index_routing"]["selected_indexes"][0]["name"] == "index.root"
+    assert context["index_routing"]["preferred_entries"] == ["热备份"]
+    assert any(item["name"] == "热备份" for item in context["expanded_candidates"])
+
+
 def test_prepare_explore_context_keeps_shortlist_priority_in_expanded_candidates(
     tmp_path: Path,
 ) -> None:

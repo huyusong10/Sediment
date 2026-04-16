@@ -1,83 +1,82 @@
-# Sediment 测试用例设计思路（E2E + DT）
+# Sediment 测试设计契约
 
-本文档描述新增测试的设计目标：在“乱序执行 / 乱序操作 / 异常恢复”下验证系统稳定性。
+本文档约束测试如何保护 Sediment 的稳定对外行为，并尽量不给未来重构制造负担。
 
-## 1. 设计原则
+## 1. 核心目标
 
-- **用户真实顺序优先**：优先覆盖用户在生产中最可能的错误顺序，而非理想 Happy Path。
-- **状态可重复验证**：每个用例都要有可观测输出（HTTP 状态码、CLI 返回码、JSON 字段）。
-- **最小依赖**：在测试内尽量使用项目已有 fixture 和 mock backend，避免引入外部网络/模型依赖。
-- **可扩展**：用例按“场景族”组织，后续可在同一族里快速扩展。
+- 测试保护对外契约，而不是当前实现细节。
+- 只有用户可感知行为、公开接口、稳定数据结构与核心流程值得被锁定。
+- 内部重构在不改变契约的前提下，应尽量不触发测试修改。
 
-## 2. 场景族划分
+## 2. 分层策略
 
-### A. CLI 乱序执行（Disorder CLI）
+| 层级 | 保护对象 | 适用场景 | 当前主要落点 |
+| --- | --- | --- | --- |
+| E2E | 核心用户旅程与页面级行为 | 登录、提交、审核、后台工作台、前台搜索 | `tests/test_web_browser_e2e.py` |
+| 接口 / 集成 | 路由、CLI、模块边界、流式协议 | Admin API、CLI JSON 输出、Explore runtime、文件管理接口 | `tests/test_web_e2e.py`、`tests/test_cli.py`、`tests/test_explore_runtime.py` |
+| 单元 | 稳定且复杂的规则 | 只有规则复杂且实现独立时才新增 | 按需新增，不默认铺开 |
 
-重点覆盖：
+## 3. 编写规则
 
-1. **stop-before-start**：先停后启是否幂等。
-2. **double-start**：重复 start 是否正确报错并保护实例。
-3. **unlock-all-deleted 空扫描**：批量解锁命令在无目标时是否稳定退出。
-4. **init on KB root**：在知识库目录内 init 是否正确识别并回退到父实例。
-5. **quartz status/build-if-missing**：runtime/site 不同状态下命令是否可安全执行。
+- 面向契约，不面向私有实现：断言状态码、返回结构、消息类型、用户可见结果，不断言内部变量或调用顺序。
+- 优先使用稳定锚点：`data-testid`、语义角色、公开 API 字段；避免依赖脆弱 DOM 层级或具体 CSS 数值。
+- 样式与文案微调默认不应触发回归；只有当它们本身构成契约时才应被测试，例如 locale 单语显示、页面级标题是否存在、布局区块的相对关系。
+- 对布局只验证稳定的结构关系，例如“右侧上下堆叠”或“Live 位于工作台下方”，不锁死像素、颜色、圆角、渐变等视觉实现。
+- 对运行时诊断只验证是否有可观测事件与终态，不依赖具体日志模板或 mock 路径文本。
 
-对应实现文件：`tests/test_cli_disorder_e2e.py`。
+## 4. 当前关键契约
 
-### B. 网页端乱序操作（Disorder Web）
+### 4.1 CLI 与运行时
 
-重点覆盖：
+1. `status`、`status queue` 等 JSON 输出必须保持稳定字段，支撑自动化和脚本调用。
+2. `kb explore --json` 的成功结果必须来自 Explore runtime；当 runtime 失败时必须返回显式错误，而不是伪造固定答案。
+3. Explore runtime 在 Agent 输出无效时必须暴露可诊断原因，至少包含失败原因与可观测重试。
 
-1. **未登录直接调用 Admin API**：必须 401。
-2. **错误 token 后恢复登录**：失败后可恢复，后续接口行为符合预期。
-3. **logout 后继续操作**：会话失效后应拒绝敏感操作。
-4. **越序编辑不存在条目**：应返回 404/错误，而不是写入脏数据。
+### 4.2 前台 Web
 
-对应实现文件：`tests/test_web_disorder_e2e.py`。
+4. 首页、搜索页、条目页、提交页都必须保留稳定的 page-level heading 语义；首页允许以 `sr-only` 形式避免重复可见标题。
+5. 搜索建议弹层不能推挤主搜索按钮、统计区和最近更新区。
+6. 前台一级导航与 utility 控件必须视觉分区；`Quartz` 继续作为只读入口存在。
+7. 接入教程必须锁定“MCP 或 Skill”的决策结构，并通过 compact tip 承载补充说明，而不是在首屏平铺长文案。
+8. 教程页必须同时说明 `knowledge_ask` 快答路径与 `knowledge_list` / `knowledge_read` 白盒推导路径。
+9. 默认语言契约为英文优先；显式中文参数或中文环境信号才切换到中文。
 
-### C. 网页表面结构回归（Web Surface Regressions）
+### 4.3 后台 Web
 
-重点覆盖：
+10. `/admin/overview` 必须稳定呈现总览、治理焦点和最近活动，长列表采用可滚动容器，不无限拉长页面。
+11. `/admin/kb` 只负责 ingest、tidy、explore 三类动作，不承载文件编辑工作区。
+12. `/admin/kb` 桌面端必须维持“左上 ingest、右上 tidy、右下 explore、下方 Live”的工作台结构。
+13. `/admin/kb` 的说明性文案默认折叠进 tip，避免把长说明直接铺进卡片正文。
+14. `/admin/kb` 的 Live 区必须作为共享诊断通道存在；explore 运行时至少暴露请求、运行输出与终态，而不是只显示静态“加载中”。
+15. `/admin/kb` 各分区的状态条必须只反映各自动作；一个分区失败不能覆盖其他分区的状态，跨动作诊断统一进入 Live。
+16. 后台 explore 的成功结果必须来自 Agent 输出；当 Agent 输出无效或 CLI 失败时，公开入口必须返回显式失败，不得回退成固定代码生成的回答卡片。
+17. `/admin/files` 必须独立为一级功能，提供结构浏览、搜索建议、在线编辑与健康联动。
+18. `/admin/system` 必须保持 owner-only，并提供原始配置、解析后配置与重启入口。
+19. 中文后台页面必须直接使用当前 locale，不把通用英文词与中文拼接在同一标题、按钮或主区块里。
 
-1. **suggestion-overlay-no-shift**：搜索建议/状态文案出现后，搜索按钮与主要模块位置保持稳定。
-2. **semantic-page-heading**：知识库概览页允许使用 sr-only 语义标题避免重复，其余关键页面必须保留可见 page heading。
-3. **entry-title-sync**：条目详情页在异步加载后，hero 标题与浏览器标题同步到 canonical title。
-4. **nav-vs-utility-separation**：一级导航必须左对齐且等宽等高，utility 控件必须右对齐并使用不同视觉样式；`Quartz` 主导航默认新标签打开；内容区中的并排 CTA 也必须保持等宽等高。
-5. **locale-default-english**：未显式指定语言且未检测到中文环境时，Web 默认显示英文。
-6. **tutorial-path-decision**：接入教程页的顶层决策必须是 “MCP 还是 Skill”，而不是推荐工作流步骤。
-7. **tutorial-agent-paths**：接入教程页必须同时说明 `knowledge_ask` 的服务端快答路径，以及 `knowledge_list` / `knowledge_read` 的只读推导路径，并提供自然语言版 Agent 接入示例。
-8. **tutorial-compact-tips**：接入教程中的长说明默认以 compact note 呈现，并通过统一位置的 tip 展开完整内容。
-9. **tutorial-downloads**：接入教程页必须暴露 MCP 端点说明，并且只提供面向本地推导的单个内置 SKILL。
-10. **tutorial-endpoint-origin**：教程页的 MCP 端点必须优先反映 `public_base_url` / 受信代理头，而不是硬编码本地监听地址。
-11. **admin-kb-management-surface**：后台知识库管理页必须只保留 ingest、单输入 tidy 与 explore 三类能力，不再夹带文件编辑工作区。
-12. **admin-file-management-surface**：后台文件管理页必须作为独立一级功能存在，并提供 index 驱动的结构浏览、自动建议搜索、健康联动和大尺寸 Markdown 编辑区。
-13. **admin-settings-owner-only**：后台设置页必须 owner-only，并提供 raw YAML 编辑、resolved config 只读视图，以及一键重启服务入口。
-14. **overview-scroll-caps**：后台总览中的治理焦点列表和最近活动列表都必须限制最大高度并改为滚动容器，避免页面被长队列无限拉长。
-15. **admin-file-search-keyboard-nav**：后台文件搜索建议必须支持上下键切换高亮项，Enter 打开当前高亮项，且显式选择不能被 exact-match 自动载入覆盖。
+### 4.4 乱序与恢复
 
-对应实现文件：`tests/test_web_e2e.py`、`tests/test_web_browser_e2e.py`、`tests/test_web_ui_style.py`。
+20. 未登录、错误 token、logout 后继续操作等乱序路径必须稳定失败，并且后续可恢复到正常工作流。
+21. stop-before-start、double-start、空目标批量操作等 CLI 乱序场景必须稳定退出，不破坏实例状态。
 
-## 3. DT（Destructive / Disorder Tolerance）策略
+## 5. 何时新增或更新测试
 
-新增 DT 用例关注两个维度：
+- 新增或修改公开路由、CLI 命令、核心页面工作流、核心组件对外行为：新增或更新集成 / E2E。
+- 修改内部实现但不改契约：优先不改测试；若失败，先判断是否破坏了契约。
+- 纯样式微调、排版调整、文案润色：默认不新增测试，也不应导致已有契约测试失败。
+- 新增复杂而稳定的规则计算：仅在规则本身具备长期稳定性时补单元测试。
 
-- **破坏性顺序**：先做本不该先做的动作（如 stop、admin 操作、review 操作）。
-- **容错恢复**：错误发生后系统是否还能回到可操作状态（如错误登录后重新登录）。
+## 6. 文件映射
 
-建议后续继续扩展：
-
-- 并发提交 + 并发 ingest 的竞态用例。
-- `server start/stop/restart` 快速抖动测试。
-- Quartz build 中断后的二次恢复测试。
-- instance unlock/remove 与 Windows 文件锁的长链路回归。
-
-## 4. 质量门禁建议
-
-- 将 `test_cli_disorder_e2e.py` 与 `test_web_disorder_e2e.py` 纳入 CI 必跑集合。
-- 对关键命令增加平台矩阵（Linux + Windows）回归。
-- 对失败场景固定断言：返回码、错误信息关键字、状态字段。
-
-## 5. 验收标准
-
-- 乱序场景下：**系统不崩溃**、**错误可预期**、**可恢复**。
-- CLI/网页端操作后：状态数据一致（review、job、session、daemon）。
-- 失败路径可追踪（日志 + 明确错误响应）。
+- `tests/test_web_browser_e2e.py`
+  - 保护关键用户旅程、主要页面布局关系、后台工作台可操作性。
+- `tests/test_web_e2e.py`
+  - 保护公开 Web 路由、流式接口、locale 输出与页面表面契约。
+- `tests/test_cli.py`
+  - 保护 CLI JSON 契约与命令级边界行为。
+- `tests/test_explore_runtime.py`
+  - 保护 Explore runtime 的 Agent 输出校验、错误显式化与可诊断性。
+- `tests/test_web_ui_style.py`
+  - 只保护共享 shell 与关键页面的稳定表面钩子，不锁定具体 CSS 实现细节。
+- `tests/test_cli_disorder_e2e.py`、`tests/test_web_disorder_e2e.py`
+  - 保护乱序操作与失败恢复能力。

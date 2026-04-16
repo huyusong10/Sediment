@@ -1250,11 +1250,14 @@ def kb_explore(args) -> int:
         f"Exploring the knowledge base for: {args.question}",
         enabled=progress_enabled(args),
     )
-    result = _server_module().answer_question(
-        args.question,
-        kb_path().resolve(),
-        project_root(),
-    )
+    try:
+        result = _server_module().answer_question_agent_only(
+            args.question,
+            kb_path().resolve(),
+            project_root(),
+        )
+    except RuntimeError as exc:
+        result = _server_module()._error_payload(str(exc))
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0

@@ -5,6 +5,11 @@
   const INITIAL_QUARTZ = pageData.quartz || {};
   const { collectUploads, escapeHtml, fetchJson, renderMarkdown } = shell;
   const isZh = document.documentElement.dataset.locale === "zh";
+  const WORKBENCH_STATUS_IDS = {
+    ingest: "admin-ingest-status",
+    tidy: "admin-tidy-status",
+    explore: "admin-explore-status",
+  };
   const state = {
     reviews: [],
     reviewDetails: {},
@@ -29,6 +34,54 @@
   function setSectionStatus(id, message) {
     const node = document.getElementById(id);
     if (node) node.textContent = String(message || "");
+  }
+
+  function workbenchStatusId(section) {
+    return WORKBENCH_STATUS_IDS[String(section || "")] || "";
+  }
+
+  function setWorkbenchStatus(section, message) {
+    const id = workbenchStatusId(section);
+    if (id) setSectionStatus(id, message);
+  }
+
+  function liveLogNode() {
+    return document.getElementById("admin-kb-live-log");
+  }
+
+  function setLiveStatus(message) {
+    const node = document.getElementById("admin-kb-live-status");
+    if (node) node.textContent = String(message || "");
+  }
+
+  function setExploreStatus(message) {
+    setWorkbenchStatus("explore", message);
+  }
+
+  function formatLiveTimestamp() {
+    return new Date().toLocaleTimeString();
+  }
+
+  function appendLiveLog(label, message) {
+    const node = liveLogNode();
+    const text = String(message || "").trim();
+    if (!node || !text) return;
+    const readyText = String(UI.live_ready || "LIVE READY").trim();
+    const existing = String(node.value || "").trim();
+    const prefix = String(label || UI.live_status_label || "Status");
+    const line = `[${formatLiveTimestamp()}] ${prefix}: ${text}`;
+    node.value = !existing || existing === readyText || existing === "LIVE READY"
+      ? line
+      : `${node.value}\n${line}`;
+    node.scrollTop = node.scrollHeight;
+  }
+
+  function clearLiveLog() {
+    const node = liveLogNode();
+    if (!node) return;
+    node.value = UI.live_ready || "LIVE READY";
+    setLiveStatus(UI.live_ready || "");
+    setAdminMessage(UI.live_cleared || "");
   }
 
   function formatDateTime(value) {
@@ -58,16 +111,51 @@
     return fetchJson(url, options);
   }
 
-  function showAdminError(error) {
-    const message = error && error.message ? error.message : "Unknown error";
-    const diffNode = document.getElementById("diff-view");
-    if (diffNode) diffNode.textContent = message;
-    const exploreNode = document.getElementById("admin-explore-result");
-    if (exploreNode && UI.section === "kb") exploreNode.textContent = message;
-    setSectionStatus("editor-status", message);
-    setSectionStatus("admin-ingest-status", message);
-    setSectionStatus("settings-status", message);
-    setAdminMessage(message);
+  function showAdminError(error, options = {}) {
+    const message = error instanceof Error ? error.message : String(error || "Unknown error");
+    const statusIds = Array.isArray(options.statusIds)
+      ? options.statusIds.map((value) => String(value || "")).filter(Boolean)
+      : [];
+    if (options.diff) {
+      const diffNode = document.getElementById("diff-view");
+      if (diffNode) diffNode.textContent = message;
+    }
+    if (options.live && options.appendLive !== false) {
+      appendLiveLog(UI.live_error_label || "Error", message);
+    }
+    if (options.live) {
+      setLiveStatus(message);
+    }
+    statusIds.forEach((id) => setSectionStatus(id, message));
+    if (options.adminMessage !== false) setAdminMessage(message);
+  }
+
+  function createErrorHandler(options = {}) {
+    return (error) => showAdminError(error, options);
+  }
+
+  function workbenchErrorOptions(section, extra = {}) {
+    const statusId = workbenchStatusId(section);
+    return {
+      ...extra,
+      live: true,
+      statusIds: statusId ? [statusId] : [],
+    };
+  }
+
+  function logWorkbenchRequest(section, message, options = {}) {
+    appendLiveLog(UI.live_request_label || "Request", message);
+    if (options.liveStatus) setLiveStatus(options.liveStatus);
+    if (options.sectionStatus) setWorkbenchStatus(section, options.sectionStatus);
+  }
+
+  function completeWorkbenchAction(section, message, options = {}) {
+    if (options.logResponse !== false) {
+      appendLiveLog(UI.live_response_label || "Response", message);
+    }
+    setWorkbenchStatus(section, options.sectionStatus || message);
+    setLiveStatus(options.liveStatus || message);
+    setAdminMessage(options.adminMessage || message);
   }
 
   function roleLabel(role) {
@@ -844,7 +932,7 @@
       fileSearchAutoLoadTimer = window.setTimeout(() => {
         const latestQuery = String(document.getElementById("admin-file-search")?.value || "").trim().toLowerCase();
         if (latestQuery === normalizedQuery) {
-          openDocument(exactMatch.name).catch(showAdminError);
+          openDocument(exactMatch.name).catch(createErrorHandler({ statusIds: ["editor-status"] }));
         }
       }, 180);
     }
@@ -941,15 +1029,10 @@
     setAdminMessage(UI.quartz_build_success);
   }
 
-  async function runExplore() {
-    const question = (document.getElementById("admin-explore-input")?.value || "").trim();
-    const payload = await fetchAdmin("/api/admin/explore", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question }),
-    });
+  function renderExploreResult(payload) {
     const node = document.getElementById("admin-explore-result");
     if (!node) return;
+    node.className = "markdown";
     node.innerHTML = `
       <div class="card">
         <div class="row spread">
@@ -962,7 +1045,147 @@
         <div class="subtle">${escapeHtml(UI.explore_gaps)}: ${escapeHtml((payload.gaps || []).join(" | ") || "-")}</div>
       </div>
     `;
-    setAdminMessage((payload.answer || "").slice(0, 140));
+  }
+
+  function renderExploreFailure(message) {
+    const node = document.getElementById("admin-explore-result");
+    if (!node) return;
+    node.className = "markdown";
+    node.innerHTML = `
+      <div class="card">
+        <div class="row spread">
+          <strong>${escapeHtml(UI.explore_failed || "Explore failed")}</strong>
+          <span class="tag danger">${escapeHtml(UI.live_error_label || "Error")}</span>
+        </div>
+        <div class="subtle">${escapeHtml(message || "")}</div>
+        <div class="subtle">${escapeHtml(UI.explore_failed_hint || "")}</div>
+      </div>
+    `;
+  }
+
+  async function readResponseError(response) {
+    const rawText = await response.text();
+    try {
+      const payload = JSON.parse(rawText);
+      return payload.error || payload.message || rawText || `HTTP ${response.status}`;
+    } catch {
+      return rawText || `HTTP ${response.status}`;
+    }
+  }
+
+  function liveLabelForExploreEvent(event) {
+    if (event.type === "command") return UI.live_command_label || "Command";
+    if (event.type === "cli-output" && event.stream === "stderr") return UI.live_stderr_label || "Stderr";
+    if (event.type === "cli-output") return UI.live_stdout_label || "Stdout";
+    if (event.type === "retry") return UI.live_retry_label || "Retry";
+    if (event.type === "error") return UI.live_error_label || "Error";
+    if (event.type === "result") return UI.live_result_label || "Result";
+    if (event.type === "done") return UI.live_done_label || "Done";
+    return UI.live_status_label || "Status";
+  }
+
+  function liveMessageForExploreEvent(event) {
+    if (event.type === "result") {
+      const payload = event.payload || {};
+      const sources = Array.isArray(payload.sources) && payload.sources.length
+        ? payload.sources.join(", ")
+        : "-";
+      return `${UI.explore_completed || "Explore completed."} sources=${sources}`;
+    }
+    if (event.raw_excerpt) {
+      return `${event.message || ""} | ${event.raw_excerpt}`;
+    }
+    return event.message || "";
+  }
+
+  async function consumeNdjsonStream(response, onEvent) {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      const fallback = await response.text();
+      for (const line of fallback.split(/\n+/)) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        onEvent(JSON.parse(trimmed));
+      }
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      while (buffer.includes("\n")) {
+        const newlineIndex = buffer.indexOf("\n");
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!line) continue;
+        onEvent(JSON.parse(line));
+      }
+      if (done) break;
+    }
+    const tail = buffer.trim();
+    if (tail) onEvent(JSON.parse(tail));
+  }
+
+  async function runExplore() {
+    const question = (document.getElementById("admin-explore-input")?.value || "").trim();
+    if (!question) throw new Error(isZh ? "问题不能为空。" : "Question must not be empty.");
+    const node = document.getElementById("admin-explore-result");
+    if (node) {
+      node.className = "markdown empty";
+      node.textContent = UI.explore_running || "";
+    }
+    setExploreStatus(UI.explore_running || "");
+    setLiveStatus(UI.live_running || "");
+    logWorkbenchRequest("explore", `POST /api/admin/explore/live · question="${question}"`, {
+      liveStatus: UI.live_running || "",
+      sectionStatus: UI.explore_running || "",
+    });
+
+    let finalPayload = null;
+    let finalError = "";
+    const response = await fetch("/api/admin/explore/live", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question }),
+      credentials: "same-origin",
+    });
+    if (!response.ok) {
+      finalError = await readResponseError(response);
+      renderExploreFailure(finalError);
+      showAdminError(finalError, workbenchErrorOptions("explore"));
+      return;
+    }
+
+    await consumeNdjsonStream(response, (event) => {
+      appendLiveLog(liveLabelForExploreEvent(event), liveMessageForExploreEvent(event));
+      if (["status", "retry", "command", "heartbeat"].includes(event.type)) {
+        setExploreStatus(event.message || UI.explore_running || "");
+      }
+      if (event.type === "result") {
+        finalPayload = event.payload || null;
+        renderExploreResult(finalPayload || {});
+        setWorkbenchStatus("explore", UI.explore_completed || "");
+        setAdminMessage(String((finalPayload?.answer || "")).slice(0, 140));
+        return;
+      }
+      if (event.type === "error") {
+        finalError = event.message || UI.explore_failed || "Explore failed";
+        renderExploreFailure(finalError);
+        showAdminError(finalError, { ...workbenchErrorOptions("explore"), appendLive: false });
+        return;
+      }
+      if (event.type === "done") {
+        setLiveStatus(event.ok ? (UI.explore_completed || "") : (finalError || UI.explore_failed || ""));
+      }
+    });
+
+    if (!finalPayload && !finalError) {
+      finalError = UI.explore_no_result || "The explore run finished without a result.";
+      renderExploreFailure(finalError);
+      showAdminError(finalError, workbenchErrorOptions("explore"));
+    }
   }
 
   async function triageSubmission(id, status) {
@@ -976,22 +1199,28 @@
   }
 
   async function runIngest(id) {
+    logWorkbenchRequest("ingest", `POST /api/admin/submissions/${id}/run-ingest`, {
+      liveStatus: UI.live_running || "",
+    });
     const job = await fetchAdmin(`/api/admin/submissions/${encodeURIComponent(id)}/run-ingest`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    setAdminMessage(`${UI.ingest_done}${(job.id || "").slice(0, 8)}`);
+    completeWorkbenchAction("ingest", `${UI.ingest_done}${(job.id || "").slice(0, 8)}`);
     await refreshCurrentPage();
   }
 
   async function runTidy(options = {}) {
+    logWorkbenchRequest("tidy", `POST /api/admin/tidy · ${JSON.stringify(options)}`, {
+      liveStatus: UI.live_running || "",
+    });
     const job = await fetchAdmin("/api/admin/tidy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(options),
     });
-    setAdminMessage(`${UI.tidy_done}${(job.id || "").slice(0, 8)}`);
+    completeWorkbenchAction("tidy", `${UI.tidy_done}${(job.id || "").slice(0, 8)}`);
     await refreshCurrentPage();
   }
 
@@ -1132,6 +1361,9 @@
   async function uploadAndIngest() {
     const files = currentIngestFiles();
     if (!files.length) throw new Error(UI.ingest_file_required);
+    logWorkbenchRequest("ingest", `POST /api/admin/ingest/document · files=${files.length}`, {
+      liveStatus: UI.live_running || "",
+    });
     const uploads = await collectUploads(files);
     const payload = await fetchAdmin("/api/admin/ingest/document", {
       method: "POST",
@@ -1142,11 +1374,14 @@
         mime_type: files.length === 1 ? (files[0].type || "application/octet-stream") : "application/zip",
       }),
     });
-    setSectionStatus(
-      "admin-ingest-status",
-      `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)} · ${UI.ingest_submission_prefix || "submission"} ${(payload.submission?.id || "").slice(0, 8)}`
+    completeWorkbenchAction(
+      "ingest",
+      `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)} · ${UI.ingest_submission_prefix || "submission"} ${(payload.submission?.id || "").slice(0, 8)}`,
+      {
+        liveStatus: UI.ingest_uploaded,
+        adminMessage: `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)}`,
+      }
     );
-    setAdminMessage(`${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)}`);
     state.ingestFiles = [];
     if (document.getElementById("admin-ingest-file")) document.getElementById("admin-ingest-file").value = "";
     if (document.getElementById("admin-ingest-folder")) document.getElementById("admin-ingest-folder").value = "";
@@ -1253,7 +1488,7 @@
   function bindClick(containerId, handler) {
     const node = document.getElementById(containerId);
     if (!node) return;
-    node.addEventListener("click", (event) => handler(event).catch(showAdminError));
+    node.addEventListener("click", (event) => handler(event).catch(createErrorHandler()));
   }
 
   bindClick("submission-list", async (event) => {
@@ -1266,7 +1501,11 @@
       return;
     }
     if (button.dataset.action === "run-ingest") {
-      await withBusyButton(button, UI.busy_queue, () => runIngest(button.dataset.submissionId || ""));
+      try {
+        await withBusyButton(button, UI.busy_queue, () => runIngest(button.dataset.submissionId || ""));
+      } catch (error) {
+        showAdminError(error, workbenchErrorOptions("ingest"));
+      }
     }
   });
 
@@ -1320,13 +1559,20 @@
 
   document.getElementById("admin-logout-button")?.addEventListener("click", () => logout().catch(showAdminError));
   document.getElementById("admin-explore-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("admin-explore-button"), UI.busy_loading, runExplore).catch(showAdminError)
+    withBusyButton(document.getElementById("admin-explore-button"), UI.busy_loading, runExplore).catch((error) => {
+      renderExploreFailure(error && error.message ? error.message : String(error || ""));
+      showAdminError(error, workbenchErrorOptions("explore"));
+    })
   );
   document.getElementById("manual-tidy-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("manual-tidy-button"), UI.busy_queue, runManualTidy).catch(showAdminError)
+    withBusyButton(document.getElementById("manual-tidy-button"), UI.busy_queue, runManualTidy).catch(
+      createErrorHandler(workbenchErrorOptions("tidy"))
+    )
   );
   document.getElementById("save-entry-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("save-entry-button"), UI.busy_saving, saveEntry).catch(showAdminError)
+    withBusyButton(document.getElementById("save-entry-button"), UI.busy_saving, saveEntry).catch(
+      createErrorHandler({ statusIds: ["editor-status"] })
+    )
   );
   document.getElementById("create-user-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("create-user-button"), UI.busy_saving, createUser).catch(showAdminError)
@@ -1347,22 +1593,31 @@
     withBusyButton(document.getElementById("admin-quartz-build-button"), UI.busy_queue, runQuartzBuild).catch(showAdminError)
   );
   document.getElementById("admin-ingest-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("admin-ingest-button"), UI.busy_queue, uploadAndIngest).catch(showAdminError)
+    withBusyButton(document.getElementById("admin-ingest-button"), UI.busy_queue, uploadAndIngest).catch(
+      createErrorHandler(workbenchErrorOptions("ingest"))
+    )
   );
   document.getElementById("settings-reload-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("settings-reload-button"), UI.busy_loading, reloadSettingsFromDisk).catch(showAdminError)
+    withBusyButton(document.getElementById("settings-reload-button"), UI.busy_loading, reloadSettingsFromDisk).catch(
+      createErrorHandler({ statusIds: ["settings-status"] })
+    )
   );
   document.getElementById("settings-save-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("settings-save-button"), UI.busy_saving, saveSettingsConfig).catch(showAdminError)
+    withBusyButton(document.getElementById("settings-save-button"), UI.busy_saving, saveSettingsConfig).catch(
+      createErrorHandler({ statusIds: ["settings-status"] })
+    )
   );
   document.getElementById("settings-restart-button")?.addEventListener("click", () =>
-    withBusyButton(document.getElementById("settings-restart-button"), UI.busy_loading, restartSettingsService).catch(showAdminError)
+    withBusyButton(document.getElementById("settings-restart-button"), UI.busy_loading, restartSettingsService).catch(
+      createErrorHandler({ statusIds: ["settings-status"] })
+    )
   );
+  document.getElementById("admin-kb-live-clear")?.addEventListener("click", clearLiveLog);
   document.getElementById("editor-content")?.addEventListener("input", (event) => {
     updateEditorPreview(event.target.value || "");
   });
   document.getElementById("admin-file-search")?.addEventListener("input", () => {
-    updateFileSuggestions().catch(showAdminError);
+    updateFileSuggestions().catch(createErrorHandler({ statusIds: ["admin-file-search-status"] }));
   });
   document.getElementById("admin-file-search")?.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -1390,7 +1645,7 @@
     });
     const selected = exactMatch || activeFileSuggestion();
     if (selected) {
-      openDocument(selected.name).catch(showAdminError);
+      openDocument(selected.name).catch(createErrorHandler({ statusIds: ["editor-status"] }));
     }
   });
   document.getElementById("admin-file-search")?.addEventListener("blur", () => {
@@ -1439,5 +1694,5 @@
       updateEditorPreview(document.getElementById("editor-content")?.value || "");
       setAdminMessage(isZh ? "管理台已就绪。" : "Admin ready.");
     })
-    .catch(showAdminError);
+    .catch(createErrorHandler());
 })();

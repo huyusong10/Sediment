@@ -7,6 +7,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from sediment import server
 from tests.config_helpers import write_test_config
 
@@ -246,6 +248,35 @@ def test_answer_question_returns_explicit_error_when_cli_is_unavailable(
     assert result["sources"] == []
     assert result["confidence"] == "low"
     assert "unavailable" in result["error"].lower()
+
+
+def test_answer_question_agent_only_surfaces_invalid_json_with_trace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root, kb_path = _build_project(tmp_path)
+    cli_path = Path(__file__).parent / "fixtures" / "mock_workflow_cli.py"
+
+    monkeypatch.setenv("MOCK_EXPLORE_INVALID_JSON", "1")
+    server_module = _reload_server(
+        project_root,
+        kb_path,
+        command=[sys.executable, str(cli_path)],
+    )
+
+    events: list[dict[str, object]] = []
+
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        server_module.answer_question_agent_only(
+            "什么是热备份？",
+            kb_path,
+            project_root,
+            emit=events.append,
+        )
+
+    assert any(event.get("type") == "command" for event in events)
+    assert any(event.get("type") == "retry" for event in events)
+    assert any("not-json-response" in str(event.get("raw_excerpt", "")) for event in events)
 
 
 def test_answer_question_uses_local_fast_path_when_enabled(

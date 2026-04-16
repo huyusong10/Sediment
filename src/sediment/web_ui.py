@@ -94,8 +94,8 @@ def _portal_page_title(page: str, *, is_zh: bool, entry_name: str = "") -> str:
 def _admin_page_title(section: str, *, is_zh: bool) -> str:
     return {
         "overview": "总览" if is_zh else "Overview",
-        "kb": "KB Management 知识库管理" if is_zh else "Knowledge base management",
-        "files": "Files 文件管理" if is_zh else "File management",
+        "kb": "知识库管理" if is_zh else "Knowledge base management",
+        "files": "文件管理" if is_zh else "File management",
         "reviews": "评审" if is_zh else "Reviews",
         "users": "用户" if is_zh else "Users",
         "system": "设置" if is_zh else "Settings",
@@ -520,7 +520,7 @@ def portal_html(
         "DECISION_CARDS": _tutorial_decision_cards(active_locale),
         "TOOLS_TITLE": "工具分工" if is_zh else "Tool roles",
         "MCP_TOOL_CARDS": _tutorial_mcp_tool_cards(active_locale),
-        "MCP_EXAMPLES_TITLE": "如何让 Agent 用对工具" if is_zh else "How to steer the agent toward the right tools",
+        "MCP_EXAMPLES_TITLE": "如何让智能体用对工具" if is_zh else "How to steer the agent toward the right tools",
         "MCP_EXAMPLES_INTRO": _tutorial_tip(
             (
                 "大多数 Agent 运行时都支持“在任务里点名 server 或 tool”。"
@@ -637,13 +637,13 @@ def portal_html(
             "submit_file_busy": "上传中..." if is_zh else "Uploading...",
             "file_required": "请先选择文件、压缩包或文件夹" if is_zh else "Select a file, folder, or archive first.",
             "file_read_error": "读取文件失败" if is_zh else "Failed to read file.",
-            "analysis_title": "Agent 建议" if is_zh else "Agent recommendation",
+            "analysis_title": "智能建议" if is_zh else "Agent recommendation",
             "analysis_related_empty": "暂无明显关联条目" if is_zh else "No obvious related entries.",
             "analysis_title_label": "建议标题" if is_zh else "Suggested title",
             "analysis_type_label": "建议类型" if is_zh else "Suggested type",
             "analysis_risk_label": "风险" if is_zh else "Risk",
             "analysis_action_label": "下一步" if is_zh else "Next step",
-            "analysis_note_label": "Committer 提示" if is_zh else "Committer note",
+            "analysis_note_label": "提交者提示" if is_zh else "Committer note",
             "submit_text_success": "文本提交成功，submission_id=" if is_zh else "Text submission created, submission_id=",
             "submit_file_success": "文档提交成功，submission_id=" if is_zh else "Document submission created, submission_id=",
             "submitted_text_prefix": "已提交文本草案：" if is_zh else "Submitted text draft: ",
@@ -720,10 +720,10 @@ def admin_login_html(*, knowledge_name: str, instance_name: str, locale: str, ne
         KNOWLEDGE_NAME=knowledge_name,
         INSTANCE_NAME=instance_name,
         PAGE_TITLE=page_title,
-        TOKEN_LABEL="登录 Token" if is_zh else "Sign-in token",
-        TOKEN_PLACEHOLDER="输入 owner 或 committer token" if is_zh else "Enter an owner or committer token",
+        TOKEN_LABEL="登录令牌" if is_zh else "Sign-in token",
+        TOKEN_PLACEHOLDER="输入所有者或提交者令牌" if is_zh else "Enter an owner or committer token",
         OPEN_ADMIN_LABEL="进入管理台" if is_zh else "Open admin",
-        LOGIN_STATUS="需要有效 token 才能进入后台。" if is_zh else "A valid token is required.",
+        LOGIN_STATUS="需要有效令牌才能进入后台。" if is_zh else "A valid token is required.",
         **nav,
     )
     return shared_shell(
@@ -798,7 +798,7 @@ def admin_html(
         "overview": _render_html_template(
             "admin-overview-section.html",
             QUEUE_TITLE="工作队列" if is_zh else "Queue",
-            QUEUE_NOTE="提交 / review / 任务" if is_zh else "submissions / reviews / jobs",
+            QUEUE_NOTE="提交 / 评审 / 任务" if is_zh else "submissions / reviews / jobs",
             HEALTH_TITLE="治理健康度" if is_zh else "Health",
             HEALTH_NOTE="问题分布与阻断项" if is_zh else "severity distribution and blockers",
             ISSUE_TITLE="治理焦点" if is_zh else "Priority issues",
@@ -808,8 +808,17 @@ def admin_html(
         ),
         "kb": _render_html_template(
             "admin-kb-section.html",
-            INGEST_TITLE="Ingest 导入" if is_zh else "Ingest",
-            INGEST_NOTE="拖入文档后直接入队" if is_zh else "drop documents and enqueue immediately",
+            INGEST_TITLE="导入" if is_zh else "Ingest",
+            INGEST_TIP=_tutorial_tip(
+                "拖入文档后直接入队。" if is_zh else "Drop documents and enqueue immediately.",
+                (
+                    "支持 Markdown、文本、DOCX、PPTX 和 zip；也可以直接选择文件或文件夹。上传后会先创建 submission，再由 ingest 任务进入评审队列。"
+                    if is_zh
+                    else "Supports Markdown, text, DOCX, PPTX, and zip. You can also choose files or folders directly. Uploads first create a submission, then enqueue an ingest job for review."
+                ),
+                locale=active_locale,
+                testid="admin-kb-ingest-tip",
+            ),
             INGEST_DROPZONE_TITLE="拖入文档或压缩包" if is_zh else "Drop documents or an archive",
             INGEST_DROPZONE_BODY=(
                 "支持 Markdown、文本、DOCX、PPTX 和 zip；也可以直接选择文件或文件夹。"
@@ -820,21 +829,34 @@ def admin_html(
             INGEST_FOLDER_LABEL="选择文件夹" if is_zh else "Choose folder",
             INGEST_SELECTION_LABEL="当前导入选择" if is_zh else "Current import selection",
             INGEST_SELECTION_EMPTY="还没有选择任何文档。" if is_zh else "No documents selected yet.",
-            INGEST_BUTTON="上传并运行 Ingest" if is_zh else "Upload and run ingest",
-            INGEST_STATUS="上传完成后会在这里显示 submission 与 job 信息。" if is_zh else "Submission and job feedback appears here after upload.",
-            TIDY_TITLE="Tidy 整理" if is_zh else "Tidy",
-            TIDY_NOTE="输入原因后直接发起治理" if is_zh else "enter a reason and queue maintenance",
-            TIDY_REASON_LABEL="本次 tidy 原因" if is_zh else "Tidy reason",
-            TIDY_REASON_PLACEHOLDER="例如：整理 dangling links 与未覆盖正式条目" if is_zh else "Example: clean up dangling links and uncovered formal entries",
-            TIDY_BUTTON="执行 Tidy" if is_zh else "Run tidy",
-            TIDY_HINT_TITLE="默认范围" if is_zh else "Default scope",
-            TIDY_HINT_BODY=(
-                "这里默认按阻断性健康问题执行；如果你需要更大范围的整理，建议走 CLI 或专门任务。"
-                if is_zh
-                else "This button targets blocking health issues by default. Use the CLI or a dedicated task when you need a broader cleanup."
+            INGEST_BUTTON="上传并执行导入" if is_zh else "Upload and run ingest",
+            INGEST_STATUS="Live 区会同步显示请求与任务反馈。" if is_zh else "The Live panel mirrors request and job feedback.",
+            TIDY_TITLE="整理" if is_zh else "Tidy",
+            TIDY_TIP=_tutorial_tip(
+                "输入原因后直接发起治理。" if is_zh else "Enter a reason and queue maintenance.",
+                (
+                    "后台会按阻断性健康问题创建 tidy 任务。需要更大范围或更细粒度的整理时，建议改走 CLI 或专门任务。"
+                    if is_zh
+                    else "The admin UI creates a tidy job against blocking health issues. Use the CLI or a dedicated task when you need a broader or more granular cleanup."
+                ),
+                locale=active_locale,
+                testid="admin-kb-tidy-tip",
             ),
-            EXPLORE_TITLE="Explore 探索" if is_zh else "Knowledge explore",
-            EXPLORE_NOTE="保留当前问答能力" if is_zh else "keep the current Q&A path",
+            TIDY_REASON_LABEL="本次整理原因" if is_zh else "Tidy reason",
+            TIDY_REASON_PLACEHOLDER="例如：整理悬空链接与未覆盖正式条目" if is_zh else "Example: clean up dangling links and uncovered formal entries",
+            TIDY_BUTTON="执行整理" if is_zh else "Run tidy",
+            TIDY_STATUS="创建任务后，Live 区会记录请求与返回。" if is_zh else "The Live panel records the request and response after queueing.",
+            EXPLORE_TITLE="探索" if is_zh else "Knowledge explore",
+            EXPLORE_TIP=_tutorial_tip(
+                "只接受 Agent 输出，并把过程写进 Live。" if is_zh else "Accept agent output only and mirror the run in Live.",
+                (
+                    "探索不再把固定错误包装成“回答”。如果 Agent 输出无效、CLI 卡住或重试失败，结果区会直接显示失败，完整命令调用与终端输出会写到下方 Live。"
+                    if is_zh
+                    else "Explore no longer wraps fixed fallback text as an answer. When agent output is invalid, the CLI stalls, or retries fail, the result panel shows an explicit failure and the full command / terminal trace is written into the Live panel below."
+                ),
+                locale=active_locale,
+                testid="admin-kb-explore-tip",
+            ),
             EXPLORE_INPUT_LABEL="问题 / 场景" if is_zh else "Question / scenario",
             EXPLORE_INPUT_PLACEHOLDER=(
                 "例如：热备份在什么情况下不该当成主备切换方案？"
@@ -842,11 +864,26 @@ def admin_html(
                 else "Example: when should hot backup not be treated as a failover strategy?"
             ),
             EXPLORE_BUTTON="运行探索" if is_zh else "Run explore",
-            EXPLORE_RESULT_EMPTY="这里会显示回答、来源和缺口。" if is_zh else "Answers, sources, and gaps appear here.",
+            EXPLORE_STATUS="等待下一次探索。" if is_zh else "Waiting for the next explore run.",
+            EXPLORE_RESULT_EMPTY="这里会显示 Agent 输出，失败时不会伪装成回答。" if is_zh else "Agent output appears here; failures are shown as failures instead of disguised answers.",
+            LIVE_TITLE="Live",
+            LIVE_TIP=_tutorial_tip(
+                "实时报告命令调用与终端回复。" if is_zh else "Mirror command calls and terminal output in real time.",
+                (
+                    "导入、整理和探索的关键请求都会写到这里。探索额外会持续写入 Agent CLI 的命令、stdout / stderr、重试原因与最终状态，方便判断到底是在运行、重试，还是已经失败。"
+                    if is_zh
+                    else "Key ingest, tidy, and explore requests are mirrored here. Explore additionally streams the agent CLI command, stdout / stderr, retry reasons, and the final state so you can tell whether it is still running, retrying, or already failed."
+                ),
+                locale=active_locale,
+                testid="admin-kb-live-tip",
+            ),
+            LIVE_CLEAR_BUTTON="清空记录" if is_zh else "Clear log",
+            LIVE_STATUS="等待下一次导入 / 整理 / 探索。" if is_zh else "Waiting for the next ingest / tidy / explore run.",
+            LIVE_EMPTY="LIVE READY\n" if is_zh else "LIVE READY\n",
         ),
         "files": _render_html_template(
             "admin-files-section.html",
-            FILE_BROWSER_TITLE="Files 文件结构" if is_zh else "File browser",
+            FILE_BROWSER_TITLE="文件结构" if is_zh else "File browser",
             FILE_BROWSER_NOTE=(
                 "按 index 导航组织文档，而不是把所有 Markdown 平铺出来。"
                 if is_zh
@@ -855,15 +892,15 @@ def admin_html(
             FILE_COUNTS_INDEXED="已纳入索引" if is_zh else "Indexed",
             FILE_COUNTS_UNINDEXED="未纳入索引" if is_zh else "Unindexed",
             FILE_SEARCH_LABEL="搜索并直接打开文档" if is_zh else "Search and open a document",
-            FILE_SEARCH_PLACEHOLDER="输入标题、别名、路径或 index 名称" if is_zh else "Search by title, alias, path, or index name",
+            FILE_SEARCH_PLACEHOLDER="输入标题、别名、路径或索引名称" if is_zh else "Search by title, alias, path, or index name",
             FILE_SEARCH_STATUS="输入后会显示自动建议；选中后直接载入编辑区。" if is_zh else "Suggestions appear as you type and open directly in the editor.",
-            FILE_BROWSE_HINT_TITLE="Index 治理约定" if is_zh else "Index governance",
+            FILE_BROWSE_HINT_TITLE="索引治理约定" if is_zh else "Index governance",
             FILE_BROWSE_HINT_BODY=(
                 "Tidy 会负责维护 index.root 与分段 index 的可导航性；文件管理页沿用这套结构来浏览与修订文档。"
                 if is_zh
                 else "Tidy maintains index.root and segment indexes; this page reuses that structure for browsing and editing."
             ),
-            DOC_STRUCTURE_TITLE="Index 结构浏览" if is_zh else "Index structure",
+            DOC_STRUCTURE_TITLE="索引结构浏览" if is_zh else "Index structure",
             DOC_STRUCTURE_NOTE="按根索引与分段索引展开" if is_zh else "expand root and segment indexes",
             DOC_HEALTH_TITLE="健康队列联动" if is_zh else "Health-driven selection",
             DOC_HEALTH_NOTE="可从治理问题直接跳到对应文档" if is_zh else "jump from a governance issue straight into the related document",
@@ -883,22 +920,22 @@ def admin_html(
             PENDING_REVIEWS_TITLE="待审补丁" if is_zh else "Pending reviews",
             PENDING_REVIEWS_NOTE="先选中补丁，再进入详情和决策" if is_zh else "Select a patch first, then review details and decide",
             DETAIL_TITLE="评审详情" if is_zh else "Review detail",
-            DETAIL_NOTE="按条查看来源、摘要与 diff，再给出结论" if is_zh else "Inspect source context, summary, and diff before deciding",
+            DETAIL_NOTE="按条查看来源、摘要与补丁差异，再给出结论" if is_zh else "Inspect source context, summary, and diff before deciding",
             DETAIL_EMPTY="选择左侧待审补丁后，在这里展开完整上下文。" if is_zh else "Select a pending review on the left to open its full context here.",
             REVIEW_COMMENT_LABEL="评审备注" if is_zh else "Review comment",
             REVIEW_COMMENT_PLACEHOLDER="为批准、退回或拒绝留下简短原因。" if is_zh else "Leave a short rationale for approval, changes, or rejection.",
             APPROVE_BUTTON="批准合并" if is_zh else "Approve merge",
             REJECT_BUTTON="退回 / 拒绝" if is_zh else "Request changes / reject",
-            DIFF_EMPTY="选择待审 patch 后在这里查看。" if is_zh else "Select a pending review to inspect its diff here.",
+            DIFF_EMPTY="选择待审补丁后在这里查看差异。" if is_zh else "Select a pending review to inspect its diff here.",
             JOB_TITLE="任务" if is_zh else "Jobs",
-            JOB_NOTE="用来观察 ingest / tidy / review 的后续状态" if is_zh else "Track follow-up state for ingest, tidy, and review jobs",
+            JOB_NOTE="用来观察导入 / 整理 / 评审的后续状态" if is_zh else "Track follow-up state for ingest, tidy, and review jobs",
         ),
         "users": _render_html_template(
             "admin-users-section.html",
             USERS_NOTE="仅所有者可操作" if is_zh else "Owner only",
             CREATE_TITLE="新增提交者" if is_zh else "Create committer",
             NAME_LABEL="姓名" if is_zh else "Name",
-            NAME_PLACEHOLDER="例如：Ops Committer" if is_zh else "Example: Ops Committer",
+            NAME_PLACEHOLDER="例如：运维提交者" if is_zh else "Example: Ops Committer",
             CREATE_HELP=(
                 "新建用户固定为提交者。所有者只有初始化时生成的唯一账户。"
                 if is_zh
@@ -917,7 +954,7 @@ def admin_html(
         "system": _render_html_template(
             "admin-system-section.html",
             SETTINGS_TITLE="配置文件" if is_zh else "Config file",
-            SETTINGS_NOTE="仅 owner 可查看与修改" if is_zh else "owner-only view and edit",
+            SETTINGS_NOTE="仅所有者可查看与修改" if is_zh else "owner-only view and edit",
             SETTINGS_PATH_LABEL="当前配置路径" if is_zh else "Current config path",
             SETTINGS_PATH_EMPTY="配置路径加载中..." if is_zh else "Loading config path...",
             SETTINGS_EDITOR_LABEL="原始 YAML 配置" if is_zh else "Raw YAML config",
@@ -991,7 +1028,7 @@ def admin_html(
                 "review_empty": "暂无待审补丁。" if is_zh else "No pending reviews right now.",
                 "job_empty": "暂无任务。" if is_zh else "No jobs right now.",
                 "audit_empty": "暂无审计日志。" if is_zh else "No audit logs yet.",
-                "diff_empty": "选择待审 patch 后在这里查看。" if is_zh else "Select a pending review to inspect its diff here.",
+                "diff_empty": "选择待审补丁后在这里查看差异。" if is_zh else "Select a pending review to inspect its diff here.",
                 "editor_loaded": "已加载" if is_zh else "Loaded",
                 "editor_saved": "保存成功" if is_zh else "Saved",
                 "editor_preview_empty": "预览将在这里显示。" if is_zh else "Preview appears here.",
@@ -1000,12 +1037,30 @@ def admin_html(
                 "explore_sources": "来源" if is_zh else "Sources",
                 "explore_gaps": "缺口" if is_zh else "Gaps",
                 "explore_confidence": "置信度" if is_zh else "Confidence",
-                "manual_tidy_reason_required": "请填写 tidy 原因。" if is_zh else "Enter a tidy reason.",
+                "explore_running": "正在运行探索，详情见 Live。" if is_zh else "Explore is running; see Live for details.",
+                "explore_completed": "探索已完成。" if is_zh else "Explore completed.",
+                "explore_failed": "探索失败" if is_zh else "Explore failed",
+                "explore_failed_hint": "请查看下方 Live 区的命令调用与终端输出。" if is_zh else "Check the Live panel below for the command trace and terminal output.",
+                "explore_no_result": "探索结束了，但没有收到最终 Agent 输出。" if is_zh else "The explore run finished without a final agent result.",
+                "live_ready": "等待下一次导入 / 整理 / 探索。" if is_zh else "Waiting for the next ingest / tidy / explore run.",
+                "live_running": "Live 正在接收运行事件..." if is_zh else "Live is receiving runtime events...",
+                "live_cleared": "Live 记录已清空。" if is_zh else "Live log cleared.",
+                "live_request_label": "请求" if is_zh else "Request",
+                "live_response_label": "响应" if is_zh else "Response",
+                "live_command_label": "命令" if is_zh else "Command",
+                "live_stdout_label": "标准输出" if is_zh else "Stdout",
+                "live_stderr_label": "标准错误" if is_zh else "Stderr",
+                "live_status_label": "状态" if is_zh else "Status",
+                "live_retry_label": "重试" if is_zh else "Retry",
+                "live_error_label": "错误" if is_zh else "Error",
+                "live_result_label": "结果" if is_zh else "Result",
+                "live_done_label": "结束" if is_zh else "Done",
+                "manual_tidy_reason_required": "请填写整理原因。" if is_zh else "Enter a tidy reason.",
                 "ingest_file_required": "请先拖入或选择至少一个文档。" if is_zh else "Drop or choose at least one document first.",
                 "ingest_selected_prefix": "当前已选择" if is_zh else "Selected",
                 "ingest_selected_suffix": "个文件" if is_zh else "files",
-                "ingest_uploaded": "已创建 Ingest：" if is_zh else "Created ingest: ",
-                "ingest_submission_prefix": "submission" if is_zh else "submission",
+                "ingest_uploaded": "已创建导入任务：" if is_zh else "Created ingest: ",
+                "ingest_submission_prefix": "提交" if is_zh else "submission",
                 "doc_group_formal": "正式条目" if is_zh else "Formal entries",
                 "doc_group_placeholder": "Placeholders" if not is_zh else "待补全条目",
                 "doc_group_index": "索引" if is_zh else "Indexes",
@@ -1030,30 +1085,30 @@ def admin_html(
                 "settings_restart_scheduled": "服务重启已安排，页面会自动重新连接。" if is_zh else "Service restart scheduled. The page will reconnect automatically.",
                 "triaged": "标记已归类" if is_zh else "Mark triaged",
                 "reject": "拒绝提交" if is_zh else "Reject",
-                "run_ingest": "运行 Ingest" if is_zh else "Run ingest",
+                "run_ingest": "执行导入" if is_zh else "Run ingest",
                 "show_diff": "查看详情" if is_zh else "Open detail",
                 "approve": "批准" if is_zh else "Approve",
                 "reject_review": "拒绝" if is_zh else "Reject",
                 "retry": "重试" if is_zh else "Retry",
                 "cancel": "取消" if is_zh else "Cancel",
                 "logout_done": "已退出登录。" if is_zh else "Signed out.",
-                "tidy_done": "已创建 tidy 任务：" if is_zh else "Created tidy job: ",
-                "ingest_done": "已创建 ingest 任务：" if is_zh else "Created ingest job: ",
-                "review_loaded": "已加载 review diff：" if is_zh else "Loaded review diff: ",
-                "review_approved": "Review 已批准：" if is_zh else "Approved review: ",
-                "review_rejected": "Review 已拒绝：" if is_zh else "Rejected review: ",
+                "tidy_done": "已创建整理任务：" if is_zh else "Created tidy job: ",
+                "ingest_done": "已创建导入任务：" if is_zh else "Created ingest job: ",
+                "review_loaded": "已加载评审差异：" if is_zh else "Loaded review diff: ",
+                "review_approved": "已批准评审：" if is_zh else "Approved review: ",
+                "review_rejected": "已退回评审：" if is_zh else "Rejected review: ",
                 "job_retried": "任务已重新入队：" if is_zh else "Requeued job: ",
                 "job_cancelled": "任务已请求取消：" if is_zh else "Cancellation requested for job: ",
                 "quartz_ready": "Quartz 站点已就绪" if is_zh else "Quartz site is ready",
                 "quartz_missing_site": "尚未构建实例站点" if is_zh else "Instance site is not built yet",
-                "quartz_missing_runtime": "Quartz runtime 不可用" if is_zh else "Quartz runtime is unavailable",
-                "quartz_runtime_path": "runtime 路径" if is_zh else "runtime path",
+                "quartz_missing_runtime": "Quartz 运行时不可用" if is_zh else "Quartz runtime is unavailable",
+                "quartz_runtime_path": "运行时路径" if is_zh else "runtime path",
                 "quartz_site_path": "站点路径" if is_zh else "site path",
                 "quartz_built_at": "最后构建时间" if is_zh else "last built",
                 "quartz_build_success": "Quartz 站点已刷新。" if is_zh else "Quartz site refreshed.",
-                "token_revealed": "Token 已就地展开。" if is_zh else "Token expanded inline.",
-                "token_show": "显示 Token" if is_zh else "Show token",
-                "token_hide": "收起 Token" if is_zh else "Hide token",
+                "token_revealed": "访问令牌已就地展开。" if is_zh else "Token expanded inline.",
+                "token_show": "显示令牌" if is_zh else "Show token",
+                "token_hide": "收起令牌" if is_zh else "Hide token",
                 "token_label": "Token" if not is_zh else "访问令牌",
                 "disable_user": "停用" if is_zh else "Disable",
                 "user_created": "用户已创建：" if is_zh else "Created user: ",
@@ -1063,7 +1118,7 @@ def admin_html(
                 "role_owner": "所有者" if is_zh else "owner",
                 "role_committer": "提交者" if is_zh else "committer",
                 "review_selected": "已载入评审：" if is_zh else "Loaded review: ",
-                "review_select_prompt": "先从左侧选择一个待审 patch。" if is_zh else "Select a pending review from the left first.",
+                "review_select_prompt": "先从左侧选择一个待审补丁。" if is_zh else "Select a pending review from the left first.",
                 "review_summary": "改动摘要" if is_zh else "Patch summary",
                 "review_source_submission": "来源提交" if is_zh else "Source submission",
                 "review_job_type": "任务类型" if is_zh else "Job type",
@@ -1072,7 +1127,7 @@ def admin_html(
                 "review_created_at": "创建时间" if is_zh else "Created",
                 "review_submission_status": "提交状态" if is_zh else "Submission status",
                 "review_submission_author": "提交者" if is_zh else "Submitter",
-                "review_queue_empty_detail": "当前没有待审 patch。" if is_zh else "There is no pending review right now.",
+                "review_queue_empty_detail": "当前没有待审补丁。" if is_zh else "There is no pending review right now.",
                 "review_comment_approve": "由管理台批准" if is_zh else "Approved from admin UI",
                 "review_comment_reject": "由管理台退回" if is_zh else "Rejected from admin UI",
                 "scope_full": "全库维护" if is_zh else "Full KB",
@@ -1091,7 +1146,7 @@ def admin_html(
                 "file_unindexed_group": "未纳入任何索引的文档" if is_zh else "Documents outside all indexes",
                 "file_index_direct_docs": "直接文档" if is_zh else "Direct documents",
                 "file_index_child_indexes": "子索引" if is_zh else "Child indexes",
-                "file_tokens_label": "token 估算" if is_zh else "tokens",
+                "file_tokens_label": "令牌估算" if is_zh else "tokens",
             },
             "quartz": quartz,
         },

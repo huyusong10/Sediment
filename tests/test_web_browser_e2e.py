@@ -103,7 +103,7 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             page.locator("#submit-content").fill("这是一条来自真实浏览器流程的提案。")
             page.get_by_test_id("portal-submit-text-button").click()
             expect(page.locator("#submit-text-status")).to_contain_text("submission_id=")
-            expect(page.locator("#submit-text-analysis")).to_contain_text("Agent 建议")
+            expect(page.locator("#submit-text-analysis")).to_contain_text("智能建议")
             expect(page.get_by_test_id("portal-message")).to_contain_text("已提交文本草案")
 
             page.locator("#upload-name").fill("Alice")
@@ -134,6 +134,16 @@ def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) ->
             nav_row_box = page.locator("[data-shell-nav]").bounding_box()
             assert title_box is not None and nav_row_box is not None
             assert nav_row_box["y"] > title_box["y"]
+            mcp_panel = page.get_by_test_id("tutorial-mcp-panel")
+            skill_panel = page.get_by_test_id("tutorial-skill-panel")
+            decision_panel = page.get_by_test_id("tutorial-decision-panel")
+            mcp_box = mcp_panel.bounding_box()
+            skill_box = skill_panel.bounding_box()
+            decision_box = decision_panel.bounding_box()
+            assert mcp_box is not None and skill_box is not None and decision_box is not None
+            assert mcp_box["x"] < skill_box["x"]
+            assert abs(skill_box["x"] - decision_box["x"]) < 2
+            assert skill_box["y"] < decision_box["y"]
             expect(page.locator('[data-testid="tutorial-skill-downloads"] .card')).to_have_count(1)
             expect(page.locator('[data-testid="tutorial-decision-cards"] .card')).to_have_count(2)
             expect(page.locator('[data-testid="tutorial-tool-cards"] .card')).to_have_count(3)
@@ -189,13 +199,35 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
             expect(page.get_by_test_id("admin-ingest-dropzone")).to_be_visible()
             expect(page.locator('[data-testid="admin-file-index-tree"]')).to_have_count(0)
+            ingest_box = page.get_by_test_id("admin-kb-ingest-panel").bounding_box()
+            tidy_box = page.get_by_test_id("admin-kb-tidy-panel").bounding_box()
+            explore_box = page.get_by_test_id("admin-kb-explore-panel").bounding_box()
+            live_box = page.get_by_test_id("admin-kb-live-panel").bounding_box()
+            assert ingest_box is not None and tidy_box is not None and explore_box is not None and live_box is not None
+            assert ingest_box["x"] < tidy_box["x"]
+            assert abs(tidy_box["x"] - explore_box["x"]) < 2
+            assert tidy_box["y"] < explore_box["y"]
+            assert live_box["y"] > ingest_box["y"]
+            assert live_box["y"] > explore_box["y"]
+            expect(page.get_by_test_id("admin-ingest-status")).to_contain_text("Live 区会同步显示请求与任务反馈")
+            page.get_by_test_id("admin-manual-tidy-button").click()
+            expect(page.get_by_test_id("admin-tidy-status")).to_contain_text("请填写整理原因")
+            expect(page.get_by_test_id("admin-ingest-status")).to_contain_text("Live 区会同步显示请求与任务反馈")
+            expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(re.compile("请填写整理原因"))
+            page.get_by_test_id("admin-explore-input").fill("什么是热备份？")
+            page.get_by_test_id("admin-explore-button").click()
+            expect(page.get_by_test_id("admin-explore-result")).to_contain_text("热备份是在故障切换前准备好的可接管能力")
+            expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(re.compile("POST /api/admin/explore/live"))
+            live_log = page.get_by_test_id("admin-kb-live-log").input_value()
+            assert "什么是热备份？" in live_log
+            assert len([line for line in live_log.splitlines() if line.strip()]) >= 3
             submission_card = page.locator("#submission-list .card").filter(
                 has_text="浏览器管理台提案"
             ).first
             expect(submission_card).to_be_visible()
-            expect(submission_card).to_contain_text("运行 Ingest")
+            expect(submission_card).to_contain_text("执行导入")
             submission_card.locator('button[data-action="run-ingest"]').click()
-            expect(page.get_by_test_id("admin-message")).to_contain_text("创建 ingest 任务")
+            expect(page.get_by_test_id("admin-message")).to_contain_text("创建导入任务")
 
             assert live["worker_module"].process_queue_until_idle(max_jobs=1) == 1
 
@@ -204,7 +236,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             expect(review_card).to_be_visible()
             review_card.click()
             page.get_by_test_id("admin-review-comment").fill("浏览器流程批准")
-            expect(page.get_by_test_id("admin-diff-view")).not_to_contain_text("选择待审 patch")
+            expect(page.get_by_test_id("admin-diff-view")).not_to_contain_text("选择待审补丁")
 
             page.get_by_test_id("admin-approve-review-button").click()
             expect(page.get_by_test_id("admin-message")).to_contain_text("已批准")

@@ -1,10 +1,10 @@
-<section class="grid cols-2">
-  <div class="panel">
+<section class="admin-kb-layout" data-testid="admin-kb-layout">
+  <div class="panel admin-kb-primary-panel" data-testid="admin-kb-ingest-panel">
     <div class="row spread">
       <h2>__INGEST_TITLE__</h2>
-      <span class="tabs-note">__INGEST_NOTE__</span>
+      <div class="panel-header-tip">__INGEST_TIP__</div>
     </div>
-    <div class="grid">
+    <div class="admin-kb-panel-grid">
       <div class="dropzone" id="admin-ingest-dropzone" data-testid="admin-ingest-dropzone">
         <strong>__INGEST_DROPZONE_TITLE__</strong>
         <p class="subtle">__INGEST_DROPZONE_BODY__</p>
@@ -18,35 +18,49 @@
         <p id="admin-ingest-selection" data-testid="admin-ingest-selection">__INGEST_SELECTION_EMPTY__</p>
       </div>
       <button class="primary" id="admin-ingest-button" data-testid="admin-ingest-button">__INGEST_BUTTON__</button>
-      <div id="admin-ingest-status" data-testid="admin-ingest-status" class="subtle" role="status" aria-live="polite">__INGEST_STATUS__</div>
+      <div id="admin-ingest-status" data-testid="admin-ingest-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__INGEST_STATUS__</div>
       <div class="list scroll-list" id="submission-list" data-testid="admin-submission-list"></div>
     </div>
   </div>
 
-  <div class="panel">
-    <div class="row spread">
-      <h2>__TIDY_TITLE__</h2>
-      <span class="tabs-note">__TIDY_NOTE__</span>
+  <div class="admin-kb-side-stack" data-testid="admin-kb-side-stack">
+    <div class="panel admin-kb-compact-panel" data-testid="admin-kb-tidy-panel">
+      <div class="row spread">
+        <h2>__TIDY_TITLE__</h2>
+        <div class="panel-header-tip">__TIDY_TIP__</div>
+      </div>
+      <div class="admin-kb-panel-grid">
+        <label>__TIDY_REASON_LABEL__<input id="tidy-reason" data-testid="admin-tidy-reason" placeholder="__TIDY_REASON_PLACEHOLDER__" /></label>
+        <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__TIDY_BUTTON__</button>
+        <div id="admin-tidy-status" data-testid="admin-tidy-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__TIDY_STATUS__</div>
+      </div>
     </div>
-    <div class="grid">
-      <label>__TIDY_REASON_LABEL__<input id="tidy-reason" data-testid="admin-tidy-reason" placeholder="__TIDY_REASON_PLACEHOLDER__" /></label>
-      <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__TIDY_BUTTON__</button>
-      <div class="detail-block">
-        <strong>__TIDY_HINT_TITLE__</strong>
-        <p>__TIDY_HINT_BODY__</p>
+
+    <div class="panel admin-kb-compact-panel" data-testid="admin-kb-explore-panel">
+      <div class="row spread">
+        <h2>__EXPLORE_TITLE__</h2>
+        <div class="panel-header-tip">__EXPLORE_TIP__</div>
+      </div>
+      <div class="admin-kb-panel-grid">
+        <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
+        <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
+        <div id="admin-explore-status" data-testid="admin-explore-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__EXPLORE_STATUS__</div>
+        <div id="admin-explore-result" data-testid="admin-explore-result" class="markdown empty">__EXPLORE_RESULT_EMPTY__</div>
       </div>
     </div>
   </div>
 </section>
 
-<section class="panel">
+<section class="panel admin-live-panel" data-testid="admin-kb-live-panel">
   <div class="row spread">
-    <h2>__EXPLORE_TITLE__</h2>
-    <span class="tabs-note">__EXPLORE_NOTE__</span>
+    <h2>__LIVE_TITLE__</h2>
+    <div class="admin-live-toolbar">
+      <div class="panel-header-tip">__LIVE_TIP__</div>
+      <button id="admin-kb-live-clear" data-testid="admin-kb-live-clear">__LIVE_CLEAR_BUTTON__</button>
+    </div>
   </div>
-  <div class="grid">
-    <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
-    <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
-    <div id="admin-explore-result" data-testid="admin-explore-result" class="markdown empty">__EXPLORE_RESULT_EMPTY__</div>
+  <div class="admin-kb-panel-grid">
+    <div id="admin-kb-live-status" data-testid="admin-kb-live-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__LIVE_STATUS__</div>
+    <textarea class="live-log-area" id="admin-kb-live-log" data-testid="admin-kb-live-log" readonly spellcheck="false">__LIVE_EMPTY__</textarea>
   </div>
 </section>

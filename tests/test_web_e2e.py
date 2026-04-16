@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -210,6 +211,10 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert kb_page.status_code == 200
     assert 'data-testid="admin-submission-list"' in kb_page.text
     assert 'data-testid="admin-ingest-button"' in kb_page.text
+    assert 'data-testid="admin-kb-ingest-panel"' in kb_page.text
+    assert 'data-testid="admin-kb-tidy-panel"' in kb_page.text
+    assert 'data-testid="admin-kb-explore-panel"' in kb_page.text
+    assert 'data-testid="admin-kb-live-log"' in kb_page.text
     assert 'data-testid="admin-doc-browser"' not in kb_page.text
     assert 'data-testid="admin-editor-content"' not in kb_page.text
 
@@ -238,6 +243,36 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-settings-raw-text"' in system_page.text
     assert 'data-testid="admin-settings-restart-button"' in system_page.text
     assert "<title>Settings | Test Knowledge Base</title>" in system_page.text
+
+    kb_page_zh = client.get("/admin/kb", headers={"accept-language": "zh-CN"})
+    assert kb_page_zh.status_code == 200
+    assert "<title>知识库管理 | Test Knowledge Base</title>" in kb_page_zh.text
+    assert "KB Management 知识库管理" not in kb_page_zh.text
+    assert "Ingest 导入" not in kb_page_zh.text
+    assert "Tidy 整理" not in kb_page_zh.text
+    assert "Explore 探索" not in kb_page_zh.text
+    assert ">导入<" in kb_page_zh.text
+    assert ">整理<" in kb_page_zh.text
+    assert ">探索<" in kb_page_zh.text
+
+    files_page_zh = client.get("/admin/files", headers={"accept-language": "zh-CN"})
+    assert files_page_zh.status_code == 200
+    assert "<title>文件管理 | Test Knowledge Base</title>" in files_page_zh.text
+    assert "Files 文件管理" not in files_page_zh.text
+    assert "Files 文件结构" not in files_page_zh.text
+    assert "Index 结构浏览" not in files_page_zh.text
+    assert "Index 治理约定" not in files_page_zh.text
+    assert ">文件结构<" in files_page_zh.text
+    assert ">索引结构浏览<" in files_page_zh.text
+    assert ">索引治理约定<" in files_page_zh.text
+
+    with client.stream("POST", "/api/admin/explore/live", json={"question": "什么是热备份？"}) as explore_live:
+        assert explore_live.status_code == 200
+        events = [json.loads(line) for line in explore_live.iter_lines() if line]
+    assert any(event["type"] == "command" for event in events)
+    assert any(event["type"] == "cli-output" for event in events)
+    result_event = next(event for event in events if event["type"] == "result")
+    assert "热备份" in result_event["payload"]["answer"]
 
     kb_documents = client.get("/api/admin/kb/documents")
     assert kb_documents.status_code == 200
@@ -339,6 +374,38 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="portal-entry-sections-panel"' in entry_page.text
     assert 'data-testid="portal-entry-signals-panel"' in entry_page.text
     assert "<title>薄弱条目 | Test Knowledge Base</title>" in entry_page.text
+
+
+def test_admin_explore_public_entrypoints_surface_runtime_failure(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_EXPLORE_INVALID_JSON", "1")
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+        admin_token="top-secret",
+    )
+
+    login = client.post("/api/admin/session", json={"token": "top-secret"})
+    assert login.status_code == 200
+    assert client.cookies.get(server_module.ADMIN_SESSION_COOKIE_NAME)
+
+    explore = client.post("/api/admin/explore", json={"question": "什么是热备份？"})
+    assert explore.status_code == 502
+    payload = explore.json()
+    assert "error" in payload
+    assert "invalid JSON" in payload["error"]
+    assert "answer" not in payload
+
+    with client.stream("POST", "/api/admin/explore/live", json={"question": "什么是热备份？"}) as explore_live:
+        assert explore_live.status_code == 200
+        events = [json.loads(line) for line in explore_live.iter_lines() if line]
+
+    assert not any(event["type"] == "result" for event in events)
+    assert any(event["type"] == "error" and "invalid JSON" in event["message"] for event in events)
+    done_event = next(event for event in events if event["type"] == "done")
+    assert done_event["ok"] is False
 
 
 def test_tutorial_endpoint_prefers_proxy_headers_when_trusted(tmp_path: Path, monkeypatch) -> None:

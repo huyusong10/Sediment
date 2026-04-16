@@ -23,16 +23,22 @@ from __future__ import annotations
 
 import base64
 import binascii
+import asyncio
 import hashlib
 import hmac
 import json
 import mimetypes
 import os
+import queue
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -866,7 +872,10 @@ async def _knowledge_read(filename: str) -> str:
 
 
 async def _knowledge_ask(question: str) -> str:
-    result = answer_question(question, KB_PATH, _PROJECT_ROOT)
+    try:
+        result = answer_question_agent_only(question, KB_PATH, _PROJECT_ROOT)
+    except RuntimeError as exc:
+        result = _error_payload(str(exc))
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -1041,6 +1050,120 @@ async def _knowledge_review_decide(
     return json.dumps(result, ensure_ascii=False)
 
 
+ExploreEventEmitter = Callable[[dict[str, Any]], None]
+
+
+@dataclass(frozen=True)
+class ExploreRuntimeBundle:
+    question: str
+    skill_body: str
+    runtime_contract: dict[str, Any]
+    skill_label: str
+    context: dict[str, Any]
+    inventory_data: dict[str, Any]
+    payload: dict[str, Any]
+    project_root: Path
+
+
+def _emit_explore_event(
+    emit: ExploreEventEmitter | None,
+    event_type: str,
+    message: str,
+    **extra: Any,
+) -> None:
+    if emit is None:
+        return
+    payload = {
+        "type": event_type,
+        "message": message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    payload.update(extra)
+    emit(payload)
+
+
+def _trim_explore_excerpt(text: str, limit: int = 400) -> str:
+    normalized = " ".join(str(text or "").split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(limit - 3, 0)] + "..."
+
+
+def _prepare_explore_runtime(
+    question: str,
+    *,
+    kb_path: Path,
+    project_root: Path,
+    inventory_data: dict[str, Any] | None = None,
+    emit: ExploreEventEmitter | None = None,
+) -> ExploreRuntimeBundle:
+    if inventory_data is None:
+        inventory_data = inventory(kb_path)
+    _emit_explore_event(
+        emit,
+        "status",
+        "Loaded KB inventory.",
+        formal_entry_count=len(inventory_data.get("entries", [])),
+        placeholder_count=len(inventory_data.get("placeholders", [])),
+        index_count=len(inventory_data.get("indexes", [])),
+    )
+    skill_body, runtime_contract, skill_label = _load_explore_skill(project_root)
+    context = prepare_explore_context(
+        question,
+        inventory_data=inventory_data,
+        shortlist_limit=runtime_contract["shortlist_limit"],
+        neighbor_depth=runtime_contract["neighbor_depth"],
+        max_context_entries=runtime_contract["max_context_entries"],
+        max_snippets_per_entry=runtime_contract["max_snippets_per_entry"],
+        snippet_char_limit=runtime_contract["snippet_char_limit"],
+    )
+    _emit_explore_event(
+        emit,
+        "status",
+        "Prepared explore context.",
+        shortlist_count=len(context.get("initial_shortlist", [])),
+        candidate_count=len(context.get("expanded_candidates", [])),
+        routed_index_count=len(context.get("routed_indexes", [])),
+    )
+    payload = {"question": question, "runtime_contract": runtime_contract, "context": context}
+    return ExploreRuntimeBundle(
+        question=question,
+        skill_body=skill_body,
+        runtime_contract=runtime_contract,
+        skill_label=skill_label,
+        context=context,
+        inventory_data=inventory_data,
+        payload=payload,
+        project_root=project_root,
+    )
+
+
+def _run_explore_runtime_bundle(
+    bundle: ExploreRuntimeBundle,
+    *,
+    emit: ExploreEventEmitter | None = None,
+) -> dict[str, Any]:
+    result = _run_validated_explore(
+        question=bundle.question,
+        skill_body=bundle.skill_body,
+        runtime_contract=bundle.runtime_contract,
+        context=bundle.context,
+        payload=bundle.payload,
+        project_root=bundle.project_root,
+        skill_label=bundle.skill_label,
+        inventory_data=bundle.inventory_data,
+        emit=emit,
+    )
+    _emit_explore_event(
+        emit,
+        "status",
+        "Explore completed with agent output.",
+        confidence=result.get("confidence", ""),
+        source_count=len(result.get("sources", [])),
+    )
+    return result
+
+
 def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[str, Any]:
     question = question.strip()
     if not question:
@@ -1072,24 +1195,20 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
         }
 
     try:
-        skill_body, runtime_contract, skill_label = _load_explore_skill(project_root)
-        context = prepare_explore_context(
+        bundle = _prepare_explore_runtime(
             question,
+            kb_path=kb_path,
+            project_root=project_root,
             inventory_data=inventory_data,
-            shortlist_limit=runtime_contract["shortlist_limit"],
-            neighbor_depth=runtime_contract["neighbor_depth"],
-            max_context_entries=runtime_contract["max_context_entries"],
-            max_snippets_per_entry=runtime_contract["max_snippets_per_entry"],
-            snippet_char_limit=runtime_contract["snippet_char_limit"],
         )
 
-        if not context["expanded_candidates"]:
+        if not bundle.context["expanded_candidates"]:
             return {
                 "answer": "No sufficiently relevant knowledge entries were found for this question.",
                 "sources": [],
                 "confidence": "low",
                 "exploration_summary": {
-                    "entries_scanned": len(inventory_data["entries"]),
+                    "entries_scanned": len(bundle.inventory_data["entries"]),
                     "entries_read": 0,
                     "links_followed": 0,
                     "mode": "no-match",
@@ -1101,26 +1220,39 @@ def answer_question(question: str, kb_path: Path, project_root: Path) -> dict[st
         if _explore_fast_only_enabled():
             local_answer = _build_local_explore_answer(
                 question,
-                inventory_data=inventory_data,
-                context=context,
+                inventory_data=bundle.inventory_data,
+                context=bundle.context,
                 mode_label="local-fastpath",
             )
             if local_answer is not None:
                 return local_answer
 
-        payload = {"question": question, "runtime_contract": runtime_contract, "context": context}
-        return _run_validated_explore(
-            question=question,
-            skill_body=skill_body,
-            runtime_contract=runtime_contract,
-            context=context,
-            payload=payload,
-            project_root=project_root,
-            skill_label=skill_label,
-            inventory_data=inventory_data,
-        )
+        return _run_explore_runtime_bundle(bundle)
     except RuntimeError as exc:
         return _error_payload(str(exc))
+
+
+def answer_question_agent_only(
+    question: str,
+    kb_path: Path,
+    project_root: Path,
+    *,
+    emit: ExploreEventEmitter | None = None,
+) -> dict[str, Any]:
+    question = question.strip()
+    if not question:
+        raise RuntimeError("Question must not be empty.")
+    try:
+        bundle = _prepare_explore_runtime(
+            question,
+            kb_path=kb_path,
+            project_root=project_root,
+            emit=emit,
+        )
+        return _run_explore_runtime_bundle(bundle, emit=emit)
+    except RuntimeError as exc:
+        _emit_explore_event(emit, "error", str(exc))
+        raise
 
 
 def _explore_fast_only_enabled() -> bool:
@@ -3060,9 +3192,16 @@ def _run_validated_explore(
     project_root: Path,
     skill_label: str,
     inventory_data: dict[str, Any],
+    emit: ExploreEventEmitter | None = None,
 ) -> dict[str, Any]:
     retry_reason = None
-    for _ in range(2):
+    for attempt in range(1, 3):
+        _emit_explore_event(
+            emit,
+            "status",
+            f"Starting agent attempt {attempt}/2.",
+            attempt=attempt,
+        )
         prompt = _build_explore_prompt(
             question,
             skill_body,
@@ -3077,18 +3216,43 @@ def _run_validated_explore(
             skill_label=skill_label,
             payload=payload,
             timeout_seconds=runtime_contract["cli_timeout_seconds"],
+            emit=emit,
+            attempt=attempt,
         )
 
         try:
             parsed_output = _parse_cli_json(raw_output)
         except RuntimeError:
             retry_reason = "response was not a valid JSON object"
+            _emit_explore_event(
+                emit,
+                "retry",
+                f"Attempt {attempt} returned non-JSON output; retrying.",
+                attempt=attempt,
+                reason=retry_reason,
+                raw_excerpt=_trim_explore_excerpt(raw_output),
+            )
             continue
 
         validation = validate_answer(parsed_output, inventory_data=inventory_data)
         if validation["valid"]:
+            _emit_explore_event(
+                emit,
+                "status",
+                f"Attempt {attempt} produced a valid explore payload.",
+                attempt=attempt,
+                confidence=validation["normalized"].get("confidence", ""),
+            )
             return validation["normalized"]
         retry_reason = "; ".join(validation["errors"])
+        _emit_explore_event(
+            emit,
+            "retry",
+            f"Attempt {attempt} returned an invalid explore payload; retrying.",
+            attempt=attempt,
+            reason=retry_reason,
+            raw_excerpt=_trim_explore_excerpt(raw_output),
+        )
 
     raise RuntimeError(f"Explore runtime returned invalid JSON: {retry_reason}")
 
@@ -3101,6 +3265,8 @@ def _run_explore_cli(
     skill_label: str,
     payload: dict[str, Any],
     timeout_seconds: int,
+    emit: ExploreEventEmitter | None = None,
+    attempt: int | None = None,
 ) -> str:
     settings = load_settings()
 
@@ -3122,15 +3288,26 @@ def _run_explore_cli(
             cwd=project_root,
             extra_args=["--json-schema", _EXPLORE_JSON_SCHEMA],
         )
+        _emit_explore_event(
+            emit,
+            "command",
+            shlex.join(invocation.command),
+            attempt=attempt,
+            backend=invocation.backend,
+            cwd=str(project_root),
+            prompt_file=str(prompt_file),
+            payload_file=str(payload_file),
+            skill_file=str(skill_file),
+        )
         try:
-            result = subprocess.run(
+            process = subprocess.Popen(
                 invocation.command,
-                input=invocation.stdin_data,
+                stdin=subprocess.PIPE if invocation.stdin_data is not None else None,
                 text=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 cwd=str(project_root),
-                timeout=timeout_seconds,
-                check=False,
+                bufsize=1,
             )
         except FileNotFoundError as exc:
             backend = settings["agent"]["backend"]
@@ -3138,20 +3315,131 @@ def _run_explore_cli(
                 f"Explore runtime CLI is unavailable for backend {backend}: "
                 f"{exc.filename or invocation.command[0]}"
             ) from exc
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(
-                f"Explore runtime timed out after {timeout_seconds} seconds."
-            ) from exc
 
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            stdout = result.stdout.strip()
-            detail = stderr or stdout or f"exit code {result.returncode}"
+        if invocation.stdin_data is not None and process.stdin is not None:
+            try:
+                process.stdin.write(invocation.stdin_data)
+            except BrokenPipeError:
+                pass
+            finally:
+                process.stdin.close()
+            _emit_explore_event(
+                emit,
+                "status",
+                "Prompt streamed to agent CLI.",
+                attempt=attempt,
+                prompt_chars=len(invocation.stdin_data),
+            )
+
+        stdout_text, stderr_text = _stream_explore_process_output(
+            process,
+            timeout_seconds=timeout_seconds,
+            emit=emit,
+            attempt=attempt,
+        )
+
+        if process.returncode != 0:
+            stderr = stderr_text.strip()
+            stdout = stdout_text.strip()
+            detail = stderr or stdout or f"exit code {process.returncode}"
             raise RuntimeError(f"Explore runtime CLI failed: {detail}")
-        output = collect_output(invocation, stdout=result.stdout, stderr=result.stderr)
+
+        file_output = ""
+        if invocation.output_file is not None and invocation.output_file.exists():
+            file_output = invocation.output_file.read_text(encoding="utf-8").strip()
+            if file_output and file_output != stdout_text.strip():
+                _emit_explore_event(
+                    emit,
+                    "cli-output",
+                    file_output,
+                    attempt=attempt,
+                    stream="assistant-file",
+                )
+
+        output = collect_output(invocation, stdout=stdout_text, stderr=stderr_text)
         if not output:
             raise RuntimeError("Explore runtime CLI returned no output.")
         return output
+
+
+def _stream_explore_process_output(
+    process: subprocess.Popen[str],
+    *,
+    timeout_seconds: int,
+    emit: ExploreEventEmitter | None = None,
+    attempt: int | None = None,
+) -> tuple[str, str]:
+    if process.stdout is None or process.stderr is None:
+        raise RuntimeError("Explore runtime CLI did not expose stdout/stderr pipes.")
+
+    chunks: dict[str, list[str]] = {"stdout": [], "stderr": []}
+    stream_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+
+    def _reader(stream_name: str, pipe) -> None:
+        try:
+            for chunk in iter(pipe.readline, ""):
+                stream_queue.put((stream_name, chunk))
+        finally:
+            pipe.close()
+            stream_queue.put((stream_name, None))
+
+    stdout_thread = threading.Thread(
+        target=_reader,
+        args=("stdout", process.stdout),
+        daemon=True,
+        name="sediment-explore-stdout",
+    )
+    stderr_thread = threading.Thread(
+        target=_reader,
+        args=("stderr", process.stderr),
+        daemon=True,
+        name="sediment-explore-stderr",
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    deadline = time.monotonic() + timeout_seconds
+    last_heartbeat = time.monotonic()
+    completed_readers = 0
+
+    while completed_readers < 2:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            process.kill()
+            process.wait(timeout=5)
+            raise RuntimeError(
+                f"Explore runtime timed out after {timeout_seconds} seconds."
+            )
+        try:
+            stream_name, chunk = stream_queue.get(timeout=min(0.5, remaining))
+        except queue.Empty:
+            if process.poll() is None and time.monotonic() - last_heartbeat >= 5:
+                _emit_explore_event(
+                    emit,
+                    "heartbeat",
+                    "Agent CLI is still running and has not emitted a new line yet.",
+                    attempt=attempt,
+                )
+                last_heartbeat = time.monotonic()
+            continue
+
+        if chunk is None:
+            completed_readers += 1
+            continue
+
+        chunks[stream_name].append(chunk)
+        _emit_explore_event(
+            emit,
+            "cli-output",
+            chunk.rstrip("\n"),
+            attempt=attempt,
+            stream=stream_name,
+        )
+
+    process.wait(timeout=5)
+    stdout_thread.join(timeout=1)
+    stderr_thread.join(timeout=1)
+    return "".join(chunks["stdout"]), "".join(chunks["stderr"])
 
 
 def _parse_cli_json(raw_output: str) -> dict[str, Any]:
@@ -3247,6 +3535,12 @@ def _text_response(text: str, *, media_type: str, status: int = 200):
     from starlette.responses import Response
 
     return Response(text, status_code=status, media_type=media_type)
+
+
+def _stream_response(body, *, media_type: str, status: int = 200):
+    from starlette.responses import StreamingResponse
+
+    return StreamingResponse(body, status_code=status, media_type=media_type)
 
 
 def _redirect(url: str):
@@ -4337,7 +4631,60 @@ async def _api_admin_explore(request):
     question = str(body.get("question", "")).strip()
     if not question:
         return _json_response({"error": "question must not be empty"}, status=400)
-    return _json_response(answer_question(question, KB_PATH, _PROJECT_ROOT))
+    try:
+        return _json_response(
+            answer_question_agent_only(question, KB_PATH, _PROJECT_ROOT)
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=502)
+
+
+async def _api_admin_explore_live(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    body = await _request_json_or_empty(request)
+    question = str(body.get("question", "")).strip()
+    if not question:
+        return _json_response({"error": "question must not be empty"}, status=400)
+
+    async def _stream():
+        loop = asyncio.get_running_loop()
+        event_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        def emit(event: dict[str, Any]) -> None:
+            line = json.dumps(event, ensure_ascii=False)
+            loop.call_soon_threadsafe(event_queue.put_nowait, line)
+
+        def worker() -> None:
+            try:
+                result = answer_question_agent_only(
+                    question,
+                    KB_PATH,
+                    _PROJECT_ROOT,
+                    emit=emit,
+                )
+                emit({"type": "result", "payload": result, "message": "Explore completed."})
+                emit({"type": "done", "ok": True, "message": "Explore stream closed."})
+            except RuntimeError as exc:
+                emit({"type": "error", "message": str(exc)})
+                emit({"type": "done", "ok": False, "message": "Explore stream closed."})
+            finally:
+                loop.call_soon_threadsafe(event_queue.put_nowait, None)
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="sediment-admin-explore-live",
+        ).start()
+
+        while True:
+            line = await event_queue.get()
+            if line is None:
+                break
+            yield line + "\n"
+
+    return _stream_response(_stream(), media_type="application/x-ndjson")
 
 
 async def _api_admin_quartz_status(request):
@@ -4804,6 +5151,7 @@ def create_starlette_app():
         Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
         Route("/api/admin/explore", _api_admin_explore, methods=["POST"]),
+        Route("/api/admin/explore/live", _api_admin_explore_live, methods=["POST"]),
         Route("/api/admin/settings/config", _api_admin_settings_config, methods=["GET"]),
         Route("/api/admin/settings/config", _api_admin_settings_save, methods=["PUT"]),
         Route("/api/admin/settings/restart", _api_admin_settings_restart, methods=["POST"]),

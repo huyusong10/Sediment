@@ -71,6 +71,24 @@ def test_kb_explore_command_json_uses_existing_runtime(
     assert payload["sources"]
 
 
+def test_kb_explore_command_json_surfaces_runtime_error_without_fixed_answer(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    monkeypatch.setenv("MOCK_EXPLORE_INVALID_JSON", "1")
+    configure_cli_config(tmp_path)
+
+    rc = cli.main(["kb", "explore", "热备份是什么", "--json"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sources"] == []
+    assert payload["confidence"] == "low"
+    assert "invalid JSON" in payload["error"]
+    assert "answer" in payload
+
+
 def test_kb_tidy_process_once_creates_review(monkeypatch, tmp_path: Path, capsys) -> None:
     configure_cli_config(tmp_path)
 

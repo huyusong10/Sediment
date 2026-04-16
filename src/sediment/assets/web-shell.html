@@ -722,6 +722,78 @@
       display: grid;
       gap: 10px;
     }
+    .tutorial-layout {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.92fr);
+      align-items: start;
+      margin-top: 14px;
+    }
+    .tutorial-main-panel,
+    .tutorial-side-panel {
+      min-width: 0;
+    }
+    .tutorial-side-stack {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .tutorial-detail-block,
+    .tutorial-list-block {
+      margin-top: 14px;
+    }
+    .admin-kb-layout {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+      align-items: start;
+      margin-top: 14px;
+    }
+    .admin-kb-primary-panel,
+    .admin-kb-compact-panel {
+      min-width: 0;
+    }
+    .admin-kb-side-stack {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .admin-kb-panel-grid {
+      display: grid;
+      gap: 12px;
+    }
+    .admin-kb-status-line {
+      min-height: 22px;
+    }
+    .panel-header-tip {
+      flex: 0 1 min(360px, 100%);
+      min-width: min(220px, 100%);
+    }
+    .panel-header-tip .compact-note {
+      margin: 0 0 0 auto;
+    }
+    .panel-header-tip .compact-note-text {
+      text-align: right;
+    }
+    .admin-live-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .live-log-area {
+      width: 100%;
+      min-height: min(34vh, 340px);
+      padding: 12px 14px;
+      border: 1px solid rgba(125, 125, 125, 0.15);
+      background: var(--input-bg);
+      color: var(--ink);
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      resize: vertical;
+    }
     .tutorial-section-stack {
       display: grid;
       gap: 18px;
@@ -1122,7 +1194,9 @@
       .grid.cols-3,
       .grid.cols-2,
       .split,
-      .entry-detail-layout {
+      .entry-detail-layout,
+      .admin-kb-layout,
+      .tutorial-layout {
         grid-template-columns: 1fr;
       }
       .page {

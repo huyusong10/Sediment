@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -45,6 +46,9 @@ def main() -> int:
 
     prompt = _read_prompt(argv.copy())
     if "internal Sediment explore runtime" in prompt:
+        if os.environ.get("MOCK_EXPLORE_INVALID_JSON", "").strip().lower() in {"1", "true", "yes", "on"}:
+            _write_output(argv, "not-json-response")
+            return 0
         payload = {
             "answer": "热备份是在故障切换前准备好的可接管能力。",
             "sources": ["热备份", "回音壁"],

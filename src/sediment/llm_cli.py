@@ -34,6 +34,7 @@ def build_cli_command(
 
     if backend == "claude-code":
         command = [*prefix, "-p"]
+        command.append("--bare")
         if agent.get("model"):
             command.extend(["--model", str(agent["model"])])
         if agent.get("reasoning_effort"):

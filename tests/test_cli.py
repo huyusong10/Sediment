@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from sediment import cli
+from sediment.diagnostics import build_log_record, serialize_log_record
 from sediment.instances import register_instance
 from sediment.platform_store import PlatformStore
 from sediment.settings import current_config_path
@@ -733,8 +734,20 @@ def test_logs_and_help_commands(tmp_path: Path, capsys) -> None:
     log_path.write_text(
         "\n".join(
             [
-                "[server] server ready",
-                "[worker] worker boot",
+                serialize_log_record(
+                    build_log_record(
+                        component="server",
+                        event="startup.ready",
+                        message="server ready",
+                    )
+                ),
+                serialize_log_record(
+                    build_log_record(
+                        component="worker",
+                        event="worker.started",
+                        message="worker boot",
+                    )
+                ),
                 "[worker] worker idle",
             ]
         )
@@ -745,7 +758,9 @@ def test_logs_and_help_commands(tmp_path: Path, capsys) -> None:
     rc = cli.main(["logs", "show", "--component", "worker", "--lines", "2"])
     assert rc == 0
     output = capsys.readouterr().out
-    assert "[worker] worker boot" in output
+    assert "[worker]" in output
+    assert "worker.started" in output
+    assert "worker idle" in output
     assert "[server]" not in output
 
     rc = cli.main(["help", "review"])

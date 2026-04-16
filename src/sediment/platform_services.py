@@ -17,6 +17,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from sediment.diagnostics import DiagnosticLogger
 from sediment.kb import (
     audit_kb,
     extract_wikilinks,
@@ -28,6 +29,8 @@ from sediment.kb import (
     validate_index,
 )
 from sediment.platform_store import PlatformStore
+
+LOGGER = DiagnosticLogger("platform_services")
 
 FORMAL_STATUSES = {"fact", "inferred", "disputed"}
 ALLOWED_MIME_TYPES = {
@@ -236,6 +239,15 @@ def analyze_text_submission(
         submission_type=submission_type,
         shortlist=shortlist,
     )
+    LOGGER.info(
+        "submission.analysis.start",
+        "Starting submission analysis.",
+        details={
+            "title": cleaned_title,
+            "submission_type": submission_type,
+            "shortlist_count": len(shortlist),
+        },
+    )
     try:
         from sediment.llm_cli import build_cli_command, collect_output, parse_json_object
         from sediment.settings import load_settings
@@ -294,6 +306,15 @@ def analyze_text_submission(
             )
             fallback["status"] = "degraded"
             fallback["warnings"] = [f"Agent analysis failed: {detail}"]
+            LOGGER.warning(
+                "submission.analysis.degraded",
+                "Submission analysis degraded because the agent CLI failed.",
+                details={
+                    "returncode": result.returncode,
+                    "stderr": result.stderr,
+                    "stdout": result.stdout,
+                },
+            )
             return fallback
         raw_output = collect_output(invocation, stdout=result.stdout, stderr=result.stderr)
         parsed = parse_json_object(raw_output)
@@ -304,10 +325,27 @@ def analyze_text_submission(
             shortlist=shortlist,
         )
         normalized["status"] = "ok"
+        LOGGER.info(
+            "submission.analysis.completed",
+            "Submission analysis completed.",
+            details={
+                "recommended_type": normalized.get("recommended_type"),
+                "committer_action": normalized.get("committer_action"),
+            },
+        )
         return normalized
     except Exception as exc:  # noqa: BLE001
         fallback["status"] = "degraded"
         fallback["warnings"] = [f"Agent analysis unavailable: {exc}"]
+        LOGGER.error(
+            "submission.analysis.unavailable",
+            "Submission analysis fell back because the agent runtime was unavailable.",
+            error=exc,
+            details={
+                "title": cleaned_title,
+                "submission_type": submission_type,
+            },
+        )
         return fallback
 
 
@@ -328,6 +366,16 @@ def prepare_document_submission(
     )
     if not normalized_uploads:
         raise ValueError("could not find a supported document to ingest")
+    LOGGER.info(
+        "document.prepare.start",
+        "Preparing document submission payload.",
+        details={
+            "filename": filename,
+            "mime_type": mime_type,
+            "upload_count": len(normalized_uploads),
+            "skipped_count": len(skipped),
+        },
+    )
 
     extracted_parts: list[str] = []
     with tempfile.TemporaryDirectory(prefix="sediment-upload-extract-") as temp_dir:
@@ -347,6 +395,11 @@ def prepare_document_submission(
     notes_parts: list[str] = []
     if skipped:
         notes_parts.append("Skipped unsupported files: " + ", ".join(skipped[:8]))
+        LOGGER.warning(
+            "document.prepare.skipped_uploads",
+            "Skipped unsupported uploads while preparing document submission.",
+            details={"skipped": skipped[:8], "skipped_count": len(skipped)},
+        )
     notes = " | ".join(notes_parts) if notes_parts else None
 
     original_is_archive = mime_type in ZIP_MIME_TYPES
@@ -734,6 +787,17 @@ def submit_text(
         target_id=record["id"],
         details={"submission_type": submission_type},
     )
+    LOGGER.info(
+        "submission.text.created",
+        "Created text submission.",
+        submission_id=record["id"],
+        user_id=submitter_user_id,
+        details={
+            "submission_type": submission_type,
+            "submitter_ip": submitter_ip,
+            "title": cleaned_title,
+        },
+    )
     return record
 
 
@@ -802,6 +866,18 @@ def submit_document(
             "filename": safe_filename,
             "mime_type": prepared["mime_type"],
             "file_count": prepared["file_count"],
+        },
+    )
+    LOGGER.info(
+        "submission.document.created",
+        "Created document submission.",
+        submission_id=record["id"],
+        user_id=submitter_user_id,
+        details={
+            "filename": safe_filename,
+            "mime_type": prepared["mime_type"],
+            "file_count": prepared["file_count"],
+            "submitter_ip": submitter_ip,
         },
     )
     return record

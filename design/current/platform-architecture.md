@@ -176,6 +176,23 @@ flowchart LR
 - Admin Console：`/admin/overview`、`/admin/kb`（知识库管理）、`/admin/files`（文件管理）、`/admin/reviews`、`/admin/users`、`/admin/system`（设置）
 - 兼容路径：`/portal`、`/portal/graph-view`、`/admin`
 
+### 3.9 Diagnostic Logging
+
+职责：
+
+- 为排障、运行态回放、值班诊断和后台 Live 面板提供统一的诊断事件源
+- 覆盖 launcher、server、worker、Agent Runner、平台服务层和关键 CLI 诊断入口
+- 与审计日志分层：诊断日志回答“系统当时做了什么”，审计日志回答“谁批准或触发了什么”
+
+结构与规则统一由 [diagnostic-logging.md](diagnostic-logging.md) 约束。平台架构层只锁定以下判断：
+
+- 平台长期日志文件保存结构化 JSONL，作为唯一诊断真相源
+- HTTP 请求、任务执行与 Agent 运行都必须使用同一套 `component / event / 关联字段` 契约
+- 边界入口应绑定 `request_id / job_id / submission_id` 等关联上下文，用于串联跨模块诊断
+- `sediment logs show/follow` 负责把原始 JSONL 渲染成可读摘要，同时兼容历史前缀日志
+- `/admin/kb` Live 负责当前动作的实时轨迹，不能替代长期平台日志
+- 审计日志继续保存在工作流存储中，不与诊断日志共用 schema
+
 ## 4. 技术选择
 
 ### 4.1 后端

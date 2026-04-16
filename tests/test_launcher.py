@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from sediment import launcher
+from sediment.diagnostics import parse_log_record
 from tests.config_helpers import write_test_config
 
 
@@ -66,11 +67,31 @@ def test_run_managed_processes_starts_and_stops_children(monkeypatch) -> None:
         timer.cancel()
 
     output = sink.getvalue()
+    records = [parse_log_record(line) for line in output.splitlines() if line.strip()]
     assert rc == 0
-    assert "[up] Starting server:" in output
-    assert "[server] server ready" in output
-    assert "[worker] worker ready" in output
-    assert "[up] Stopping server..." in output
+    assert all(record is not None for record in records)
+    assert any(record["component"] == "launcher" and record["event"] == "process.start" for record in records if record)
+    assert any(
+        record["component"] == "server"
+        and record["event"] == "legacy.output"
+        and record["message"] == "server ready"
+        for record in records
+        if record
+    )
+    assert any(
+        record["component"] == "worker"
+        and record["event"] == "legacy.output"
+        and record["message"] == "worker ready"
+        for record in records
+        if record
+    )
+    assert any(
+        record["component"] == "launcher"
+        and record["event"] == "process.stop_requested"
+        and record["details"]["process_name"] == "server"
+        for record in records
+        if record
+    )
 
 
 def test_run_managed_processes_returns_nonzero_when_child_exits_early(monkeypatch) -> None:
@@ -95,8 +116,14 @@ def test_run_managed_processes_returns_nonzero_when_child_exits_early(monkeypatc
     )
 
     output = sink.getvalue()
+    records = [parse_log_record(line) for line in output.splitlines() if line.strip()]
     assert rc == 3
-    assert "server exited" in output
+    assert all(record is not None for record in records)
+    assert any(
+        record["component"] == "launcher" and record["event"] == "process.startup_exit"
+        for record in records
+        if record
+    )
     monkeypatch.delenv("MOCK_SERVER_FAIL_FAST", raising=False)
     monkeypatch.delenv("MOCK_SERVICE_RUN_SECONDS", raising=False)
 
@@ -127,8 +154,14 @@ def test_run_managed_processes_detects_exit_during_ready_probe(monkeypatch) -> N
     )
 
     output = sink.getvalue()
+    records = [parse_log_record(line) for line in output.splitlines() if line.strip()]
     assert rc == 3
-    assert "exited during startup" in output
+    assert all(record is not None for record in records)
+    assert any(
+        record["component"] == "launcher" and record["event"] == "process.startup_exit"
+        for record in records
+        if record
+    )
     monkeypatch.delenv("MOCK_SERVER_FAIL_FAST", raising=False)
     monkeypatch.delenv("MOCK_SERVICE_RUN_SECONDS", raising=False)
 
@@ -154,6 +187,14 @@ def test_run_managed_processes_treats_unexpected_zero_exit_as_failure(monkeypatc
     )
 
     output = sink.getvalue()
+    records = [parse_log_record(line) for line in output.splitlines() if line.strip()]
     assert rc == 1
-    assert "exited with code 0" in output
+    assert all(record is not None for record in records)
+    assert any(
+        record["component"] == "launcher"
+        and record["event"] == "process.exit"
+        and record["details"]["returncode"] == 0
+        for record in records
+        if record
+    )
     monkeypatch.delenv("MOCK_SERVICE_RUN_SECONDS", raising=False)

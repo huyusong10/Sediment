@@ -12,6 +12,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from sediment.diagnostics import DiagnosticLogger, bind_log_context
 from sediment.kb import inventory
 from sediment.llm_cli import build_cli_command, collect_output
 from sediment.package_data import read_skill_text
@@ -87,6 +88,8 @@ TIDY_SCHEMA = json.dumps(
     ensure_ascii=False,
 )
 
+LOGGER = DiagnosticLogger("agent_runner")
+
 
 class AgentRunner:
     def __init__(
@@ -112,19 +115,35 @@ class AgentRunner:
     def run_job_now(self, job_id: str) -> None:
         job = self.store.get_job(job_id)
         if not job:
+            LOGGER.warning(
+                "job.missing",
+                "Agent runner could not find the requested job.",
+                job_id=job_id,
+            )
             return
-        if job["job_type"] == "ingest":
-            self._run_ingest(job)
-            return
-        if job["job_type"] == "tidy":
-            self._run_tidy(job)
-            return
-        self.store.update_job(
-            job_id,
-            status="failed",
-            finished_at=utc_now(),
-            error_message=f"unsupported job type: {job['job_type']}",
-        )
+        with bind_log_context(job_id=job["id"]):
+            LOGGER.info(
+                "job.dispatch",
+                "Agent runner dispatching job.",
+                details={"job_type": job["job_type"]},
+            )
+            if job["job_type"] == "ingest":
+                self._run_ingest(job)
+                return
+            if job["job_type"] == "tidy":
+                self._run_tidy(job)
+                return
+            LOGGER.error(
+                "job.unsupported",
+                "Encountered unsupported job type.",
+                details={"job_type": job["job_type"]},
+            )
+            self.store.update_job(
+                job_id,
+                status="failed",
+                finished_at=utc_now(),
+                error_message=f"unsupported job type: {job['job_type']}",
+            )
 
     def _run_ingest(self, job: dict[str, Any]) -> None:
         submission = self.store.get_submission(job["source_submission_id"])
@@ -138,124 +157,172 @@ class AgentRunner:
             return
         workspace = stage_workspace_copy(self.kb_path, self.workspaces_dir, job["id"])
         try:
-            self.store.update_job(
-                job["id"],
-                status="running",
-                started_at=utc_now(),
-                runner_host=socket.gethostname(),
-                workspace_path=str(workspace),
-            )
-            try:
-                payload = self._run_ingest_agent(job, submission, workspace)
-            except Exception as exc:  # noqa: BLE001
+            with bind_log_context(job_id=job["id"], submission_id=submission["id"]):
+                self.store.update_job(
+                    job["id"],
+                    status="running",
+                    started_at=utc_now(),
+                    runner_host=socket.gethostname(),
+                    workspace_path=str(workspace),
+                )
+                LOGGER.info(
+                    "ingest.started",
+                    "Started ingest job.",
+                    details={"workspace": workspace},
+                )
+                try:
+                    payload = self._run_ingest_agent(job, submission, workspace)
+                except Exception as exc:  # noqa: BLE001
+                    latest = self.store.get_job(job["id"])
+                    if latest and latest["status"] == "cancel_requested":
+                        LOGGER.warning(
+                            "ingest.cancelled",
+                            "Ingest job was cancelled by admin.",
+                        )
+                        self.store.update_job(
+                            job["id"],
+                            status="cancelled",
+                            finished_at=utc_now(),
+                            error_message="job cancelled by admin",
+                            workspace_path=None,
+                        )
+                        self.store.update_submission(submission["id"], status="triaged")
+                        return
+                    LOGGER.error(
+                        "ingest.failed",
+                        "Ingest job failed.",
+                        error=exc,
+                    )
+                    self.store.update_job(
+                        job["id"],
+                        status="failed",
+                        finished_at=utc_now(),
+                        error_message=str(exc),
+                        workspace_path=None,
+                    )
+                    self.store.update_submission(submission["id"], status="triaged")
+                    return
+
                 latest = self.store.get_job(job["id"])
                 if latest and latest["status"] == "cancel_requested":
+                    LOGGER.warning(
+                        "ingest.cancelled",
+                        "Ingest job was cancelled after the agent completed.",
+                    )
                     self.store.update_job(
                         job["id"],
                         status="cancelled",
                         finished_at=utc_now(),
                         error_message="job cancelled by admin",
+                        result_payload=payload,
                         workspace_path=None,
                     )
                     self.store.update_submission(submission["id"], status="triaged")
                     return
-                self.store.update_job(
-                    job["id"],
-                    status="failed",
-                    finished_at=utc_now(),
-                    error_message=str(exc),
-                    workspace_path=None,
-                )
-                self.store.update_submission(submission["id"], status="triaged")
-                return
 
-            latest = self.store.get_job(job["id"])
-            if latest and latest["status"] == "cancel_requested":
                 self.store.update_job(
                     job["id"],
-                    status="cancelled",
+                    status="awaiting_review",
                     finished_at=utc_now(),
-                    error_message="job cancelled by admin",
                     result_payload=payload,
                     workspace_path=None,
                 )
-                self.store.update_submission(submission["id"], status="triaged")
-                return
-
-            self.store.update_job(
-                job["id"],
-                status="awaiting_review",
-                finished_at=utc_now(),
-                result_payload=payload,
-                workspace_path=None,
-            )
-            self.store.update_submission(submission["id"], status="draft_ready")
-            if self.store.find_review_by_job(job["id"]) is None:
-                self.store.create_review(
-                    job_id=job["id"],
-                    submission_id=submission["id"],
-                    review_type="ingest",
+                self.store.update_submission(submission["id"], status="draft_ready")
+                LOGGER.info(
+                    "ingest.awaiting_review",
+                    "Ingest job completed and is awaiting review.",
+                    details={"operation_count": len(payload.get("operations", []))},
                 )
+                if self.store.find_review_by_job(job["id"]) is None:
+                    self.store.create_review(
+                        job_id=job["id"],
+                        submission_id=submission["id"],
+                        review_type="ingest",
+                    )
         finally:
             self._cleanup_workspace(workspace)
 
     def _run_tidy(self, job: dict[str, Any]) -> None:
         workspace = stage_workspace_copy(self.kb_path, self.workspaces_dir, job["id"])
         try:
-            self.store.update_job(
-                job["id"],
-                status="running",
-                started_at=utc_now(),
-                runner_host=socket.gethostname(),
-                workspace_path=str(workspace),
-            )
-            try:
-                payload = self._run_tidy_agent(job, workspace)
-            except Exception as exc:  # noqa: BLE001
+            with bind_log_context(job_id=job["id"]):
+                self.store.update_job(
+                    job["id"],
+                    status="running",
+                    started_at=utc_now(),
+                    runner_host=socket.gethostname(),
+                    workspace_path=str(workspace),
+                )
+                LOGGER.info(
+                    "tidy.started",
+                    "Started tidy job.",
+                    details={"workspace": workspace},
+                )
+                try:
+                    payload = self._run_tidy_agent(job, workspace)
+                except Exception as exc:  # noqa: BLE001
+                    latest = self.store.get_job(job["id"])
+                    if latest and latest["status"] == "cancel_requested":
+                        LOGGER.warning(
+                            "tidy.cancelled",
+                            "Tidy job was cancelled by admin.",
+                        )
+                        self.store.update_job(
+                            job["id"],
+                            status="cancelled",
+                            finished_at=utc_now(),
+                            error_message="job cancelled by admin",
+                            workspace_path=None,
+                        )
+                        return
+                    LOGGER.error(
+                        "tidy.failed",
+                        "Tidy job failed.",
+                        error=exc,
+                    )
+                    self.store.update_job(
+                        job["id"],
+                        status="failed",
+                        finished_at=utc_now(),
+                        error_message=str(exc),
+                        workspace_path=None,
+                    )
+                    return
+
                 latest = self.store.get_job(job["id"])
                 if latest and latest["status"] == "cancel_requested":
+                    LOGGER.warning(
+                        "tidy.cancelled",
+                        "Tidy job was cancelled after the agent completed.",
+                    )
                     self.store.update_job(
                         job["id"],
                         status="cancelled",
                         finished_at=utc_now(),
                         error_message="job cancelled by admin",
+                        result_payload=payload,
                         workspace_path=None,
                     )
                     return
-                self.store.update_job(
-                    job["id"],
-                    status="failed",
-                    finished_at=utc_now(),
-                    error_message=str(exc),
-                    workspace_path=None,
-                )
-                return
 
-            latest = self.store.get_job(job["id"])
-            if latest and latest["status"] == "cancel_requested":
                 self.store.update_job(
                     job["id"],
-                    status="cancelled",
+                    status="awaiting_review",
                     finished_at=utc_now(),
-                    error_message="job cancelled by admin",
                     result_payload=payload,
                     workspace_path=None,
                 )
-                return
-
-            self.store.update_job(
-                job["id"],
-                status="awaiting_review",
-                finished_at=utc_now(),
-                result_payload=payload,
-                workspace_path=None,
-            )
-            if self.store.find_review_by_job(job["id"]) is None:
-                self.store.create_review(
-                    job_id=job["id"],
-                    submission_id=job.get("source_submission_id"),
-                    review_type="tidy",
+                LOGGER.info(
+                    "tidy.awaiting_review",
+                    "Tidy job completed and is awaiting review.",
+                    details={"operation_count": len(payload.get("operations", []))},
                 )
+                if self.store.find_review_by_job(job["id"]) is None:
+                    self.store.create_review(
+                        job_id=job["id"],
+                        submission_id=job.get("source_submission_id"),
+                        review_type="tidy",
+                    )
         finally:
             self._cleanup_workspace(workspace)
 
@@ -451,6 +518,17 @@ class AgentRunner:
                 cwd=cwd,
                 extra_args=["--json-schema", schema],
             )
+            LOGGER.info(
+                "agent_cli.start",
+                "Starting agent CLI for managed job.",
+                job_id=job_id,
+                details={
+                    "backend": invocation.backend,
+                    "command": invocation.command,
+                    "cwd": cwd,
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
             try:
                 process = subprocess.Popen(
                     invocation.command,
@@ -465,6 +543,13 @@ class AgentRunner:
                     process.stdin.close()
                     process.stdin = None
             except FileNotFoundError as exc:  # pragma: no cover - environment dependent
+                LOGGER.error(
+                    "agent_cli.unavailable",
+                    "Agent CLI executable is unavailable.",
+                    job_id=job_id,
+                    error=exc,
+                    details={"command": invocation.command},
+                )
                 raise RuntimeError(
                     f"agent CLI unavailable: {exc.filename or invocation.command[0]}"
                 ) from exc
@@ -474,6 +559,11 @@ class AgentRunner:
                 self.store.heartbeat_job(job_id)
                 latest = self.store.get_job(job_id)
                 if latest and latest["status"] == "cancel_requested":
+                    LOGGER.warning(
+                        "agent_cli.cancel_requested",
+                        "Cancelling agent CLI because the job was cancelled.",
+                        job_id=job_id,
+                    )
                     process.terminate()
                     try:
                         process.wait(timeout=5)
@@ -483,6 +573,12 @@ class AgentRunner:
                 if process.poll() is not None:
                     break
                 if time.monotonic() - started > timeout_seconds:
+                    LOGGER.error(
+                        "agent_cli.timeout",
+                        "Agent CLI timed out.",
+                        job_id=job_id,
+                        details={"timeout_seconds": timeout_seconds},
+                    )
                     process.terminate()
                     try:
                         process.wait(timeout=5)
@@ -494,10 +590,36 @@ class AgentRunner:
             stdout, stderr = process.communicate()
             if process.returncode != 0:
                 detail = stderr.strip() or stdout.strip() or f"exit code {process.returncode}"
+                LOGGER.error(
+                    "agent_cli.failed",
+                    "Agent CLI exited with a non-zero code.",
+                    job_id=job_id,
+                    details={
+                        "returncode": process.returncode,
+                        "stderr": stderr,
+                        "stdout": stdout,
+                    },
+                )
                 raise RuntimeError(f"agent CLI failed: {detail}")
             raw_output = collect_output(invocation, stdout=stdout, stderr=stderr)
             if not raw_output:
+                LOGGER.error(
+                    "agent_cli.empty_output",
+                    "Agent CLI returned no output.",
+                    job_id=job_id,
+                    details={"stdout": stdout, "stderr": stderr},
+                )
                 raise RuntimeError("agent CLI returned no output")
+            LOGGER.info(
+                "agent_cli.completed",
+                "Agent CLI completed successfully.",
+                job_id=job_id,
+                details={
+                    "returncode": process.returncode,
+                    "stdout": stdout,
+                    "stderr": stderr,
+                },
+            )
             return self._parse_cli_json(raw_output)
 
     @staticmethod
@@ -522,6 +644,11 @@ class AgentRunner:
                 continue
             if isinstance(payload, dict):
                 return payload
+        LOGGER.error(
+            "agent_cli.invalid_json",
+            "Agent CLI did not return a valid JSON object.",
+            details={"raw_output": raw_output},
+        )
         raise RuntimeError("agent CLI did not return a valid JSON object")
 
     def _cleanup_workspace(self, workspace: Path) -> None:

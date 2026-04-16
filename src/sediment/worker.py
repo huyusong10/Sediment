@@ -5,6 +5,7 @@ import socket
 import time
 from pathlib import Path
 
+from sediment.diagnostics import DiagnosticLogger
 from sediment.platform_store import PlatformStore
 from sediment.runtime import (
     build_agent_runner,
@@ -23,6 +24,8 @@ from sediment.runtime import (
     project_root as runtime_project_root,
 )
 from sediment.settings import set_active_config_path
+
+LOGGER = DiagnosticLogger("worker")
 
 
 def project_root() -> Path:
@@ -54,6 +57,15 @@ def process_next_job(*, store: PlatformStore | None = None, runner=None) -> bool
     )
     if job is None:
         return False
+    LOGGER.info(
+        "job.claimed",
+        "Worker claimed a job.",
+        job_id=job["id"],
+        details={
+            "job_type": job["job_type"],
+            "attempt_count": job.get("attempt_count"),
+        },
+    )
     runner.run_job_now(job["id"])
     return True
 
@@ -97,16 +109,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.once:
         processed = process_queue_until_idle(max_jobs=args.max_jobs)
-        print(f"Sediment worker processed {processed} job(s).")
+        LOGGER.info(
+            "worker.once.completed",
+            "Sediment worker processed queued jobs once.",
+            details={"processed_jobs": processed, "max_jobs": args.max_jobs},
+        )
         return 0
 
     store = build_store()
     runner = build_runner(store)
     processed = 0
-    print("Sediment worker started.")
-    print(f"KB path:    {kb_path()}")
-    print(f"DB path:    {platform_paths()['db_path']}")
-    print(f"Hostname:   {socket.gethostname()}")
+    LOGGER.info(
+        "worker.started",
+        "Sediment worker started.",
+        details={
+            "kb_path": kb_path(),
+            "db_path": platform_paths()["db_path"],
+            "hostname": socket.gethostname(),
+            "poll_interval_seconds": max(args.poll_interval, 0.2),
+            "max_jobs": args.max_jobs,
+        },
+    )
     while True:
         if args.max_jobs is not None and processed >= args.max_jobs:
             break
@@ -115,7 +138,11 @@ def main(argv: list[str] | None = None) -> int:
             processed += 1
             continue
         time.sleep(max(args.poll_interval, 0.2))
-    print(f"Sediment worker exiting after processing {processed} job(s).")
+    LOGGER.info(
+        "worker.stopped",
+        "Sediment worker exiting.",
+        details={"processed_jobs": processed},
+    )
     return 0
 
 

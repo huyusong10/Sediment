@@ -23,6 +23,7 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     page = client.get("/", headers={"accept-language": "en-US"})
     assert page.status_code == 200
+    assert page.headers.get("x-request-id")
     assert 'data-testid="portal-search-input"' in page.text
     assert 'data-testid="portal-submit-text-button"' not in page.text
     assert 'href="/tutorial?lang=en"' in page.text
@@ -98,7 +99,9 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert portal_asset.status_code == 200
     assert "loadHome" in portal_asset.text
 
-    home = client.get("/api/portal/home").json()
+    home_response = client.get("/api/portal/home")
+    assert home_response.headers.get("x-request-id")
+    home = home_response.json()
     assert home["counts"]["formal_entries"] >= 2
 
     suggest = client.get("/api/portal/search/suggest?q=%E7%83%AD%E5%A4%87").json()
@@ -117,6 +120,7 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
         },
     )
     assert created.status_code == 201
+    assert created.headers.get("x-request-id")
     assert created.json()["analysis"]["recommended_type"] == "concept"
 
     submissions = client.get("/api/admin/submissions").json()["submissions"]
@@ -200,6 +204,7 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     admin_page = client.get("/admin/overview", headers={"accept-language": "en-US"})
     assert admin_page.status_code == 200
+    assert admin_page.headers.get("x-request-id")
     assert 'data-testid="admin-page-title"' in admin_page.text
     assert 'data-testid="admin-message"' in admin_page.text
     assert 'data-testid="admin-stats"' in admin_page.text

@@ -27,6 +27,7 @@ from sediment.auth import (
     disable_config_user,
     find_user_by_id,
 )
+from sediment.diagnostics import coerce_log_record, record_matches_component, render_log_record
 from sediment.cli_help import render_help as render_help_topic
 from sediment.cli_parser import build_cli_parser
 from sediment.control import (
@@ -1181,7 +1182,8 @@ def start_daemon(args) -> int:
     lines = tail_lines(paths["log"], limit=30)
     if lines:
         print("--- recent log ---", file=sys.stderr)
-        print("\n".join(lines), file=sys.stderr)
+        rendered = [render_log_record(coerce_log_record(line, default_component="platform")) for line in lines]
+        print("\n".join(rendered), file=sys.stderr)
     return 1
 
 
@@ -2561,11 +2563,13 @@ def review_reject_command(args) -> int:
     return _review_decision_command(args, "reject")
 
 
-def _filter_log_lines(lines: list[str], component: str) -> list[str]:
-    if component == "all":
-        return lines
-    prefix = f"[{component}]"
-    return [line for line in lines if line.startswith(prefix)]
+def _filter_log_lines(lines: list[str], component: str) -> list[dict[str, Any]]:
+    records = [
+        coerce_log_record(line, default_component="platform")
+        for line in lines
+        if str(line).strip()
+    ]
+    return [record for record in records if record_matches_component(record, component)]
 
 
 def logs_show_command(args) -> int:
@@ -2577,7 +2581,7 @@ def logs_show_command(args) -> int:
         print("No matching log lines are available yet.")
         print_next_steps(scoped_command("server start"))
         return 0
-    print("\n".join(lines))
+    print("\n".join(render_log_record(line) for line in lines))
     return 0
 
 
@@ -2587,7 +2591,7 @@ def logs_follow_command(args) -> int:
     raw_lines = tail_lines(log_path, limit=max(args.lines * 4, args.lines))
     existing = _filter_log_lines(raw_lines, args.component)
     if existing:
-        print("\n".join(existing[-args.lines :]))
+        print("\n".join(render_log_record(line) for line in existing[-args.lines :]))
     with log_path.open("a+", encoding="utf-8") as handle:
         handle.seek(0, os.SEEK_END)
         try:
@@ -2596,9 +2600,9 @@ def logs_follow_command(args) -> int:
                 if not line:
                     time.sleep(0.3)
                     continue
-                line = line.rstrip("\n")
-                if args.component == "all" or line.startswith(f"[{args.component}]"):
-                    print(line)
+                record = coerce_log_record(line.rstrip("\n"), default_component="platform")
+                if record_matches_component(record, args.component):
+                    print(render_log_record(record))
         except KeyboardInterrupt:
             return 0
 

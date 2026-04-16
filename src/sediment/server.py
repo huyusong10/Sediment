@@ -74,6 +74,7 @@ from sediment.control import (
     submit_text_request,
     system_status_payload,
 )
+from sediment.diagnostics import DiagnosticLogger, bind_log_context
 from sediment.i18n import tr
 from sediment.instances import user_state_root
 from sediment.kb import resolve_kb_document_path
@@ -186,6 +187,10 @@ from sediment.skills.explore.scripts.kb_query import (
     validate_answer,
 )
 from sediment.web_ui import admin_html, admin_login_html, portal_graph_html, portal_html
+
+SERVER_LOGGER = DiagnosticLogger("server")
+HTTP_LOGGER = DiagnosticLogger("http")
+EXPLORE_LOGGER = DiagnosticLogger("explore")
 
 DEFAULT_CONTRACT = {
     "shortlist_limit": 8,
@@ -1071,6 +1076,17 @@ def _emit_explore_event(
     message: str,
     **extra: Any,
 ) -> None:
+    level = "INFO"
+    if event_type == "retry":
+        level = "WARNING"
+    elif event_type == "error":
+        level = "ERROR"
+    EXPLORE_LOGGER.log(
+        level,
+        f"explore.{event_type}",
+        message,
+        details=extra or None,
+    )
     if emit is None:
         return
     payload = {
@@ -3693,6 +3709,15 @@ def _schedule_admin_restart() -> dict[str, Any]:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+    SERVER_LOGGER.info(
+        "admin.restart_scheduled",
+        "Scheduled a managed daemon restart from the admin surface.",
+        details={
+            "config_path": CONFIG_PATH.resolve(),
+            "log_path": log_path,
+            "command": restart_command,
+        },
+    )
     return {
         "scheduled": True,
         "config_path": str(CONFIG_PATH.resolve()),
@@ -5090,6 +5115,72 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_wrapper)
 
 
+class RequestLoggingMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = str(scope.get("path", "")).strip() or "/"
+        if path.startswith("/ui-assets/") or path.startswith("/quartz") or path == "/healthz":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = hashlib.sha1(
+            f"{time.time_ns()}:{path}:{id(scope)}".encode("utf-8")
+        ).hexdigest()[:12]
+        scope["sediment.request_id"] = request_id
+        method = str(scope.get("method", "GET")).upper()
+        client = scope.get("client") or ("unknown", 0)
+        started = time.perf_counter()
+        status_code = 500
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                from starlette.datastructures import MutableHeaders
+
+                status_code = int(message.get("status", 500))
+                headers = MutableHeaders(raw=message["headers"])
+                headers.setdefault("X-Request-ID", request_id)
+            await send(message)
+
+        try:
+            with bind_log_context(request_id=request_id):
+                await self.app(scope, receive, send_wrapper)
+        except Exception as exc:  # noqa: BLE001
+            HTTP_LOGGER.error(
+                "request.failed",
+                "HTTP request raised an exception.",
+                error=exc,
+                request_id=request_id,
+                details={
+                    "method": method,
+                    "path": path,
+                    "client_ip": client[0],
+                    "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                },
+            )
+            raise
+
+        HTTP_LOGGER.log(
+            "ERROR" if status_code >= 500 else ("WARNING" if status_code >= 400 else "INFO"),
+            "request.completed",
+            "HTTP request completed.",
+            request_id=request_id,
+            details={
+                "method": method,
+                "path": path,
+                "status_code": status_code,
+                "client_ip": client[0],
+                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+        )
+
+
 def create_starlette_app():
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
@@ -5170,7 +5261,10 @@ def create_starlette_app():
         )
     )
     return Starlette(
-        middleware=[Middleware(SecurityHeadersMiddleware)],
+        middleware=[
+            Middleware(RequestLoggingMiddleware),
+            Middleware(SecurityHeadersMiddleware),
+        ],
         routes=routes,
     )
 
@@ -5180,17 +5274,23 @@ def main(argv: list[str] | None = None):
 
     refresh_runtime_state()
     starlette_app = create_starlette_app()
-    print(f"Sediment MCP Server listening on http://{HOST}:{PORT}")
-    print(f"Portal:        http://{HOST}:{PORT}/")
-    print(f"Search:        http://{HOST}:{PORT}/search")
-    print(f"Submit:        http://{HOST}:{PORT}/submit")
-    print(f"Quartz:        http://{HOST}:{PORT}/quartz/")
-    print(f"Admin:         http://{HOST}:{PORT}/admin/overview")
-    print(f"Health:        http://{HOST}:{PORT}/healthz")
-    print(f"SSE endpoint:  http://{HOST}:{PORT}{SSE_ENDPOINT}")
-    print(f"POST endpoint: http://{HOST}:{PORT}{SSE_ENDPOINT}")
-    print(f"In-process jobs: {'enabled' if RUN_JOBS_IN_PROCESS else 'disabled'}")
-    uvicorn.run(starlette_app, host=HOST, port=PORT)
+    SERVER_LOGGER.info(
+        "startup.ready",
+        "Sediment MCP server is starting.",
+        details={
+            "listen_url": f"http://{HOST}:{PORT}",
+            "portal_url": f"http://{HOST}:{PORT}/",
+            "search_url": f"http://{HOST}:{PORT}/search",
+            "submit_url": f"http://{HOST}:{PORT}/submit",
+            "quartz_url": f"http://{HOST}:{PORT}/quartz/",
+            "admin_url": f"http://{HOST}:{PORT}/admin/overview",
+            "health_url": f"http://{HOST}:{PORT}/healthz",
+            "sse_endpoint": f"http://{HOST}:{PORT}{SSE_ENDPOINT}",
+            "post_endpoint": f"http://{HOST}:{PORT}{SSE_ENDPOINT}",
+            "run_jobs_in_process": RUN_JOBS_IN_PROCESS,
+        },
+    )
+    uvicorn.run(starlette_app, host=HOST, port=PORT, access_log=False, log_level="warning")
 
 
 if __name__ == "__main__":

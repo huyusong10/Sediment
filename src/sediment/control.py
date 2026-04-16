@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from sediment.diagnostics import DiagnosticLogger
 from sediment.platform_services import (
     apply_operations,
     build_health_issue_queue,
@@ -13,6 +14,8 @@ from sediment.platform_services import (
     submit_text,
 )
 from sediment.platform_store import PlatformStore
+
+LOGGER = DiagnosticLogger("control")
 
 TIDY_SCOPES = {"full", "graph", "indexes", "health_blocking"}
 
@@ -180,6 +183,14 @@ def enqueue_ingest_job(
         target_id=job["id"],
         details={"submission_id": submission_id},
     )
+    LOGGER.info(
+        "job.enqueue_ingest",
+        "Enqueued ingest job.",
+        job_id=job["id"],
+        submission_id=submission_id,
+        actor_id=actor_id,
+        details={"actor_role": actor_role},
+    )
     return job
 
 
@@ -219,6 +230,16 @@ def enqueue_tidy_job(
             "scope": request_payload["scope"],
             "reason": request_payload["reason"],
             "issue": request_payload["issue"],
+        },
+    )
+    LOGGER.info(
+        "job.enqueue_tidy",
+        "Enqueued tidy job.",
+        job_id=job["id"],
+        actor_id=actor_id,
+        details={
+            "actor_role": actor_role,
+            "scope": request_payload["scope"],
         },
     )
     return job

@@ -73,6 +73,7 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
   - 直接进入 Quartz
   - 由 Sediment 负责 `exact -> .html -> /index.html -> 404.html` 解析
   - 前台主导航里的 `Quartz` 默认使用新标签打开
+  - Sediment 托管 Quartz 时，图谱等前端运行时能力必须保持可用；路由级安全头不能把 Quartz 自带的图谱运行时拦掉
 - `/portal/graph-view`
   - 兼容性入口
   - Quartz 已构建时重定向到 `/quartz/`

@@ -5082,12 +5082,14 @@ class SecurityHeadersMiddleware:
                 headers.setdefault("Referrer-Policy", "no-referrer")
                 if path.startswith("/quartz"):
                     headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+                    # Quartz graph rendering uses Pixi's runtime, which currently needs
+                    # script evaluation enabled in the hosted Quartz route.
                     headers.setdefault(
                         "Content-Security-Policy",
                         "default-src 'self'; "
                         "img-src 'self' data: blob: https:; "
                         "style-src 'self' 'unsafe-inline' https:; "
-                        "script-src 'self' 'unsafe-inline' https: blob:; "
+                        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:; "
                         "connect-src 'self'; "
                         "worker-src 'self' blob:; "
                         "font-src 'self' data: https:; "

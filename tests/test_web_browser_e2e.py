@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -10,6 +12,7 @@ pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import expect, sync_playwright
 
+from sediment.quartz_runtime import build_quartz_site
 from tests.support.platform_harness import live_server
 
 pytestmark = [pytest.mark.e2e, pytest.mark.browser]
@@ -29,6 +32,19 @@ def _browser_page():
         finally:
             context.close()
             browser.close()
+
+
+def _installed_quartz_runtime_dir() -> Path:
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Sediment" / "quartz-runtime" / "quartz"
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA", "").strip()
+        base = Path(appdata) if appdata else home / "AppData" / "Roaming"
+        return base / "Sediment" / "quartz-runtime" / "quartz"
+    xdg_state = os.environ.get("XDG_STATE_HOME", "").strip()
+    base = Path(xdg_state) if xdg_state else home / ".local" / "state"
+    return base / "sediment" / "quartz-runtime" / "quartz"
 
 
 def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> None:
@@ -321,3 +337,24 @@ def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypat
             expect(page).not_to_have_url(re.compile(".*/quartz/.*"))
             expect(popup).to_have_url(re.compile(".*/quartz/.*"))
             expect(popup.locator("body")).to_contain_text("Quartz Ready")
+
+
+def test_quartz_graph_renders_when_served_through_sediment(tmp_path: Path, monkeypatch) -> None:
+    with live_server(tmp_path, monkeypatch) as live:
+        runtime_dir = _installed_quartz_runtime_dir()
+        if not ((runtime_dir / "package.json").exists() and (runtime_dir / "node_modules").exists()):
+            pytest.skip("Quartz runtime is not installed in the local Sediment user state.")
+
+        monkeypatch.setattr(live["server_module"], "QUARTZ_RUNTIME_DIR", runtime_dir)
+        build_quartz_site(
+            kb_path=live["server_module"].KB_PATH,
+            runtime_dir=runtime_dir,
+            site_dir=live["server_module"].QUARTZ_SITE_DIR,
+            knowledge_name=live["server_module"].KNOWLEDGE_NAME,
+            locale="zh",
+        )
+
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/quartz/", wait_until="networkidle")
+            page.wait_for_timeout(1500)
+            expect(page.locator(".graph-container canvas")).to_have_count(1)

@@ -324,7 +324,10 @@ def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, mon
     assert quartz_page.status_code == 200
     assert "Built Quartz" in quartz_page.text
     assert "worker-src 'self' blob:" in quartz_page.headers["content-security-policy"]
-    assert "script-src 'self' 'unsafe-inline' https: blob:" in quartz_page.headers["content-security-policy"]
+    assert (
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https: blob:"
+        in quartz_page.headers["content-security-policy"]
+    )
 
     quartz_postscript = client.get("/quartz/postscript.js")
     assert quartz_postscript.status_code == 200

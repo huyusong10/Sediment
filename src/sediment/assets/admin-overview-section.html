@@ -1,29 +1,26 @@
-<section class="grid cols-2 align-start">
-  <div class="panel">
+<section class="admin-overview-grid admin-overview-layout" data-testid="admin-overview-layout">
+  <div class="panel" data-testid="admin-overview-queue-panel">
     <div class="row spread">
       <h2>__QUEUE_TITLE__</h2>
       <span class="tabs-note">__QUEUE_NOTE__</span>
     </div>
     <div class="stats" id="admin-stats" data-testid="admin-stats"></div>
   </div>
-  <div class="panel">
+  <div class="panel" data-testid="admin-overview-health-panel">
     <div class="row spread">
       <h2>__HEALTH_TITLE__</h2>
       <span class="tabs-note">__HEALTH_NOTE__</span>
     </div>
     <div class="severity-bar" id="severity-bars" data-testid="admin-severity"></div>
   </div>
-</section>
-
-<section class="grid cols-2 align-start">
-  <div class="panel">
+  <div class="panel" data-testid="admin-overview-issue-panel">
     <div class="row spread">
       <h2>__ISSUE_TITLE__</h2>
       <span class="tabs-note">__ISSUE_NOTE__</span>
     </div>
     <div class="list scroll-list overview-issue-list" id="issue-list" data-testid="admin-issue-list"></div>
   </div>
-  <div class="panel">
+  <div class="panel" data-testid="admin-overview-activity-panel">
     <div class="row spread">
       <h2>__ACTIVITY_TITLE__</h2>
       <span class="tabs-note">__ACTIVITY_NOTE__</span>

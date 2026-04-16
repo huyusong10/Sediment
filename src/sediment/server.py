@@ -31,7 +31,6 @@ import mimetypes
 import os
 import queue
 import re
-import shlex
 import subprocess
 import sys
 import tempfile
@@ -78,7 +77,7 @@ from sediment.diagnostics import DiagnosticLogger, bind_log_context
 from sediment.i18n import tr
 from sediment.instances import user_state_root
 from sediment.kb import resolve_kb_document_path
-from sediment.llm_cli import build_cli_command, collect_output
+from sediment.llm_cli import AgentCliInvocation, build_cli_command, collect_output
 from sediment.package_data import read_asset_text, read_skill_text
 from sediment.platform_services import (
     build_health_issue_queue,
@@ -1103,6 +1102,20 @@ def _trim_explore_excerpt(text: str, limit: int = 400) -> str:
     if len(normalized) <= limit:
         return normalized
     return normalized[: max(limit - 3, 0)] + "..."
+
+
+def _summarize_explore_command(invocation: AgentCliInvocation, *, cwd: Path) -> str:
+    command = list(invocation.command)
+    input_mode = "stdin" if invocation.stdin_data is not None else "argv"
+    if "--json-schema" in command:
+        schema_mode = "structured-json"
+    else:
+        schema_mode = "default-output"
+    executable = Path(command[0]).name if command else invocation.backend
+    return (
+        "Launching agent CLI "
+        f"{executable} ({invocation.backend}) · input={input_mode} · output={schema_mode} · cwd={cwd}"
+    )
 
 
 def _prepare_explore_runtime(
@@ -3198,6 +3211,137 @@ def _build_explore_prompt(
     )
 
 
+_STRUCTURED_OUTPUT_NOTICE_PATTERN = re.compile(
+    r"^The response has been provided as a structured JSON object via the StructuredOutput tool\.?\s*",
+    re.IGNORECASE,
+)
+_STRUCTURED_SUMMARY_SOURCE_LABELS = {
+    "key sources",
+    "sources",
+    "source",
+    "关键来源",
+    "来源",
+    "参考来源",
+}
+_STRUCTURED_SUMMARY_CONFIDENCE_LABELS = {
+    "confidence",
+    "置信度",
+    "可信度",
+}
+
+
+def _normalize_structured_summary_label(label: str) -> str:
+    normalized = re.sub(r"[*`_]+", "", str(label or "")).strip().lower()
+    normalized = normalized.replace("：", ":")
+    return normalized
+
+
+def _parse_structured_summary_sources(
+    value: str,
+    *,
+    inventory_data: dict[str, Any],
+) -> list[str]:
+    docs = inventory_data.get("docs", {}) or {}
+    candidates = [
+        re.sub(r"^[•*\-]+", "", item).strip().strip(".。")
+        for item in re.split(r"[，,、|]+", str(value or ""))
+    ]
+    sources: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate in docs and candidate not in sources:
+            sources.append(candidate)
+    return sources
+
+
+def _parse_structured_summary_confidence(value: str) -> str:
+    lowered = str(value or "").lower()
+    for label in ("high", "medium", "low"):
+        if re.search(rf"\b{label}\b", lowered):
+            return label
+    zh_map = {
+        "高": "high",
+        "中": "medium",
+        "低": "low",
+    }
+    for marker, label in zh_map.items():
+        if marker in str(value or ""):
+            return label
+    return ""
+
+
+def _recover_structured_summary_payload(
+    raw_output: str,
+    *,
+    question: str,
+    context: dict[str, Any],
+    inventory_data: dict[str, Any],
+) -> dict[str, Any] | None:
+    text = str(raw_output or "").strip()
+    lowered = text.lower()
+    if "structuredoutput tool" not in lowered and "structured json object" not in lowered:
+        return None
+
+    answer_lines: list[str] = []
+    sources: list[str] = []
+    confidence = ""
+
+    for raw_line in text.splitlines():
+        line = str(raw_line or "").strip()
+        if not line:
+            continue
+        line = _STRUCTURED_OUTPUT_NOTICE_PATTERN.sub("", line).strip()
+        if not line:
+            continue
+
+        bullet = re.sub(r"^[-•]\s*", "", line).strip()
+        match = re.match(r"\*\*(.+?)\*\*\s*[:：]\s*(.+)", bullet)
+        if match:
+            raw_label = match.group(1).strip()
+            label = _normalize_structured_summary_label(raw_label)
+            value = match.group(2).strip()
+            if label in _STRUCTURED_SUMMARY_SOURCE_LABELS:
+                sources = _parse_structured_summary_sources(value, inventory_data=inventory_data)
+                continue
+            if label in _STRUCTURED_SUMMARY_CONFIDENCE_LABELS:
+                confidence = _parse_structured_summary_confidence(value)
+                continue
+            answer_lines.append(f"- {raw_label}: {value}")
+            continue
+
+        answer_lines.append(bullet)
+
+    answer_text = "\n".join(answer_lines).strip()
+    if not answer_text:
+        return None
+
+    payload = {
+        "answer": answer_text,
+        "sources": sources,
+        "confidence": confidence or "medium",
+        "exploration_summary": {
+            "entries_scanned": len(inventory_data.get("entries", [])),
+            "entries_read": len(sources),
+            "links_followed": max(
+                0,
+                len(context.get("expanded_candidates", [])) - len(context.get("initial_shortlist", [])),
+            ),
+            "mode": "structured-output-summary",
+        },
+        "gaps": [],
+        "contradictions": [],
+    }
+    validation = validate_answer(payload, inventory_data=inventory_data)
+    if validation["valid"]:
+        return validation["normalized"]
+
+    return _build_local_explore_answer(
+        question,
+        inventory_data=inventory_data,
+        context=context,
+        mode_label="structured-output-summary-fallback",
+    )
+
+
 def _run_validated_explore(
     *,
     question: str,
@@ -3239,6 +3383,24 @@ def _run_validated_explore(
         try:
             parsed_output = _parse_cli_json(raw_output)
         except RuntimeError:
+            recovered = _recover_structured_summary_payload(
+                raw_output,
+                question=question,
+                context=context,
+                inventory_data=inventory_data,
+            )
+            if recovered is not None:
+                _emit_explore_event(
+                    emit,
+                    "status",
+                    (
+                        "Attempt "
+                        f"{attempt} returned a structured-output summary; recovered a valid payload."
+                    ),
+                    attempt=attempt,
+                    mode=recovered.get("exploration_summary", {}).get("mode", ""),
+                )
+                return recovered
             retry_reason = "response was not a valid JSON object"
             _emit_explore_event(
                 emit,
@@ -3307,13 +3469,14 @@ def _run_explore_cli(
         _emit_explore_event(
             emit,
             "command",
-            shlex.join(invocation.command),
+            _summarize_explore_command(invocation, cwd=project_root),
             attempt=attempt,
             backend=invocation.backend,
             cwd=str(project_root),
             prompt_file=str(prompt_file),
             payload_file=str(payload_file),
             skill_file=str(skill_file),
+            command_summary=_summarize_explore_command(invocation, cwd=project_root),
         )
         try:
             process = subprocess.Popen(

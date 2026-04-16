@@ -279,6 +279,80 @@ def test_answer_question_agent_only_surfaces_invalid_json_with_trace(
     assert any("not-json-response" in str(event.get("raw_excerpt", "")) for event in events)
 
 
+def test_answer_question_agent_only_recovers_structured_output_summary(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root, kb_path = _build_project(tmp_path)
+    cli_path = Path(__file__).parent / "fixtures" / "mock_workflow_cli.py"
+
+    monkeypatch.setenv("MOCK_EXPLORE_STRUCTURED_SUMMARY", "1")
+    server_module = _reload_server(
+        project_root,
+        kb_path,
+        command=[sys.executable, str(cli_path)],
+    )
+
+    events: list[dict[str, object]] = []
+    payload = server_module.answer_question_agent_only(
+        "什么是热备份？",
+        kb_path,
+        project_root,
+        emit=events.append,
+    )
+
+    assert payload["sources"] == ["热备份"]
+    assert payload["confidence"] == "high"
+    assert payload["exploration_summary"]["mode"] == "structured-output-summary"
+    assert "热备份是在故障切换前准备好的可接管能力" in payload["answer"]
+    assert any(
+        event.get("type") == "status"
+        and "structured-output summary" in str(event.get("message", ""))
+        for event in events
+    )
+
+
+def test_answer_question_agent_only_rejects_leaked_prompt_output_with_trace(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project_root, kb_path = _build_project(tmp_path)
+    cli_path = Path(__file__).parent / "fixtures" / "mock_workflow_cli.py"
+
+    monkeypatch.setenv("MOCK_EXPLORE_LEAKED_ANSWER", "1")
+    server_module = _reload_server(
+        project_root,
+        kb_path,
+        command=[sys.executable, str(cli_path)],
+    )
+
+    events: list[dict[str, object]] = []
+
+    with pytest.raises(RuntimeError, match="invalid JSON"):
+        server_module.answer_question_agent_only(
+            "什么是热备份？",
+            kb_path,
+            project_root,
+            emit=events.append,
+        )
+
+    assert any(event.get("type") == "retry" for event in events)
+    assert any(
+        "You are the internal Sediment explore runtime"
+        in (
+            event.get("raw_excerpt", {}).get("excerpt", "")
+            if isinstance(event.get("raw_excerpt"), dict)
+            else str(event.get("raw_excerpt", ""))
+        )
+        for event in events
+    )
+    assert any(
+        "prompt/schema leakage" in str(event.get("reason", ""))
+        for event in events
+        if event.get("type") == "retry"
+    )
+
+
 def test_answer_question_uses_local_fast_path_when_enabled(
     tmp_path: Path,
     monkeypatch,

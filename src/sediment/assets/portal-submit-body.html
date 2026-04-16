@@ -27,16 +27,16 @@
     <div class="panel">
       <h2>__TEXT_SUBMISSION_TITLE__</h2>
       <div class="grid">
-        <label>__SUBMITTER_NAME_LABEL__<input id="submit-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" /></label>
-        <label>__SUBMISSION_TITLE_LABEL__<input id="submit-title" placeholder="__SUBMISSION_TITLE_PLACEHOLDER__" /></label>
+        <label>__SUBMITTER_NAME_LABEL__<input id="submit-name" data-testid="portal-submit-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" /></label>
+        <label>__SUBMISSION_TITLE_LABEL__<input id="submit-title" data-testid="portal-submit-title" placeholder="__SUBMISSION_TITLE_PLACEHOLDER__" /></label>
         <label>__SUBMISSION_TYPE_LABEL__
-          <select id="submit-type">
+          <select id="submit-type" data-testid="portal-submit-type">
             <option value="concept">__TYPE_CONCEPT__</option>
             <option value="lesson">__TYPE_LESSON__</option>
             <option value="feedback">__TYPE_FEEDBACK__</option>
           </select>
         </label>
-        <label>__SUBMISSION_CONTENT_LABEL__<textarea id="submit-content"></textarea></label>
+        <label>__SUBMISSION_CONTENT_LABEL__<textarea id="submit-content" data-testid="portal-submit-content"></textarea></label>
       </div>
       <div class="form-actions">
         <button class="primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_BUTTON__</button>
@@ -45,18 +45,61 @@
       <div id="submit-text-analysis" class="empty"></div>
     </div>
     <div class="panel">
-      <h2>__DOCUMENT_UPLOAD_TITLE__</h2>
-      <div class="grid">
-        <label>__SUBMITTER_NAME_LABEL__<input id="upload-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" /></label>
-        <div class="upload-grid">
-          <label>__UPLOAD_FILES_LABEL__
-            <input id="upload-file" data-testid="portal-upload-file" type="file" multiple accept=".txt,.md,.docx,.pptx,.zip" />
-          </label>
-          <label>__UPLOAD_FOLDER_LABEL__
-            <input id="upload-folder" data-testid="portal-upload-folder" type="file" webkitdirectory directory multiple />
-          </label>
+        <h2>__DOCUMENT_UPLOAD_TITLE__</h2>
+        <div class="grid">
+          <label>__SUBMITTER_NAME_LABEL__<input id="upload-name" data-testid="portal-upload-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" /></label>
+          <div class="upload-grid">
+            <div class="file-picker-field">
+              <label for="upload-file">__UPLOAD_FILES_LABEL__</label>
+              <div class="file-picker" data-file-picker data-testid="portal-upload-file-picker">
+                <input
+                  class="file-picker-input"
+                  id="upload-file"
+                  data-testid="portal-upload-file"
+                  type="file"
+                  multiple
+                  accept=".txt,.md,.docx,.pptx,.zip"
+                  aria-describedby="upload-file-selection"
+                />
+                <span class="button file-picker-button" aria-hidden="true">__UPLOAD_FILE_BUTTON__</span>
+                <span
+                  class="file-picker-status"
+                  id="upload-file-selection"
+                  data-file-picker-status
+                  data-empty-label="__UPLOAD_FILE_EMPTY__"
+                  data-selected-prefix="__FILE_PICKER_SELECTED_PREFIX__"
+                  data-selected-suffix="__FILE_PICKER_SELECTED_SUFFIX__"
+                  data-testid="portal-upload-file-selection"
+                >__UPLOAD_FILE_EMPTY__</span>
+              </div>
+            </div>
+            <div class="file-picker-field">
+              <label for="upload-folder">__UPLOAD_FOLDER_LABEL__</label>
+              <div class="file-picker" data-file-picker data-testid="portal-upload-folder-picker">
+                <input
+                  class="file-picker-input"
+                  id="upload-folder"
+                  data-testid="portal-upload-folder"
+                  type="file"
+                  webkitdirectory
+                  directory
+                  multiple
+                  aria-describedby="upload-folder-selection"
+                />
+                <span class="button file-picker-button" aria-hidden="true">__UPLOAD_FOLDER_BUTTON__</span>
+                <span
+                  class="file-picker-status"
+                  id="upload-folder-selection"
+                  data-file-picker-status
+                  data-empty-label="__UPLOAD_FOLDER_EMPTY__"
+                  data-selected-prefix="__FILE_PICKER_SELECTED_PREFIX__"
+                  data-selected-suffix="__FILE_PICKER_SELECTED_SUFFIX__"
+                  data-testid="portal-upload-folder-selection"
+                >__UPLOAD_FOLDER_EMPTY__</span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
       <div class="form-actions">
         <button class="primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_BUTTON__</button>
       </div>

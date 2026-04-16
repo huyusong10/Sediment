@@ -49,6 +49,34 @@ def main() -> int:
         if os.environ.get("MOCK_EXPLORE_INVALID_JSON", "").strip().lower() in {"1", "true", "yes", "on"}:
             _write_output(argv, "not-json-response")
             return 0
+        if os.environ.get("MOCK_EXPLORE_STRUCTURED_SUMMARY", "").strip().lower() in {"1", "true", "yes", "on"}:
+            _write_output(
+                argv,
+                (
+                    "The response has been provided as a structured JSON object via the "
+                    "StructuredOutput tool. The answer synthesizes the backup definition from multiple KB entries:\n"
+                    "- **Prepared capability**: 热备份是在故障切换前准备好的可接管能力。\n"
+                    "- **Key sources**: 热备份, 回音壁\n"
+                    "- **Confidence**: high — because the KB contains direct formal definitions for the concept and its supporting operational context."
+                ),
+            )
+            return 0
+        if os.environ.get("MOCK_EXPLORE_LEAKED_ANSWER", "").strip().lower() in {"1", "true", "yes", "on"}:
+            payload = {
+                "answer": prompt,
+                "sources": ["热备份", "回音壁"],
+                "confidence": "high",
+                "exploration_summary": {
+                    "entries_scanned": 2,
+                    "entries_read": 2,
+                    "links_followed": 1,
+                    "mode": "definition-driven",
+                },
+                "gaps": [],
+                "contradictions": [],
+            }
+            _write_output(argv, json.dumps(payload, ensure_ascii=False))
+            return 0
         payload = {
             "answer": "热备份是在故障切换前准备好的可接管能力。",
             "sources": ["热备份", "回音壁"],

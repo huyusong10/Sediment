@@ -3,13 +3,26 @@
   const pageData = shell.readJsonScript("sediment-page-data") || {};
   const UI = pageData.ui || {};
   const INITIAL_QUARTZ = pageData.quartz || {};
-  const { collectUploads, escapeHtml, fetchJson, renderMarkdown } = shell;
+  const {
+    clearSessionStatePrefix,
+    collectUploads,
+    escapeHtml,
+    fetchJson,
+    readSessionState,
+    renderMarkdown,
+    syncFilePickerState,
+    writeSessionState,
+  } = shell;
   const isZh = document.documentElement.dataset.locale === "zh";
+  const locale = document.documentElement.dataset.locale || "en";
   const WORKBENCH_STATUS_IDS = {
     ingest: "admin-ingest-status",
     tidy: "admin-tidy-status",
     explore: "admin-explore-status",
   };
+  const ADMIN_SESSION_PREFIX = "sediment-admin-ui:";
+  const ADMIN_PAGE_SESSION_KEY = `${ADMIN_SESSION_PREFIX}${locale}:${String(UI.section || "unknown")}`;
+  const MAX_PERSISTED_TEXT_CHARS = 120000;
   const state = {
     reviews: [],
     reviewDetails: {},
@@ -25,15 +38,126 @@
   };
   let fileSuggestionRequestId = 0;
   let fileSearchAutoLoadTimer = 0;
+  let persistStateTimer = 0;
+
+  function trimPersistedText(value, limit = MAX_PERSISTED_TEXT_CHARS) {
+    const text = String(value || "");
+    return text.length > limit ? text.slice(text.length - limit) : text;
+  }
+
+  function nodeText(id) {
+    return String(document.getElementById(id)?.textContent || "");
+  }
+
+  function nodeValue(id) {
+    return String(document.getElementById(id)?.value || "");
+  }
+
+  function setNodeText(id, value) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = String(value || "");
+  }
+
+  function setNodeValue(id, value) {
+    const node = document.getElementById(id);
+    if (node) node.value = String(value || "");
+  }
+
+  function queuePersistAdminPageState() {
+    if (!ADMIN_PAGE_SESSION_KEY) return;
+    window.clearTimeout(persistStateTimer);
+    persistStateTimer = window.setTimeout(() => persistAdminPageState(), 40);
+  }
+
+  function captureAdminPageState() {
+    const base = {
+      adminMessage: trimPersistedText(nodeText("admin-message"), 4000),
+    };
+
+    if (UI.section === "kb") {
+      const resultNode = runtimeResultNode();
+      return {
+        ...base,
+        tidyReason: trimPersistedText(nodeValue("tidy-reason"), 12000),
+        exploreQuestion: trimPersistedText(nodeValue("admin-explore-input"), 12000),
+        ingestStatus: trimPersistedText(nodeText("admin-ingest-status"), 4000),
+        tidyStatus: trimPersistedText(nodeText("admin-tidy-status"), 4000),
+        exploreStatus: trimPersistedText(nodeText("admin-explore-status"), 4000),
+        ingestSelection: trimPersistedText(nodeText("admin-ingest-selection"), 4000),
+        liveStatus: trimPersistedText(nodeText("admin-kb-live-status"), 4000),
+        liveLog: trimPersistedText(nodeValue("admin-kb-live-log")),
+        resultStatus: trimPersistedText(nodeText("admin-kb-result-status"), 4000),
+        resultHtml: trimPersistedText(resultNode?.innerHTML || ""),
+        resultClassName: String(resultNode?.className || "runtime-result-view markdown empty"),
+      };
+    }
+
+    if (UI.section === "system") {
+      return {
+        ...base,
+        rawText: trimPersistedText(nodeValue("settings-raw-text")),
+        settingsStatus: trimPersistedText(nodeText("settings-status"), 4000),
+        configPath: trimPersistedText(nodeText("settings-config-path"), 4000),
+        effectiveConfigText: trimPersistedText(nodeText("settings-effective-text")),
+      };
+    }
+
+    return null;
+  }
+
+  function persistAdminPageState() {
+    writeSessionState(ADMIN_PAGE_SESSION_KEY, captureAdminPageState());
+  }
+
+  function restoreAdminPageState() {
+    const snapshot = readSessionState(ADMIN_PAGE_SESSION_KEY, null);
+    if (!snapshot || typeof snapshot !== "object") return false;
+    setNodeText("admin-message", snapshot.adminMessage || "");
+
+    if (UI.section === "kb") {
+      setNodeValue("tidy-reason", snapshot.tidyReason || "");
+      setNodeValue("admin-explore-input", snapshot.exploreQuestion || "");
+      setNodeText("admin-ingest-status", snapshot.ingestStatus || nodeText("admin-ingest-status"));
+      setNodeText("admin-tidy-status", snapshot.tidyStatus || nodeText("admin-tidy-status"));
+      setNodeText("admin-explore-status", snapshot.exploreStatus || nodeText("admin-explore-status"));
+      setNodeText("admin-ingest-selection", snapshot.ingestSelection || nodeText("admin-ingest-selection"));
+      setNodeText("admin-kb-live-status", snapshot.liveStatus || nodeText("admin-kb-live-status"));
+      setNodeValue(
+        "admin-kb-live-log",
+        sanitizePersistedLiveLog(snapshot.liveLog || nodeValue("admin-kb-live-log"))
+      );
+      setNodeText("admin-kb-result-status", snapshot.resultStatus || nodeText("admin-kb-result-status"));
+      const resultNode = runtimeResultNode();
+      if (resultNode && snapshot.resultHtml && !looksLikeRuntimeLeak(snapshot.resultHtml)) {
+        resultNode.className = String(snapshot.resultClassName || "runtime-result-view markdown");
+        resultNode.innerHTML = snapshot.resultHtml;
+      } else if (resultNode && snapshot.resultHtml) {
+        renderExploreFailure(UI.explore_invalid_output || UI.explore_failed_hint || "");
+      }
+      return true;
+    }
+
+    if (UI.section === "system") {
+      setNodeValue("settings-raw-text", snapshot.rawText || "");
+      setNodeText("settings-status", snapshot.settingsStatus || nodeText("settings-status"));
+      setNodeText("settings-config-path", snapshot.configPath || nodeText("settings-config-path"));
+      setNodeText("settings-effective-text", snapshot.effectiveConfigText || nodeText("settings-effective-text"));
+      return true;
+    }
+
+    return Boolean(snapshot.adminMessage);
+  }
 
   function setAdminMessage(message) {
     const node = document.getElementById("admin-message");
     if (node) node.textContent = String(message || "");
+    queuePersistAdminPageState();
   }
 
   function setSectionStatus(id, message) {
     const node = document.getElementById(id);
     if (node) node.textContent = String(message || "");
+    queuePersistAdminPageState();
   }
 
   function workbenchStatusId(section) {
@@ -58,6 +182,77 @@
     setWorkbenchStatus("explore", message);
   }
 
+  function runtimeResultNode() {
+    return document.getElementById("admin-kb-result");
+  }
+
+  function setRuntimeResultStatus(message) {
+    const node = document.getElementById("admin-kb-result-status");
+    if (node) node.textContent = String(message || "");
+  }
+
+  function resetRuntimeResult(message) {
+    const node = runtimeResultNode();
+    if (!node) return;
+    node.className = "runtime-result-view markdown empty";
+    node.textContent = String(message || UI.result_ready || "");
+    queuePersistAdminPageState();
+  }
+
+  const RUNTIME_LEAK_MARKERS = [
+    "claude -p",
+    "--json-schema",
+    "you are the internal sediment explore runtime",
+    "prepared context",
+    "sediment explore skill",
+    '"additionalproperties": false',
+    '"exploration_summary"',
+    '"entries_scanned"',
+    '"links_followed"',
+    "return json only",
+  ];
+
+  function looksLikeRuntimeLeak(text) {
+    const normalized = String(text || "").trim().toLowerCase();
+    if (!normalized) return false;
+    const hitCount = RUNTIME_LEAK_MARKERS.reduce(
+      (count, marker) => count + (normalized.includes(marker) ? 1 : 0),
+      0
+    );
+    return hitCount >= 2;
+  }
+
+  function safeExploreFailureMessage(message) {
+    const normalized = String(message || "").trim().toLowerCase();
+    if (
+      looksLikeRuntimeLeak(message) ||
+      normalized.includes("prompt/schema leakage") ||
+      normalized.includes("internal runtime content")
+    ) {
+      return UI.explore_invalid_output || UI.explore_failed_hint || UI.explore_failed || "";
+    }
+    return String(message || "");
+  }
+
+  function sanitizePersistedLiveLog(value) {
+    return String(value || "")
+      .split("\n")
+      .map((line) => {
+        const normalized = line.toLowerCase();
+        if (
+          looksLikeRuntimeLeak(line) ||
+          normalized.includes("claude -p") ||
+          normalized.includes("--json-schema")
+        ) {
+          const separatorIndex = line.indexOf(":");
+          const prefix = separatorIndex >= 0 ? line.slice(0, separatorIndex + 1) : "";
+          return `${prefix} ${UI.live_command_redacted || "Agent command started with internal prompt details redacted."}`.trim();
+        }
+        return line;
+      })
+      .join("\n");
+  }
+
   function formatLiveTimestamp() {
     return new Date().toLocaleTimeString();
   }
@@ -74,6 +269,7 @@
       ? line
       : `${node.value}\n${line}`;
     node.scrollTop = node.scrollHeight;
+    queuePersistAdminPageState();
   }
 
   function clearLiveLog() {
@@ -82,6 +278,7 @@
     node.value = UI.live_ready || "LIVE READY";
     setLiveStatus(UI.live_ready || "");
     setAdminMessage(UI.live_cleared || "");
+    queuePersistAdminPageState();
   }
 
   function formatDateTime(value) {
@@ -994,6 +1191,7 @@
     if (effectiveNode) effectiveNode.textContent = payload.effective_config_text || "";
     if (pathNode) pathNode.textContent = payload.config_path || "";
     renderSystemStatus(payload.status || {});
+    queuePersistAdminPageState();
   }
 
   async function loadSettingsConfig() {
@@ -1030,9 +1228,13 @@
   }
 
   function renderExploreResult(payload) {
-    const node = document.getElementById("admin-explore-result");
+    if (looksLikeRuntimeLeak(payload?.answer || "")) {
+      renderExploreFailure(UI.explore_invalid_output || UI.explore_failed_hint || "");
+      return;
+    }
+    const node = runtimeResultNode();
     if (!node) return;
-    node.className = "markdown";
+    node.className = "runtime-result-view markdown";
     node.innerHTML = `
       <div class="card">
         <div class="row spread">
@@ -1045,22 +1247,27 @@
         <div class="subtle">${escapeHtml(UI.explore_gaps)}: ${escapeHtml((payload.gaps || []).join(" | ") || "-")}</div>
       </div>
     `;
+    setRuntimeResultStatus(UI.explore_completed || "");
+    queuePersistAdminPageState();
   }
 
   function renderExploreFailure(message) {
-    const node = document.getElementById("admin-explore-result");
+    const node = runtimeResultNode();
     if (!node) return;
-    node.className = "markdown";
+    const safeMessage = safeExploreFailureMessage(message);
+    node.className = "runtime-result-view markdown";
     node.innerHTML = `
       <div class="card">
         <div class="row spread">
           <strong>${escapeHtml(UI.explore_failed || "Explore failed")}</strong>
           <span class="tag danger">${escapeHtml(UI.live_error_label || "Error")}</span>
         </div>
-        <div class="subtle">${escapeHtml(message || "")}</div>
+        <div class="subtle">${escapeHtml(safeMessage || "")}</div>
         <div class="subtle">${escapeHtml(UI.explore_failed_hint || "")}</div>
       </div>
     `;
+    setRuntimeResultStatus(UI.explore_failed || "");
+    queuePersistAdminPageState();
   }
 
   async function readResponseError(response) {
@@ -1085,6 +1292,18 @@
   }
 
   function liveMessageForExploreEvent(event) {
+    const excerpt = String(event.raw_excerpt || "").trim();
+    if (event.type === "command") {
+      const summary = String(event.message || "").trim();
+      if (
+        looksLikeRuntimeLeak(summary) ||
+        summary.toLowerCase().includes("--json-schema") ||
+        summary.toLowerCase().includes("claude -p")
+      ) {
+        return event.command_summary || UI.live_command_redacted || summary;
+      }
+      return summary;
+    }
     if (event.type === "result") {
       const payload = event.payload || {};
       const sources = Array.isArray(payload.sources) && payload.sources.length
@@ -1092,8 +1311,11 @@
         : "-";
       return `${UI.explore_completed || "Explore completed."} sources=${sources}`;
     }
-    if (event.raw_excerpt) {
-      return `${event.message || ""} | ${event.raw_excerpt}`;
+    if (excerpt) {
+      const safeExcerpt = looksLikeRuntimeLeak(excerpt)
+        ? (UI.live_excerpt_redacted || excerpt)
+        : excerpt;
+      return `${event.message || ""} | ${safeExcerpt}`;
     }
     return event.message || "";
   }
@@ -1131,11 +1353,8 @@
   async function runExplore() {
     const question = (document.getElementById("admin-explore-input")?.value || "").trim();
     if (!question) throw new Error(isZh ? "问题不能为空。" : "Question must not be empty.");
-    const node = document.getElementById("admin-explore-result");
-    if (node) {
-      node.className = "markdown empty";
-      node.textContent = UI.explore_running || "";
-    }
+    resetRuntimeResult(UI.result_running || UI.explore_running || "");
+    setRuntimeResultStatus(UI.result_running || UI.explore_running || "");
     setExploreStatus(UI.explore_running || "");
     setLiveStatus(UI.live_running || "");
     logWorkbenchRequest("explore", `POST /api/admin/explore/live · question="${question}"`, {
@@ -1350,12 +1569,14 @@
     const node = document.getElementById("admin-ingest-selection");
     if (!node) return;
     if (!files.length) {
-      node.textContent = isZh ? "还没有选择任何文档。" : "No documents selected yet.";
+      node.textContent = UI.ingest_selection_empty || (isZh ? "还没有选择任何文档。" : "No documents selected yet.");
+      queuePersistAdminPageState();
       return;
     }
     const sample = files.slice(0, 3).map((file) => file.webkitRelativePath || file.name).join(" · ");
     const suffix = files.length > 3 ? ` +${files.length - 3}` : "";
     node.textContent = `${UI.ingest_selected_prefix || "Selected"} ${files.length} ${UI.ingest_selected_suffix || "files"} · ${sample}${suffix}`;
+    queuePersistAdminPageState();
   }
 
   async function uploadAndIngest() {
@@ -1385,6 +1606,8 @@
     state.ingestFiles = [];
     if (document.getElementById("admin-ingest-file")) document.getElementById("admin-ingest-file").value = "";
     if (document.getElementById("admin-ingest-folder")) document.getElementById("admin-ingest-folder").value = "";
+    syncFilePickerState?.("admin-ingest-file");
+    syncFilePickerState?.("admin-ingest-folder");
     updateIngestSelection();
     await refreshCurrentPage();
   }
@@ -1455,6 +1678,7 @@
 
   async function logout() {
     await fetchAdmin("/api/admin/session", { method: "DELETE" });
+    clearSessionStatePrefix?.(ADMIN_SESSION_PREFIX);
     setAdminMessage(UI.logout_done);
     window.location.href = "/admin/overview";
   }
@@ -1615,7 +1839,11 @@
   document.getElementById("admin-kb-live-clear")?.addEventListener("click", clearLiveLog);
   document.getElementById("editor-content")?.addEventListener("input", (event) => {
     updateEditorPreview(event.target.value || "");
+    queuePersistAdminPageState();
   });
+  document.getElementById("tidy-reason")?.addEventListener("input", queuePersistAdminPageState);
+  document.getElementById("admin-explore-input")?.addEventListener("input", queuePersistAdminPageState);
+  document.getElementById("settings-raw-text")?.addEventListener("input", queuePersistAdminPageState);
   document.getElementById("admin-file-search")?.addEventListener("input", () => {
     updateFileSuggestions().catch(createErrorHandler({ statusIds: ["admin-file-search-status"] }));
   });
@@ -1683,16 +1911,25 @@
       state.ingestFiles = files;
       if (document.getElementById("admin-ingest-file")) document.getElementById("admin-ingest-file").value = "";
       if (document.getElementById("admin-ingest-folder")) document.getElementById("admin-ingest-folder").value = "";
+      syncFilePickerState?.("admin-ingest-file");
+      syncFilePickerState?.("admin-ingest-folder");
       updateIngestSelection();
     });
   }
+
+  window.addEventListener("pagehide", persistAdminPageState);
 
   refreshCurrentPage()
     .then(() => {
       updateIngestSelection();
       syncFileEditorState();
       updateEditorPreview(document.getElementById("editor-content")?.value || "");
-      setAdminMessage(isZh ? "管理台已就绪。" : "Admin ready.");
+      const restored = restoreAdminPageState();
+      if (!restored) {
+        setAdminMessage(isZh ? "管理台已就绪。" : "Admin ready.");
+      } else {
+        queuePersistAdminPageState();
+      }
     })
     .catch(createErrorHandler());
 })();

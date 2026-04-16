@@ -1,66 +1,131 @@
 <section class="admin-kb-layout" data-testid="admin-kb-layout">
-  <div class="panel admin-kb-primary-panel" data-testid="admin-kb-ingest-panel">
+  <div class="admin-kb-top-layout" data-testid="admin-kb-top-layout">
+    <div class="panel admin-kb-primary-panel" data-testid="admin-kb-ingest-panel">
+      <div class="row spread">
+        <h2>__INGEST_TITLE__</h2>
+        <div class="panel-header-tip">__INGEST_TIP__</div>
+      </div>
+      <div class="admin-kb-panel-grid">
+        <div class="dropzone" id="admin-ingest-dropzone" data-testid="admin-ingest-dropzone">
+          <strong>__INGEST_DROPZONE_TITLE__</strong>
+          <p class="subtle">__INGEST_DROPZONE_BODY__</p>
+        </div>
+        <div class="upload-grid">
+          <div class="file-picker-field">
+            <label for="admin-ingest-file">__INGEST_FILE_LABEL__</label>
+            <div class="file-picker" data-file-picker data-testid="admin-ingest-file-picker">
+              <input
+                class="file-picker-input"
+                id="admin-ingest-file"
+                data-testid="admin-ingest-file"
+                type="file"
+                multiple
+                accept=".txt,.md,.docx,.pptx,.zip"
+                aria-describedby="admin-ingest-file-selection"
+              />
+              <span class="button file-picker-button" aria-hidden="true">__INGEST_FILE_BUTTON__</span>
+              <span
+                class="file-picker-status"
+                id="admin-ingest-file-selection"
+                data-file-picker-status
+                data-empty-label="__INGEST_FILE_EMPTY__"
+                data-selected-prefix="__FILE_PICKER_SELECTED_PREFIX__"
+                data-selected-suffix="__FILE_PICKER_SELECTED_SUFFIX__"
+                data-testid="admin-ingest-file-selection"
+              >__INGEST_FILE_EMPTY__</span>
+            </div>
+          </div>
+          <div class="file-picker-field">
+            <label for="admin-ingest-folder">__INGEST_FOLDER_LABEL__</label>
+            <div class="file-picker" data-file-picker data-testid="admin-ingest-folder-picker">
+              <input
+                class="file-picker-input"
+                id="admin-ingest-folder"
+                data-testid="admin-ingest-folder"
+                type="file"
+                webkitdirectory
+                directory
+                multiple
+                aria-describedby="admin-ingest-folder-selection"
+              />
+              <span class="button file-picker-button" aria-hidden="true">__INGEST_FOLDER_BUTTON__</span>
+              <span
+                class="file-picker-status"
+                id="admin-ingest-folder-selection"
+                data-file-picker-status
+                data-empty-label="__INGEST_FOLDER_EMPTY__"
+                data-selected-prefix="__FILE_PICKER_SELECTED_PREFIX__"
+                data-selected-suffix="__FILE_PICKER_SELECTED_SUFFIX__"
+                data-testid="admin-ingest-folder-selection"
+              >__INGEST_FOLDER_EMPTY__</span>
+            </div>
+          </div>
+        </div>
+        <div class="detail-block">
+          <strong>__INGEST_SELECTION_LABEL__</strong>
+          <p id="admin-ingest-selection" data-testid="admin-ingest-selection">__INGEST_SELECTION_EMPTY__</p>
+        </div>
+        <button class="primary" id="admin-ingest-button" data-testid="admin-ingest-button">__INGEST_BUTTON__</button>
+        <div id="admin-ingest-status" data-testid="admin-ingest-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__INGEST_STATUS__</div>
+        <div class="list scroll-list" id="submission-list" data-testid="admin-submission-list"></div>
+      </div>
+    </div>
+
+    <div class="admin-kb-side-stack" data-testid="admin-kb-side-stack">
+      <div class="panel admin-kb-compact-panel" data-testid="admin-kb-tidy-panel">
+        <div class="row spread">
+          <h2>__TIDY_TITLE__</h2>
+          <div class="panel-header-tip">__TIDY_TIP__</div>
+        </div>
+        <div class="admin-kb-panel-grid">
+          <label>__TIDY_REASON_LABEL__<input id="tidy-reason" data-testid="admin-tidy-reason" placeholder="__TIDY_REASON_PLACEHOLDER__" /></label>
+          <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__TIDY_BUTTON__</button>
+          <div id="admin-tidy-status" data-testid="admin-tidy-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__TIDY_STATUS__</div>
+        </div>
+      </div>
+
+      <div class="panel admin-kb-compact-panel admin-kb-explore-panel" data-testid="admin-kb-explore-panel">
+        <div class="row spread">
+          <h2>__EXPLORE_TITLE__</h2>
+          <div class="panel-header-tip">__EXPLORE_TIP__</div>
+        </div>
+        <div class="admin-kb-panel-grid">
+          <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
+          <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
+          <div id="admin-explore-status" data-testid="admin-explore-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__EXPLORE_STATUS__</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel admin-live-panel" data-testid="admin-kb-live-panel">
     <div class="row spread">
-      <h2>__INGEST_TITLE__</h2>
-      <div class="panel-header-tip">__INGEST_TIP__</div>
+      <h2>__RUNTIME_TITLE__</h2>
+      <div class="admin-live-toolbar">
+        <div class="panel-header-tip">__RUNTIME_TIP__</div>
+        <button id="admin-kb-live-clear" data-testid="admin-kb-live-clear">__LIVE_CLEAR_BUTTON__</button>
+      </div>
     </div>
-    <div class="admin-kb-panel-grid">
-      <div class="dropzone" id="admin-ingest-dropzone" data-testid="admin-ingest-dropzone">
-        <strong>__INGEST_DROPZONE_TITLE__</strong>
-        <p class="subtle">__INGEST_DROPZONE_BODY__</p>
-      </div>
-      <div class="upload-grid">
-        <label>__INGEST_FILE_LABEL__<input id="admin-ingest-file" data-testid="admin-ingest-file" type="file" multiple accept=".txt,.md,.docx,.pptx,.zip" /></label>
-        <label>__INGEST_FOLDER_LABEL__<input id="admin-ingest-folder" data-testid="admin-ingest-folder" type="file" webkitdirectory directory multiple /></label>
-      </div>
-      <div class="detail-block">
-        <strong>__INGEST_SELECTION_LABEL__</strong>
-        <p id="admin-ingest-selection" data-testid="admin-ingest-selection">__INGEST_SELECTION_EMPTY__</p>
-      </div>
-      <button class="primary" id="admin-ingest-button" data-testid="admin-ingest-button">__INGEST_BUTTON__</button>
-      <div id="admin-ingest-status" data-testid="admin-ingest-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__INGEST_STATUS__</div>
-      <div class="list scroll-list" id="submission-list" data-testid="admin-submission-list"></div>
-    </div>
-  </div>
+    <div class="runtime-console" data-testid="admin-runtime-console">
+      <section class="runtime-console-section runtime-result-section" data-testid="admin-runtime-result-section">
+        <div class="runtime-section-header">
+          <div class="runtime-section-heading">
+            <h3>__RESULT_TITLE__</h3>
+          </div>
+          <div id="admin-kb-result-status" data-testid="admin-kb-result-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__RESULT_STATUS__</div>
+        </div>
+        <div id="admin-kb-result" data-testid="admin-kb-result" class="runtime-result-view markdown empty">__RESULT_EMPTY__</div>
+      </section>
 
-  <div class="admin-kb-side-stack" data-testid="admin-kb-side-stack">
-    <div class="panel admin-kb-compact-panel" data-testid="admin-kb-tidy-panel">
-      <div class="row spread">
-        <h2>__TIDY_TITLE__</h2>
-        <div class="panel-header-tip">__TIDY_TIP__</div>
-      </div>
-      <div class="admin-kb-panel-grid">
-        <label>__TIDY_REASON_LABEL__<input id="tidy-reason" data-testid="admin-tidy-reason" placeholder="__TIDY_REASON_PLACEHOLDER__" /></label>
-        <button id="manual-tidy-button" data-testid="admin-manual-tidy-button">__TIDY_BUTTON__</button>
-        <div id="admin-tidy-status" data-testid="admin-tidy-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__TIDY_STATUS__</div>
-      </div>
+      <section class="runtime-console-section runtime-live-section" data-testid="admin-runtime-live-section">
+        <div class="runtime-section-header">
+          <div class="runtime-section-heading">
+            <h3>__LIVE_TITLE__</h3>
+          </div>
+          <div id="admin-kb-live-status" data-testid="admin-kb-live-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__LIVE_STATUS__</div>
+        </div>
+        <textarea class="live-log-area runtime-live-log" id="admin-kb-live-log" data-testid="admin-kb-live-log" readonly spellcheck="false">__LIVE_EMPTY__</textarea>
+      </section>
     </div>
-
-    <div class="panel admin-kb-compact-panel" data-testid="admin-kb-explore-panel">
-      <div class="row spread">
-        <h2>__EXPLORE_TITLE__</h2>
-        <div class="panel-header-tip">__EXPLORE_TIP__</div>
-      </div>
-      <div class="admin-kb-panel-grid">
-        <label>__EXPLORE_INPUT_LABEL__<textarea id="admin-explore-input" data-testid="admin-explore-input" placeholder="__EXPLORE_INPUT_PLACEHOLDER__"></textarea></label>
-        <button class="primary" id="admin-explore-button" data-testid="admin-explore-button">__EXPLORE_BUTTON__</button>
-        <div id="admin-explore-status" data-testid="admin-explore-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__EXPLORE_STATUS__</div>
-        <div id="admin-explore-result" data-testid="admin-explore-result" class="markdown empty">__EXPLORE_RESULT_EMPTY__</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<section class="panel admin-live-panel" data-testid="admin-kb-live-panel">
-  <div class="row spread">
-    <h2>__LIVE_TITLE__</h2>
-    <div class="admin-live-toolbar">
-      <div class="panel-header-tip">__LIVE_TIP__</div>
-      <button id="admin-kb-live-clear" data-testid="admin-kb-live-clear">__LIVE_CLEAR_BUTTON__</button>
-    </div>
-  </div>
-  <div class="admin-kb-panel-grid">
-    <div id="admin-kb-live-status" data-testid="admin-kb-live-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__LIVE_STATUS__</div>
-    <textarea class="live-log-area" id="admin-kb-live-log" data-testid="admin-kb-live-log" readonly spellcheck="false">__LIVE_EMPTY__</textarea>
   </div>
 </section>

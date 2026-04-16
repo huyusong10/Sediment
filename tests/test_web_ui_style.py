@@ -15,12 +15,14 @@ def test_web_shell_exposes_shared_surface_hooks() -> None:
         ".search-status-line",
         ".hero-nav",
         ".nav-link",
+        ".nav-active-indicator",
         ".action-row",
         ".utility-icons",
         ".utility-action",
         ".utility-icon-button",
         ".page-title",
         ".sr-only",
+        '[data-page-transition="leaving"]',
         ":focus-visible",
     )
 
@@ -36,8 +38,19 @@ def test_web_shell_exposes_compact_tips_and_workbench_hooks() -> None:
         ".tutorial-layout",
         ".tutorial-side-stack",
         ".tutorial-section-stack",
+        ".admin-overview-grid",
         ".admin-kb-layout",
+        ".admin-kb-top-layout",
+        ".workbench-layout",
+        ".workbench-column",
         ".panel-header-tip",
+        ".file-picker",
+        ".file-picker-input",
+        ".file-picker-status",
+        ".runtime-console",
+        ".runtime-console-section",
+        ".runtime-result-view",
+        ".runtime-live-log",
         ".live-log-area",
     )
 
@@ -54,6 +67,7 @@ def test_web_shell_exposes_admin_workspace_hooks() -> None:
         ".doc-tree-group",
         ".file-index-tree",
         ".file-editor-area",
+        ".settings-action-row",
         ".settings-preview",
         ".settings-editor-area",
     )

@@ -1,50 +1,53 @@
-<section class="grid cols-2 align-start">
-  <div class="panel">
-    <div class="row spread">
-      <h2>__SETTINGS_TITLE__</h2>
-      <span class="tabs-note">__SETTINGS_NOTE__</span>
-    </div>
-    <div class="grid settings-editor-stack">
-      <div class="detail-block">
-        <strong>__SETTINGS_PATH_LABEL__</strong>
-        <p class="mono" id="settings-config-path" data-testid="admin-settings-config-path">__SETTINGS_PATH_EMPTY__</p>
+<section class="workbench-layout admin-system-layout" data-testid="admin-system-layout">
+  <div class="workbench-column" data-testid="admin-system-primary-column">
+    <div class="panel" data-testid="admin-system-settings-panel">
+      <div class="row spread">
+        <h2>__SETTINGS_TITLE__</h2>
+        <span class="tabs-note">__SETTINGS_NOTE__</span>
       </div>
-      <label class="settings-editor-label">__SETTINGS_EDITOR_LABEL__<textarea class="settings-editor-area" id="settings-raw-text" data-testid="admin-settings-raw-text"></textarea></label>
-      <div class="action-row" data-testid="admin-settings-actions">
-        <button id="settings-reload-button" data-testid="admin-settings-reload-button">__SETTINGS_RELOAD_BUTTON__</button>
-        <button class="primary" id="settings-save-button" data-testid="admin-settings-save-button">__SETTINGS_SAVE_BUTTON__</button>
-        <button id="settings-restart-button" data-testid="admin-settings-restart-button">__SETTINGS_RESTART_BUTTON__</button>
-      </div>
-      <div id="settings-status" data-testid="admin-settings-status" class="subtle" role="status" aria-live="polite">__SETTINGS_STATUS__</div>
-      <div class="detail-block">
-        <strong>__SETTINGS_RUNTIME_NOTE_TITLE__</strong>
-        <p>__SETTINGS_RUNTIME_NOTE__</p>
+      <div class="grid settings-editor-stack">
+        <div class="detail-block">
+          <strong>__SETTINGS_PATH_LABEL__</strong>
+          <p class="mono" id="settings-config-path" data-testid="admin-settings-config-path">__SETTINGS_PATH_EMPTY__</p>
+        </div>
+        <label class="settings-editor-label">__SETTINGS_EDITOR_LABEL__<textarea class="settings-editor-area" id="settings-raw-text" data-testid="admin-settings-raw-text"></textarea></label>
+        <div class="action-row settings-action-row" data-testid="admin-settings-actions">
+          <button id="settings-reload-button" data-testid="admin-settings-reload-button">__SETTINGS_RELOAD_BUTTON__</button>
+          <button class="primary" id="settings-save-button" data-testid="admin-settings-save-button">__SETTINGS_SAVE_BUTTON__</button>
+          <button id="settings-restart-button" data-testid="admin-settings-restart-button">__SETTINGS_RESTART_BUTTON__</button>
+        </div>
+        <div id="settings-status" data-testid="admin-settings-status" class="subtle" role="status" aria-live="polite">__SETTINGS_STATUS__</div>
+        <div class="detail-block">
+          <strong>__SETTINGS_RUNTIME_NOTE_TITLE__</strong>
+          <p>__SETTINGS_RUNTIME_NOTE__</p>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="panel">
-    <div class="row spread">
-      <h2>__EFFECTIVE_SETTINGS_TITLE__</h2>
-      <span class="tabs-note">__EFFECTIVE_SETTINGS_NOTE__</span>
+  <div class="workbench-column" data-testid="admin-system-secondary-column">
+    <div class="panel" data-testid="admin-system-effective-panel">
+      <div class="row spread">
+        <h2>__EFFECTIVE_SETTINGS_TITLE__</h2>
+        <span class="tabs-note">__EFFECTIVE_SETTINGS_NOTE__</span>
+      </div>
+      <div class="stack settings-preview-stack">
+        <div class="list" id="system-status" data-testid="admin-system-status"></div>
+        <pre class="detail-block mono settings-preview" id="settings-effective-text" data-testid="admin-settings-effective-text">__EFFECTIVE_SETTINGS_EMPTY__</pre>
+      </div>
     </div>
-    <div class="stack settings-preview-stack">
-      <div class="list" id="system-status" data-testid="admin-system-status"></div>
-      <pre class="detail-block mono settings-preview" id="settings-effective-text" data-testid="admin-settings-effective-text">__EFFECTIVE_SETTINGS_EMPTY__</pre>
-    </div>
-  </div>
-</section>
-
-<section class="panel">
-  <div class="row spread">
-    <h2>__QUARTZ_TITLE__</h2>
-    <span class="tabs-note">__QUARTZ_NOTE__</span>
-  </div>
-  <div class="stack">
-    <div id="quartz-status" class="list"></div>
-    <div class="action-row" data-testid="admin-quartz-actions">
-      <button class="primary" id="admin-quartz-build-button" data-testid="admin-quartz-build-button">__QUARTZ_BUTTON__</button>
-      __OPEN_QUARTZ_LINK__
+    <div class="panel" data-testid="admin-system-quartz-panel">
+      <div class="row spread">
+        <h2>__QUARTZ_TITLE__</h2>
+        <span class="tabs-note">__QUARTZ_NOTE__</span>
+      </div>
+      <div class="stack">
+        <div id="quartz-status" class="list"></div>
+        <div class="action-row" data-testid="admin-quartz-actions">
+          <button class="primary" id="admin-quartz-build-button" data-testid="admin-quartz-build-button">__QUARTZ_BUTTON__</button>
+          __OPEN_QUARTZ_LINK__
+        </div>
+      </div>
     </div>
   </div>
 </section>

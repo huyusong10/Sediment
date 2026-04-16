@@ -58,7 +58,14 @@ def _nav_link(
     classes = ["button", variant_class]
     if primary:
         classes.append("primary")
+    extra_attrs_parts: list[str] = []
+    if variant == "nav":
+        extra_attrs_parts.append('data-shell-nav-link="true"')
+    if primary and variant == "nav":
+        extra_attrs_parts.append('aria-current="page"')
     extra_attrs = ' target="_blank" rel="noopener noreferrer"' if new_tab else ""
+    if extra_attrs_parts:
+        extra_attrs += " " + " ".join(extra_attrs_parts)
     return (
         f'<a class="{" ".join(classes)}" href="{escape(href, quote=True)}"{extra_attrs}>'
         f"{escape(label)}</a>"
@@ -483,7 +490,13 @@ def portal_html(
         "SUBMISSION_CONTENT_LABEL": "内容" if is_zh else "Content",
         "SUBMIT_TEXT_BUTTON": "提交文本" if is_zh else "Submit text",
         "UPLOAD_FILES_LABEL": "上传文件" if is_zh else "Upload files",
+        "UPLOAD_FILE_BUTTON": "选择文件" if is_zh else "Choose files",
+        "UPLOAD_FILE_EMPTY": "未选择文件" if is_zh else "No files selected",
         "UPLOAD_FOLDER_LABEL": "上传文件夹" if is_zh else "Upload folder",
+        "UPLOAD_FOLDER_BUTTON": "选择文件夹" if is_zh else "Choose folder",
+        "UPLOAD_FOLDER_EMPTY": "未选择文件夹" if is_zh else "No folder selected",
+        "FILE_PICKER_SELECTED_PREFIX": "已选择" if is_zh else "Selected",
+        "FILE_PICKER_SELECTED_SUFFIX": "个文件" if is_zh else "files",
         "SUBMIT_FILE_BUTTON": "上传文档" if is_zh else "Upload documents",
         "MCP_TITLE": "通过 MCP 接入" if is_zh else "Connect via MCP",
         "MCP_INTRO": _tutorial_tip(
@@ -826,11 +839,17 @@ def admin_html(
                 else "Supports Markdown, text, DOCX, PPTX, and zip. You can also choose files or folders directly."
             ),
             INGEST_FILE_LABEL="选择文件" if is_zh else "Choose files",
+            INGEST_FILE_BUTTON="选择文件" if is_zh else "Choose files",
+            INGEST_FILE_EMPTY="未选择文件" if is_zh else "No files selected",
             INGEST_FOLDER_LABEL="选择文件夹" if is_zh else "Choose folder",
+            INGEST_FOLDER_BUTTON="选择文件夹" if is_zh else "Choose folder",
+            INGEST_FOLDER_EMPTY="未选择文件夹" if is_zh else "No folder selected",
+            FILE_PICKER_SELECTED_PREFIX="已选择" if is_zh else "Selected",
+            FILE_PICKER_SELECTED_SUFFIX="个文件" if is_zh else "files",
             INGEST_SELECTION_LABEL="当前导入选择" if is_zh else "Current import selection",
             INGEST_SELECTION_EMPTY="还没有选择任何文档。" if is_zh else "No documents selected yet.",
             INGEST_BUTTON="上传并执行导入" if is_zh else "Upload and run ingest",
-            INGEST_STATUS="Live 区会同步显示请求与任务反馈。" if is_zh else "The Live panel mirrors request and job feedback.",
+            INGEST_STATUS="下方运行台会同步显示请求与任务反馈。" if is_zh else "The runtime workspace below mirrors request and job feedback.",
             TIDY_TITLE="整理" if is_zh else "Tidy",
             TIDY_TIP=_tutorial_tip(
                 "输入原因后直接发起治理。" if is_zh else "Enter a reason and queue maintenance.",
@@ -845,14 +864,14 @@ def admin_html(
             TIDY_REASON_LABEL="本次整理原因" if is_zh else "Tidy reason",
             TIDY_REASON_PLACEHOLDER="例如：整理悬空链接与未覆盖正式条目" if is_zh else "Example: clean up dangling links and uncovered formal entries",
             TIDY_BUTTON="执行整理" if is_zh else "Run tidy",
-            TIDY_STATUS="创建任务后，Live 区会记录请求与返回。" if is_zh else "The Live panel records the request and response after queueing.",
+            TIDY_STATUS="创建任务后，请求与返回会同步写进下方运行台。" if is_zh else "Once the job is created, the request and response appear in the shared runtime workspace below.",
             EXPLORE_TITLE="探索" if is_zh else "Knowledge explore",
             EXPLORE_TIP=_tutorial_tip(
-                "只接受 Agent 输出，并把过程写进 Live。" if is_zh else "Accept agent output only and mirror the run in Live.",
+                "输入问题后直接运行；最终结果显示在下方结果区，过程持续写进 Live。" if is_zh else "Run the question directly; the final result appears in the shared result area below while the full trace stays in Live.",
                 (
-                    "探索不再把固定错误包装成“回答”。如果 Agent 输出无效、CLI 卡住或重试失败，结果区会直接显示失败，完整命令调用与终端输出会写到下方 Live。"
+                    "探索不再把固定错误包装成“回答”。如果 Agent 输出无效、CLI 卡住或重试失败，公共结果区会直接显示失败，完整命令调用与终端输出会写到下方 Live。"
                     if is_zh
-                    else "Explore no longer wraps fixed fallback text as an answer. When agent output is invalid, the CLI stalls, or retries fail, the result panel shows an explicit failure and the full command / terminal trace is written into the Live panel below."
+                    else "Explore no longer wraps fixed fallback text as an answer. When agent output is invalid, the CLI stalls, or retries fail, the shared result area shows an explicit failure and the full command / terminal trace is written into the Live panel below."
                 ),
                 locale=active_locale,
                 testid="admin-kb-explore-tip",
@@ -864,19 +883,26 @@ def admin_html(
                 else "Example: when should hot backup not be treated as a failover strategy?"
             ),
             EXPLORE_BUTTON="运行探索" if is_zh else "Run explore",
-            EXPLORE_STATUS="等待下一次探索。" if is_zh else "Waiting for the next explore run.",
-            EXPLORE_RESULT_EMPTY="这里会显示 Agent 输出，失败时不会伪装成回答。" if is_zh else "Agent output appears here; failures are shown as failures instead of disguised answers.",
-            LIVE_TITLE="Live",
-            LIVE_TIP=_tutorial_tip(
-                "实时报告命令调用与终端回复。" if is_zh else "Mirror command calls and terminal output in real time.",
+            EXPLORE_STATUS="最终结果会显示在下方结果区。" if is_zh else "The final result appears in the shared result area below.",
+            RUNTIME_TITLE="结果与 Live" if is_zh else "Result and Live",
+            RUNTIME_TIP=_tutorial_tip(
+                "上方显示最终结果，下方持续记录命令与终端轨迹。" if is_zh else "Final results stay on top while command and terminal traces keep streaming below.",
                 (
-                    "导入、整理和探索的关键请求都会写到这里。探索额外会持续写入 Agent CLI 的命令、stdout / stderr、重试原因与最终状态，方便判断到底是在运行、重试，还是已经失败。"
+                    "结果区固定在运行台顶部，不再塞回各自面板里触发重排；Live 维持更大的默认高度，并保留人工竖向缩放能力。"
                     if is_zh
-                    else "Key ingest, tidy, and explore requests are mirrored here. Explore additionally streams the agent CLI command, stdout / stderr, retry reasons, and the final state so you can tell whether it is still running, retrying, or already failed."
+                    else "The result area stays pinned to the top of the runtime workspace instead of reflowing inside individual panels; Live keeps a larger default height and can still be resized vertically."
                 ),
                 locale=active_locale,
-                testid="admin-kb-live-tip",
+                testid="admin-kb-runtime-tip",
             ),
+            RESULT_TITLE="最终结果" if is_zh else "Final result",
+            RESULT_STATUS="等待下一次运行结果。" if is_zh else "Waiting for the next runtime result.",
+            RESULT_EMPTY=(
+                "最终结果会显示在这里；完整命令与终端输出在下方 Live。"
+                if is_zh
+                else "Final results appear here; full commands and terminal output stay in Live below."
+            ),
+            LIVE_TITLE="Live",
             LIVE_CLEAR_BUTTON="清空记录" if is_zh else "Clear log",
             LIVE_STATUS="等待下一次导入 / 整理 / 探索。" if is_zh else "Waiting for the next ingest / tidy / explore run.",
             LIVE_EMPTY="LIVE READY\n" if is_zh else "LIVE READY\n",
@@ -1037,9 +1063,16 @@ def admin_html(
                 "explore_sources": "来源" if is_zh else "Sources",
                 "explore_gaps": "缺口" if is_zh else "Gaps",
                 "explore_confidence": "置信度" if is_zh else "Confidence",
+                "result_ready": "等待下一次运行结果。" if is_zh else "Waiting for the next runtime result.",
+                "result_running": "等待 Agent 最终结果；完整过程见下方 Live。" if is_zh else "Waiting for the final agent result; see Live below for the full trace.",
                 "explore_running": "正在运行探索，详情见 Live。" if is_zh else "Explore is running; see Live for details.",
                 "explore_completed": "探索已完成。" if is_zh else "Explore completed.",
                 "explore_failed": "探索失败" if is_zh else "Explore failed",
+                "explore_invalid_output": (
+                    "Agent 返回了内部运行内容，结果区已改为失败提示；原始轨迹请查看下方 Live。"
+                    if is_zh
+                    else "The agent returned internal runtime content, so the result area was downgraded to a failure message. Check Live below for the raw trace."
+                ),
                 "explore_failed_hint": "请查看下方 Live 区的命令调用与终端输出。" if is_zh else "Check the Live panel below for the command trace and terminal output.",
                 "explore_no_result": "探索结束了，但没有收到最终 Agent 输出。" if is_zh else "The explore run finished without a final agent result.",
                 "live_ready": "等待下一次导入 / 整理 / 探索。" if is_zh else "Waiting for the next ingest / tidy / explore run.",
@@ -1048,15 +1081,26 @@ def admin_html(
                 "live_request_label": "请求" if is_zh else "Request",
                 "live_response_label": "响应" if is_zh else "Response",
                 "live_command_label": "命令" if is_zh else "Command",
+                "live_command_redacted": (
+                    "Agent CLI 已启动；内部 prompt / schema 细节已隐藏。"
+                    if is_zh
+                    else "Agent CLI launched; internal prompt/schema details are hidden."
+                ),
                 "live_stdout_label": "标准输出" if is_zh else "Stdout",
                 "live_stderr_label": "标准错误" if is_zh else "Stderr",
                 "live_status_label": "状态" if is_zh else "Status",
                 "live_retry_label": "重试" if is_zh else "Retry",
+                "live_excerpt_redacted": (
+                    "内部运行摘录已隐藏；如需诊断，请查看安全失败提示。"
+                    if is_zh
+                    else "Internal runtime excerpt hidden; use the failure summary for diagnostics."
+                ),
                 "live_error_label": "错误" if is_zh else "Error",
                 "live_result_label": "结果" if is_zh else "Result",
                 "live_done_label": "结束" if is_zh else "Done",
                 "manual_tidy_reason_required": "请填写整理原因。" if is_zh else "Enter a tidy reason.",
                 "ingest_file_required": "请先拖入或选择至少一个文档。" if is_zh else "Drop or choose at least one document first.",
+                "ingest_selection_empty": "还没有选择任何文档。" if is_zh else "No documents selected yet.",
                 "ingest_selected_prefix": "当前已选择" if is_zh else "Selected",
                 "ingest_selected_suffix": "个文件" if is_zh else "files",
                 "ingest_uploaded": "已创建导入任务：" if is_zh else "Created ingest: ",

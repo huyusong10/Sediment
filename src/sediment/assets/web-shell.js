@@ -23,6 +23,12 @@
         };
   }
 
+  function prefersReducedMotion() {
+    return Boolean(
+      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+  }
+
   function applyInitialTheme() {
     const savedTheme = localStorage.getItem("theme");
     if (savedTheme === "dark") {
@@ -38,6 +44,103 @@
     }
   }
 
+  function applyMotionPreference() {
+    document.body.dataset.motionPreference = prefersReducedMotion() ? "reduce" : "full";
+  }
+
+  function isPlainPrimaryActivation(event) {
+    return (
+      event.button === 0 &&
+      !event.defaultPrevented &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey
+    );
+  }
+
+  function isNavigableSameOriginLink(link) {
+    if (!link || link.tagName !== "A") return false;
+    if (link.target && link.target.toLowerCase() === "_blank") return false;
+    if (link.hasAttribute("download")) return false;
+    const href = link.getAttribute("href");
+    if (!href) return false;
+    try {
+      const targetUrl = new URL(link.href, window.location.href);
+      const currentUrl = new URL(window.location.href);
+      if (targetUrl.origin !== currentUrl.origin) return false;
+      if (!/^https?:$/.test(targetUrl.protocol)) return false;
+      if (
+        targetUrl.pathname === currentUrl.pathname &&
+        targetUrl.search === currentUrl.search &&
+        targetUrl.hash === currentUrl.hash
+      ) {
+        return false;
+      }
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function navMotionLink(nav) {
+    return (
+      nav.querySelector('[data-shell-nav-link][aria-current="page"]') ||
+      nav.querySelector(".nav-link.primary") ||
+      nav.querySelector("[data-shell-nav-link]")
+    );
+  }
+
+  function navIndicator(nav) {
+    let indicator = nav.querySelector(".nav-active-indicator");
+    if (!indicator) {
+      indicator = document.createElement("div");
+      indicator.className = "nav-active-indicator";
+      indicator.setAttribute("aria-hidden", "true");
+      nav.appendChild(indicator);
+    }
+    return indicator;
+  }
+
+  function positionNavIndicator(nav, link) {
+    if (!nav || !link) return;
+    const indicator = navIndicator(nav);
+    const navRect = nav.getBoundingClientRect();
+    const linkRect = link.getBoundingClientRect();
+    const x = Math.round(linkRect.left - navRect.left);
+    const y = Math.round(linkRect.bottom - navRect.top + 5);
+    indicator.style.width = `${Math.round(linkRect.width)}px`;
+    indicator.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    nav.classList.add("shell-nav-enhanced");
+  }
+
+  function syncAllNavIndicators() {
+    document.querySelectorAll("[data-shell-nav]").forEach((nav) => {
+      positionNavIndicator(nav, navMotionLink(nav));
+    });
+  }
+
+  function navigateWithShellMotion(event) {
+    const link = event.currentTarget;
+    if (!isPlainPrimaryActivation(event) || !isNavigableSameOriginLink(link)) {
+      return;
+    }
+    event.preventDefault();
+    if (prefersReducedMotion()) {
+      window.location.href = link.href;
+      return;
+    }
+    document.querySelectorAll('[data-shell-nav-link][data-nav-activating="true"]').forEach((node) => {
+      delete node.dataset.navActivating;
+    });
+    link.dataset.navActivating = "true";
+    positionNavIndicator(link.closest("[data-shell-nav]"), link);
+    document.body.dataset.pageTransition = "leaving";
+    window.setTimeout(() => {
+      window.location.href = link.href;
+    }, 150);
+  }
+
   function attachShellNav() {
     document.querySelectorAll("[data-shell-nav]").forEach((nav) => {
       let utility = nav.parentElement?.querySelector("[data-shell-utility]") || null;
@@ -47,47 +150,60 @@
         utility.setAttribute("data-shell-utility", "");
         nav.parentElement.appendChild(utility);
       }
-      if (!utility || utility.dataset.enhanced === "true") {
-        return;
-      }
-      const iconGroup = document.createElement("div");
-      iconGroup.className = "utility-icons";
+      if (utility && utility.dataset.enhanced !== "true") {
+        const iconGroup = document.createElement("div");
+        iconGroup.className = "utility-icons";
 
-      const themeBtn = document.createElement("button");
-      themeBtn.className = "utility-icon-button";
-      themeBtn.type = "button";
-      const applyThemeButton = () => {
-        const next = nextThemeInfo();
-        themeBtn.innerHTML = `<span aria-hidden="true">${next.icon}</span>`;
-        themeBtn.title = next.label;
-        themeBtn.setAttribute("aria-label", next.label);
-      };
-      applyThemeButton();
-      themeBtn.addEventListener("click", () => {
-        document.documentElement.classList.toggle("dark");
-        const isDark = document.documentElement.classList.contains("dark");
-        localStorage.setItem("theme", isDark ? "dark" : "light");
+        const themeBtn = document.createElement("button");
+        themeBtn.className = "utility-icon-button";
+        themeBtn.type = "button";
+        const applyThemeButton = () => {
+          const next = nextThemeInfo();
+          themeBtn.innerHTML = `<span aria-hidden="true">${next.icon}</span>`;
+          themeBtn.title = next.label;
+          themeBtn.setAttribute("aria-label", next.label);
+        };
         applyThemeButton();
-      });
+        themeBtn.addEventListener("click", () => {
+          document.documentElement.classList.toggle("dark");
+          const isDark = document.documentElement.classList.contains("dark");
+          localStorage.setItem("theme", isDark ? "dark" : "light");
+          applyThemeButton();
+        });
 
-      const langBtn = document.createElement("button");
-      langBtn.className = "utility-icon-button";
-      langBtn.type = "button";
-      langBtn.innerHTML = `<span aria-hidden="true">${shellData.toggleLabel || "EN"}</span>`;
-      langBtn.title = shellData.toggleAriaLabel || "Switch language";
-      langBtn.setAttribute("aria-label", shellData.toggleAriaLabel || "Switch language");
-      langBtn.addEventListener("click", () => {
-        const currentUrl = new URL(window.location.href);
-        currentUrl.searchParams.set(
-          "lang",
-          document.documentElement.dataset.locale === "zh" ? "en" : "zh"
-        );
-        window.location.href = currentUrl.toString();
-      });
+        const langBtn = document.createElement("button");
+        langBtn.className = "utility-icon-button";
+        langBtn.type = "button";
+        langBtn.innerHTML = `<span aria-hidden="true">${shellData.toggleLabel || "EN"}</span>`;
+        langBtn.title = shellData.toggleAriaLabel || "Switch language";
+        langBtn.setAttribute("aria-label", shellData.toggleAriaLabel || "Switch language");
+        langBtn.addEventListener("click", () => {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set(
+            "lang",
+            document.documentElement.dataset.locale === "zh" ? "en" : "zh"
+          );
+          window.location.href = currentUrl.toString();
+        });
 
-      iconGroup.append(themeBtn, langBtn);
-      utility.append(iconGroup);
-      utility.dataset.enhanced = "true";
+        iconGroup.append(themeBtn, langBtn);
+        utility.append(iconGroup);
+        utility.dataset.enhanced = "true";
+      }
+
+      nav.querySelectorAll("[data-shell-nav-link]").forEach((link) => {
+        if (link.dataset.shellMotionBound !== "true") {
+          link.addEventListener("click", navigateWithShellMotion);
+          link.dataset.shellMotionBound = "true";
+        }
+      });
+      positionNavIndicator(nav, navMotionLink(nav));
+      if (nav.dataset.navMotionReady !== "true") {
+        window.requestAnimationFrame(() => {
+          nav.classList.add("shell-nav-motion-ready");
+          nav.dataset.navMotionReady = "true";
+        });
+      }
     });
   }
 
@@ -186,16 +302,131 @@
     );
   }
 
+  function resolveFilePickerRoot(target) {
+    if (!target) return null;
+    if (typeof target === "string") {
+      const input = document.getElementById(target);
+      return input ? input.closest("[data-file-picker]") : null;
+    }
+    if (typeof Element !== "undefined" && target instanceof Element) {
+      return target.matches("[data-file-picker]") ? target : target.closest("[data-file-picker]");
+    }
+    return null;
+  }
+
+  function summarizeFileSelection(files, statusNode) {
+    const items = Array.from(files || []);
+    if (!items.length) {
+      return statusNode?.dataset.emptyLabel || "";
+    }
+    const sample = items
+      .slice(0, 3)
+      .map((file) => file.webkitRelativePath || file.name || "")
+      .filter(Boolean)
+      .join(" · ");
+    if (items.length === 1) {
+      return sample;
+    }
+    const prefix = statusNode?.dataset.selectedPrefix || "Selected";
+    const suffix = statusNode?.dataset.selectedSuffix || "files";
+    const overflow = items.length > 3 ? ` +${items.length - 3}` : "";
+    return `${prefix} ${items.length} ${suffix} · ${sample}${overflow}`;
+  }
+
+  function syncFilePickerState(target) {
+    const root = resolveFilePickerRoot(target);
+    if (!root) return;
+    const input = root.querySelector('input[type="file"]');
+    const statusNode = root.querySelector("[data-file-picker-status]");
+    if (!input || !statusNode) return;
+    const files = Array.from(input.files || []);
+    root.dataset.hasSelection = files.length ? "true" : "false";
+    statusNode.textContent = summarizeFileSelection(files, statusNode);
+  }
+
+  function enhanceLocalizedFilePickers() {
+    document.querySelectorAll("[data-file-picker]").forEach((root) => {
+      const input = root.querySelector('input[type="file"]');
+      if (!input) return;
+      if (input.dataset.filePickerBound !== "true") {
+        input.addEventListener("change", () => syncFilePickerState(root));
+        input.dataset.filePickerBound = "true";
+      }
+      syncFilePickerState(root);
+    });
+  }
+
+  function safeSessionStorage() {
+    try {
+      return window.sessionStorage;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function readSessionState(key, fallback = null) {
+    const storage = safeSessionStorage();
+    if (!storage || !key) return fallback;
+    try {
+      const raw = storage.getItem(String(key));
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch (_error) {
+      return fallback;
+    }
+  }
+
+  function writeSessionState(key, value) {
+    const storage = safeSessionStorage();
+    if (!storage || !key) return;
+    try {
+      if (value == null) {
+        storage.removeItem(String(key));
+        return;
+      }
+      storage.setItem(String(key), JSON.stringify(value));
+    } catch (_error) {
+      // Ignore quota and privacy mode failures.
+    }
+  }
+
+  function clearSessionStatePrefix(prefix) {
+    const storage = safeSessionStorage();
+    if (!storage || !prefix) return;
+    try {
+      const keys = [];
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key && key.startsWith(String(prefix))) {
+          keys.push(key);
+        }
+      }
+      keys.forEach((key) => storage.removeItem(key));
+    } catch (_error) {
+      // Ignore privacy mode failures.
+    }
+  }
+
   window.SedimentShell = {
+    clearSessionStatePrefix,
     collectUploads,
+    enhanceLocalizedFilePickers,
     escapeHtml,
     fetchJson,
     fileToBase64,
+    readSessionState,
     readJsonScript,
     renderMarkdown,
     shellData,
+    syncFilePickerState,
+    writeSessionState,
   };
 
   applyInitialTheme();
-  document.addEventListener("DOMContentLoaded", attachShellNav);
+  document.addEventListener("DOMContentLoaded", () => {
+    applyMotionPreference();
+    attachShellNav();
+    enhanceLocalizedFilePickers();
+    window.addEventListener("resize", syncAllNavIndicators, { passive: true });
+  });
 })();

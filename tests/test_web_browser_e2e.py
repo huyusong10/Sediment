@@ -47,6 +47,30 @@ def _installed_quartz_runtime_dir() -> Path:
     return base / "sediment" / "quartz-runtime" / "quartz"
 
 
+def _wait_for_shared_row_alignment(page, *testids: str, tolerance: float = 2.0) -> None:
+    selector_list = ", ".join(f'[data-testid="{testid}"]' for testid in testids)
+    page.wait_for_function(
+        """
+        ({ selectors, tolerance }) => {
+          const nodes = selectors
+            .split(",")
+            .map((selector) => document.querySelector(selector.trim()))
+            .filter(Boolean);
+          if (nodes.length !== selectors.split(",").length) return false;
+          const boxes = nodes.map((node) => node.getBoundingClientRect());
+          const referenceTop = boxes[0].top;
+          const referenceHeight = boxes[0].height;
+          return boxes.every(
+            (box) =>
+              Math.abs(box.top - referenceTop) <= tolerance &&
+              Math.abs(box.height - referenceHeight) <= tolerance
+          );
+        }
+        """,
+        arg={"selectors": selector_list, "tolerance": tolerance},
+    )
+
+
 def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
@@ -57,6 +81,8 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.get_by_test_id("portal-message")).to_contain_text("知识库已就绪")
             expect(page.locator("[data-shell-nav] a.nav-link")).to_have_count(5)
             expect(page.locator("[data-shell-utility] .utility-icon-button")).to_have_count(2)
+            expect(page.locator("[data-shell-nav] a[aria-current='page']")).to_have_count(1)
+            expect(page.locator("[data-shell-nav] .nav-active-indicator")).to_have_count(1)
             expect(page.locator(".brand svg.brand-lockup")).to_be_visible()
             expect(page.locator('a[href^="/admin"]')).to_have_count(0)
             assert page.locator('a[href="/submit?lang=zh"]').count() == 1
@@ -66,8 +92,12 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             assert nav_row_box["y"] > brand_box["y"]
             overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
             tutorial_box = page.locator("[data-shell-nav] a.nav-link").nth(2).bounding_box()
+            indicator_box = page.locator("[data-shell-nav] .nav-active-indicator").bounding_box()
             assert overview_box is not None and tutorial_box is not None
+            assert indicator_box is not None
             assert abs(overview_box["width"] - tutorial_box["width"]) < 2
+            assert abs(indicator_box["x"] - overview_box["x"]) < 4
+            assert abs(indicator_box["width"] - overview_box["width"]) < 4
 
             page.goto(f"{live['base_url']}/?lang=en", wait_until="domcontentloaded")
             overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
@@ -122,7 +152,11 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.locator("#submit-text-analysis")).to_contain_text("智能建议")
             expect(page.get_by_test_id("portal-message")).to_contain_text("已提交文本草案")
 
+            page.goto(f"{live['base_url']}/submit?lang=en", wait_until="domcontentloaded")
+            expect(page.locator("body")).to_contain_text("Text submission")
+            expect(page.locator("body")).not_to_contain_text("文本提交")
             page.locator("#upload-name").fill("Alice")
+            expect(page.get_by_test_id("portal-upload-file-selection")).to_have_text("No files selected")
             page.get_by_test_id("portal-upload-file").set_input_files(
                 [
                     {
@@ -137,8 +171,31 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
                     },
                 ]
             )
+            expect(page.get_by_test_id("portal-upload-file-selection")).to_contain_text("Selected 2 files")
+            expect(page.get_by_test_id("portal-upload-file-selection")).to_contain_text("bundle-a.md")
             page.get_by_test_id("portal-submit-file-button").click()
             expect(page.locator("#submit-file-status")).to_contain_text("submission_id=")
+
+
+def test_portal_browser_e2e_submit_draft_survives_primary_nav_switch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    with live_server(tmp_path, monkeypatch) as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            page.get_by_test_id("portal-submit-name").fill("Alice")
+            page.get_by_test_id("portal-submit-title").fill("切页也要保留")
+            page.get_by_test_id("portal-submit-content").fill("这个草稿在同标签页切换后不应丢失。")
+
+            page.goto(f"{live['base_url']}/tutorial", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-page-title")).to_have_text("接入教程")
+
+            page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-submit-name")).to_have_value("Alice")
+            expect(page.get_by_test_id("portal-submit-title")).to_have_value("切页也要保留")
+            expect(page.get_by_test_id("portal-submit-content")).to_have_value(
+                "这个草稿在同标签页切换后不应丢失。"
+            )
 
 
 def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) -> None:
@@ -201,11 +258,51 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
             expect(page.get_by_test_id("admin-message")).to_contain_text("管理台已就绪")
             expect(page.locator('[data-testid="admin-refresh-button"]')).to_have_count(0)
+            queue_box = page.get_by_test_id("admin-overview-queue-panel").bounding_box()
+            health_box = page.get_by_test_id("admin-overview-health-panel").bounding_box()
+            issue_box = page.get_by_test_id("admin-overview-issue-panel").bounding_box()
+            activity_box = page.get_by_test_id("admin-overview-activity-panel").bounding_box()
+            assert queue_box is not None and issue_box is not None and health_box is not None and activity_box is not None
+            assert health_box["x"] > queue_box["x"]
+            assert abs(queue_box["y"] - health_box["y"]) < 2
+            assert abs(issue_box["y"] - activity_box["y"]) < 2
+            assert issue_box["y"] > queue_box["y"]
+            assert abs(queue_box["height"] - health_box["height"]) < 2
+            assert abs(issue_box["height"] - activity_box["height"]) < 2
 
-            page.goto(f"{live['base_url']}/admin/system", wait_until="domcontentloaded")
+            page.goto(f"{live['base_url']}/admin/system", wait_until="networkidle")
             expect(page.get_by_test_id("admin-page-title")).to_have_text("设置")
             expect(page.get_by_test_id("admin-settings-raw-text")).to_be_visible()
             expect(page.get_by_test_id("admin-settings-restart-button")).to_be_visible()
+            page.wait_for_function(
+                """
+                () => {
+                  const configPath = document.querySelector('[data-testid="admin-settings-config-path"]');
+                  const effectiveConfig = document.querySelector('[data-testid="admin-settings-effective-text"]');
+                  if (!configPath || !effectiveConfig) return false;
+                  const loadingPattern = /(加载中|Loading)/;
+                  return (
+                    !loadingPattern.test(configPath.textContent || "") &&
+                    !loadingPattern.test(effectiveConfig.textContent || "")
+                  );
+                }
+                """
+            )
+            _wait_for_shared_row_alignment(
+                page,
+                "admin-settings-reload-button",
+                "admin-settings-save-button",
+                "admin-settings-restart-button",
+            )
+            reload_box = page.get_by_test_id("admin-settings-reload-button").bounding_box()
+            save_box = page.get_by_test_id("admin-settings-save-button").bounding_box()
+            restart_box = page.get_by_test_id("admin-settings-restart-button").bounding_box()
+            assert reload_box is not None and save_box is not None and restart_box is not None
+            assert abs(reload_box["y"] - save_box["y"]) < 2
+            assert abs(save_box["y"] - restart_box["y"]) < 2
+            assert reload_box["x"] < save_box["x"] < restart_box["x"]
+            assert abs(reload_box["height"] - save_box["height"]) < 2
+            assert abs(save_box["height"] - restart_box["height"]) < 2
             build_box = page.get_by_test_id("admin-quartz-build-button").bounding_box()
             open_box = page.locator('[data-testid="admin-quartz-actions"] a.button').bounding_box()
             assert build_box is not None and open_box is not None
@@ -215,27 +312,54 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
             expect(page.get_by_test_id("admin-ingest-dropzone")).to_be_visible()
             expect(page.locator('[data-testid="admin-file-index-tree"]')).to_have_count(0)
+            top_layout_box = page.get_by_test_id("admin-kb-top-layout").bounding_box()
+            side_stack_box = page.get_by_test_id("admin-kb-side-stack").bounding_box()
             ingest_box = page.get_by_test_id("admin-kb-ingest-panel").bounding_box()
             tidy_box = page.get_by_test_id("admin-kb-tidy-panel").bounding_box()
             explore_box = page.get_by_test_id("admin-kb-explore-panel").bounding_box()
             live_box = page.get_by_test_id("admin-kb-live-panel").bounding_box()
+            runtime_console_box = page.get_by_test_id("admin-runtime-console").bounding_box()
+            result_box = page.get_by_test_id("admin-kb-result").bounding_box()
+            live_log_box = page.get_by_test_id("admin-kb-live-log").bounding_box()
+            live_clear_box = page.get_by_test_id("admin-kb-live-clear").bounding_box()
+            assert top_layout_box is not None and side_stack_box is not None
             assert ingest_box is not None and tidy_box is not None and explore_box is not None and live_box is not None
+            assert runtime_console_box is not None and result_box is not None and live_log_box is not None
+            assert live_clear_box is not None
             assert ingest_box["x"] < tidy_box["x"]
+            assert abs(ingest_box["width"] - side_stack_box["width"]) < 2
+            assert abs(ingest_box["y"] - side_stack_box["y"]) < 2
             assert abs(tidy_box["x"] - explore_box["x"]) < 2
             assert tidy_box["y"] < explore_box["y"]
-            assert live_box["y"] > ingest_box["y"]
-            assert live_box["y"] > explore_box["y"]
-            expect(page.get_by_test_id("admin-ingest-status")).to_contain_text("Live 区会同步显示请求与任务反馈")
+            assert live_box["y"] > top_layout_box["y"] + top_layout_box["height"] - 2
+            assert abs(live_box["x"] - top_layout_box["x"]) < 2
+            assert live_box["width"] > ingest_box["width"] * 1.8
+            assert page.get_by_test_id("admin-runtime-console").evaluate(
+                "el => getComputedStyle(el).resize"
+            ) == "vertical"
+            assert runtime_console_box["height"] > 900
+            assert result_box["height"] > 240
+            assert live_log_box["height"] > 650
+            assert result_box["y"] < live_log_box["y"]
+            assert abs(result_box["x"] - live_log_box["x"]) < 2
+            assert abs(result_box["width"] - live_log_box["width"]) < 2
+            assert live_clear_box["y"] + live_clear_box["height"] <= runtime_console_box["y"] + 2
+            assert live_clear_box["x"] + live_clear_box["width"] <= live_box["x"] + live_box["width"] + 2
+            expect(page.get_by_test_id("admin-ingest-status")).to_contain_text("下方运行台会同步显示请求与任务反馈")
             page.get_by_test_id("admin-manual-tidy-button").click()
             expect(page.get_by_test_id("admin-tidy-status")).to_contain_text("请填写整理原因")
-            expect(page.get_by_test_id("admin-ingest-status")).to_contain_text("Live 区会同步显示请求与任务反馈")
+            expect(page.get_by_test_id("admin-ingest-status")).to_contain_text("下方运行台会同步显示请求与任务反馈")
             expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(re.compile("请填写整理原因"))
             page.get_by_test_id("admin-explore-input").fill("什么是热备份？")
             page.get_by_test_id("admin-explore-button").click()
-            expect(page.get_by_test_id("admin-explore-result")).to_contain_text("热备份是在故障切换前准备好的可接管能力")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("热备份是在故障切换前准备好的可接管能力")
+            expect(page.get_by_test_id("admin-kb-result-status")).to_contain_text("探索已完成")
+            expect(page.get_by_test_id("admin-kb-explore-panel")).not_to_contain_text("热备份是在故障切换前准备好的可接管能力")
             expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(re.compile("POST /api/admin/explore/live"))
             live_log = page.get_by_test_id("admin-kb-live-log").input_value()
             assert "什么是热备份？" in live_log
+            assert "claude -p" not in live_log
+            assert "--json-schema" not in live_log
             assert len([line for line in live_log.splitlines() if line.strip()]) >= 3
             submission_card = page.locator("#submission-list .card").filter(
                 has_text="浏览器管理台提案"
@@ -306,6 +430,90 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             expect(user_card.locator(".inline-token")).to_contain_text("top-secret")
 
 
+def test_admin_browser_e2e_keeps_leaked_runtime_output_out_of_result_panel(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MOCK_EXPLORE_LEAKED_ANSWER", "1")
+
+    with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-login-token").fill("top-secret")
+            page.get_by_test_id("admin-login-button").click()
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
+
+            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-explore-input").fill("什么是热备份？")
+            page.get_by_test_id("admin-explore-button").click()
+
+            expect(page.get_by_test_id("admin-kb-result-status")).to_contain_text("探索失败")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("内部运行内容")
+            expect(page.get_by_test_id("admin-kb-result")).not_to_contain_text("claude -p")
+            expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(
+                re.compile("internal Sediment explore runtime")
+            )
+
+
+def test_admin_browser_e2e_recovers_structured_output_summary(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("MOCK_EXPLORE_STRUCTURED_SUMMARY", "1")
+
+    with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-login-token").fill("top-secret")
+            page.get_by_test_id("admin-login-button").click()
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
+
+            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-explore-input").fill("什么是热备份？")
+            page.get_by_test_id("admin-explore-button").click()
+
+            expect(page.get_by_test_id("admin-kb-result-status")).to_contain_text("探索已完成")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("Prepared capability")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("热备份是在故障切换前准备好的可接管能力")
+            expect(page.get_by_test_id("admin-kb-result")).not_to_contain_text("探索失败")
+            expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(
+                re.compile("structured-output summary")
+            )
+            expect(page.get_by_test_id("admin-kb-live-log")).not_to_have_value(
+                re.compile(r"claude -p|--json-schema")
+            )
+
+
+def test_admin_browser_e2e_kb_runtime_state_survives_primary_nav_switch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-login-token").fill("top-secret")
+            page.get_by_test_id("admin-login-button").click()
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
+
+            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-tidy-reason").fill("先保留这个整理原因")
+            page.get_by_test_id("admin-explore-input").fill("什么是热备份？")
+            page.get_by_test_id("admin-explore-button").click()
+            expect(page.get_by_test_id("admin-kb-result-status")).to_contain_text("探索已完成")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("热备份是在故障切换前准备好的可接管能力")
+            expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(re.compile("POST /api/admin/explore/live"))
+
+            page.goto(f"{live['base_url']}/admin/overview", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
+
+            page.goto(f"{live['base_url']}/admin/kb", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-tidy-reason")).to_have_value("先保留这个整理原因")
+            expect(page.get_by_test_id("admin-explore-input")).to_have_value("什么是热备份？")
+            expect(page.get_by_test_id("admin-kb-result-status")).to_contain_text("探索已完成")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("热备份是在故障切换前准备好的可接管能力")
+            expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(re.compile("POST /api/admin/explore/live"))
+            expect(page.get_by_test_id("admin-kb-live-log")).not_to_have_value(
+                re.compile(r"claude -p|--json-schema")
+            )
+
+
 def test_portal_quartz_page_shows_optional_state(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
@@ -339,7 +547,9 @@ def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypat
             expect(popup.locator("body")).to_contain_text("Quartz Ready")
 
 
-def test_quartz_graph_renders_when_served_through_sediment(tmp_path: Path, monkeypatch) -> None:
+def test_quartz_graph_hides_index_pages_and_renders_entry_pages_when_served_through_sediment(
+    tmp_path: Path, monkeypatch
+) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         runtime_dir = _installed_quartz_runtime_dir()
         if not ((runtime_dir / "package.json").exists() and (runtime_dir / "node_modules").exists()):
@@ -357,4 +567,13 @@ def test_quartz_graph_renders_when_served_through_sediment(tmp_path: Path, monke
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/quartz/", wait_until="networkidle")
             page.wait_for_timeout(1500)
+            expect(page.locator(".graph-container")).to_have_count(0)
+            expect(page.locator(".global-graph-container")).to_have_count(0)
+
+            page.goto(
+                f"{live['base_url']}/quartz/entries/%E7%83%AD%E5%A4%87%E4%BB%BD",
+                wait_until="networkidle",
+            )
+            page.wait_for_timeout(1500)
+            expect(page).to_have_title(re.compile("热备份"))
             expect(page.locator(".graph-container canvas")).to_have_count(1)

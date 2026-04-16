@@ -41,3 +41,6 @@ benchmarks/
 # Liminal
 spec.md
 .liminal/
+
+# Local collaboration rules
+AGENTS.md

@@ -3,13 +3,111 @@
   const pageData = shell.readJsonScript("sediment-page-data") || {};
   const UI = pageData.ui || {};
   const ROUTES = pageData.routes || {};
-  const { collectUploads, escapeHtml, fetchJson, renderMarkdown } = shell;
+  const { collectUploads, escapeHtml, fetchJson, readSessionState, renderMarkdown, writeSessionState } = shell;
   const isZh = document.documentElement.dataset.locale === "zh";
+  const locale = document.documentElement.dataset.locale || "en";
+  const PORTAL_PAGE_SESSION_KEY = `sediment-portal-ui:${locale}:${String(pageData.pageKind || "unknown")}`;
+  const MAX_PERSISTED_TEXT_CHARS = 120000;
   const state = {
     suggestions: [],
     activeSuggestionIndex: -1,
     debounceId: null,
   };
+  let persistStateTimer = 0;
+
+  function trimPersistedText(value, limit = MAX_PERSISTED_TEXT_CHARS) {
+    const text = String(value || "");
+    return text.length > limit ? text.slice(text.length - limit) : text;
+  }
+
+  function nodeText(id) {
+    return String(document.getElementById(id)?.textContent || "");
+  }
+
+  function nodeValue(id) {
+    return String(document.getElementById(id)?.value || "");
+  }
+
+  function setNodeText(id, value) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = String(value || "");
+  }
+
+  function setNodeValue(id, value) {
+    const node = document.getElementById(id);
+    if (node) node.value = String(value || "");
+  }
+
+  function queuePersistPortalPageState() {
+    window.clearTimeout(persistStateTimer);
+    persistStateTimer = window.setTimeout(() => persistPortalPageState(), 40);
+  }
+
+  function capturePortalPageState() {
+    const base = {
+      portalMessage: trimPersistedText(nodeText("portal-message"), 4000),
+    };
+
+    if (pageData.pageKind === "home" || pageData.pageKind === "search") {
+      return {
+        ...base,
+        query: trimPersistedText(nodeValue("search-input"), 12000),
+        searchStatus: trimPersistedText(nodeText("search-status"), 4000),
+      };
+    }
+
+    if (pageData.pageKind === "submit") {
+      return {
+        ...base,
+        submitName: trimPersistedText(nodeValue("submit-name"), 12000),
+        submitTitle: trimPersistedText(nodeValue("submit-title"), 12000),
+        submitType: trimPersistedText(nodeValue("submit-type"), 256),
+        submitContent: trimPersistedText(nodeValue("submit-content")),
+        uploadName: trimPersistedText(nodeValue("upload-name"), 12000),
+        submitTextStatus: trimPersistedText(nodeText("submit-text-status"), 4000),
+        submitFileStatus: trimPersistedText(nodeText("submit-file-status"), 4000),
+        analysisHtml: trimPersistedText(document.getElementById("submit-text-analysis")?.innerHTML || ""),
+      };
+    }
+
+    return null;
+  }
+
+  function persistPortalPageState() {
+    writeSessionState(PORTAL_PAGE_SESSION_KEY, capturePortalPageState());
+  }
+
+  function restorePortalPageState() {
+    const snapshot = readSessionState(PORTAL_PAGE_SESSION_KEY, null);
+    if (!snapshot || typeof snapshot !== "object") return false;
+    setNodeText("portal-message", snapshot.portalMessage || "");
+
+    if (pageData.pageKind === "home" || pageData.pageKind === "search") {
+      setNodeValue("search-input", snapshot.query || "");
+      setNodeText("search-status", snapshot.searchStatus || nodeText("search-status"));
+      return Boolean(snapshot.query || snapshot.portalMessage);
+    }
+
+    if (pageData.pageKind === "submit") {
+      setNodeValue("submit-name", snapshot.submitName || "");
+      setNodeValue("submit-title", snapshot.submitTitle || "");
+      const submitType = document.getElementById("submit-type");
+      if (submitType && snapshot.submitType) {
+        submitType.value = snapshot.submitType;
+      }
+      setNodeValue("submit-content", snapshot.submitContent || "");
+      setNodeValue("upload-name", snapshot.uploadName || "");
+      setNodeText("submit-text-status", snapshot.submitTextStatus || nodeText("submit-text-status"));
+      setNodeText("submit-file-status", snapshot.submitFileStatus || nodeText("submit-file-status"));
+      const analysisNode = document.getElementById("submit-text-analysis");
+      if (analysisNode && snapshot.analysisHtml) {
+        analysisNode.innerHTML = snapshot.analysisHtml;
+      }
+      return true;
+    }
+
+    return Boolean(snapshot.portalMessage);
+  }
 
   function localeValue() {
     return document.documentElement.dataset.locale || "en";
@@ -39,11 +137,13 @@
   function setPortalMessage(message) {
     const node = document.getElementById("portal-message");
     if (node) node.textContent = String(message || "");
+    queuePersistPortalPageState();
   }
 
   function setSearchStatus(message) {
     const node = document.getElementById("search-status");
     if (node) node.textContent = String(message || "");
+    queuePersistPortalPageState();
   }
 
   function setDocumentTitle(label) {
@@ -289,6 +389,7 @@
     if (!node) return;
     if (!analysis) {
       node.innerHTML = "";
+      queuePersistPortalPageState();
       return;
     }
     const related = Array.isArray(analysis.related_entries) && analysis.related_entries.length
@@ -305,6 +406,7 @@
         <div class="subtle">${related}</div>
       </div>
     `;
+    queuePersistPortalPageState();
   }
 
   async function submitText() {
@@ -393,6 +495,7 @@
 
   document.getElementById("search-input")?.addEventListener("input", (event) => {
     const value = String(event.target.value || "");
+    queuePersistPortalPageState();
     window.clearTimeout(state.debounceId);
     state.debounceId = window.setTimeout(() => {
       loadSuggestions(value).catch(showPortalError);
@@ -425,22 +528,38 @@
   });
   document.getElementById("submit-text-button")?.addEventListener("click", () => submitText().catch(showPortalError));
   document.getElementById("submit-file-button")?.addEventListener("click", () => submitFiles().catch(showPortalError));
+  document.getElementById("submit-name")?.addEventListener("input", queuePersistPortalPageState);
+  document.getElementById("submit-title")?.addEventListener("input", queuePersistPortalPageState);
+  document.getElementById("submit-type")?.addEventListener("change", queuePersistPortalPageState);
+  document.getElementById("submit-content")?.addEventListener("input", queuePersistPortalPageState);
+  document.getElementById("upload-name")?.addEventListener("input", queuePersistPortalPageState);
+  window.addEventListener("pagehide", persistPortalPageState);
 
   if (pageData.pageKind === "home") {
-    document.getElementById("search-input").value = pageData.initialQuery || "";
+    const restored = restorePortalPageState();
+    document.getElementById("search-input").value = restored
+      ? (document.getElementById("search-input")?.value || "")
+      : (pageData.initialQuery || "");
     loadHome().catch(showPortalError);
-    if (pageData.initialQuery) {
-      loadSuggestions(pageData.initialQuery).catch(showPortalError);
+    const query = document.getElementById("search-input")?.value || "";
+    if (query) {
+      loadSuggestions(query).catch(showPortalError);
     }
   } else if (pageData.pageKind === "search") {
-    document.getElementById("search-input").value = pageData.initialQuery || "";
-    if (pageData.initialQuery) {
-      runSearch({ query: pageData.initialQuery, pushHistory: false }).catch(showPortalError);
+    const restored = restorePortalPageState();
+    const query = restored
+      ? (document.getElementById("search-input")?.value || "")
+      : (pageData.initialQuery || "");
+    document.getElementById("search-input").value = query;
+    if (query) {
+      runSearch({ query, pushHistory: false }).catch(showPortalError);
     } else {
       renderSearchResults([], "");
       setPortalMessage(UI.search_prompt);
     }
   } else if (pageData.pageKind === "entry") {
     loadEntry().catch(showPortalError);
+  } else if (pageData.pageKind === "submit") {
+    restorePortalPageState();
   }
 })();

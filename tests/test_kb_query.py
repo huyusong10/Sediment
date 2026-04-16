@@ -727,6 +727,34 @@ def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> Non
     assert any("formal source" in error for error in invalid["errors"])
 
 
+def test_validate_answer_rejects_runtime_prompt_leakage(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    data = inventory(kb_path)
+
+    leaked = validate_answer(
+        {
+            "answer": (
+                'claude -p --bare --json-schema {"type":"object","additionalProperties": false} '
+                'You are the internal Sediment explore runtime. Return JSON only.'
+            ),
+            "sources": ["热备份", "正式流程"],
+            "confidence": "low",
+            "exploration_summary": {
+                "entries_scanned": 6,
+                "entries_read": 2,
+                "links_followed": 1,
+                "mode": "definition-driven",
+            },
+            "gaps": [],
+            "contradictions": [],
+        },
+        inventory_data=data,
+    )
+
+    assert leaked["valid"] is False
+    assert any("prompt/schema leakage" in error for error in leaked["errors"])
+
+
 def test_audit_kb_reports_v4_quality_and_concept_gaps(tmp_path: Path) -> None:
     kb_path = _build_sample_kb(tmp_path)
 

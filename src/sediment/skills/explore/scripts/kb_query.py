@@ -535,6 +535,35 @@ def snippets(
     return result
 
 
+_RUNTIME_LEAK_STRONG_MARKERS = (
+    "you are the internal sediment explore runtime",
+    "treat the prepared kb context",
+    "return json only",
+    "claude -p",
+    "claude -p --bare",
+    "--json-schema",
+    "prepared context",
+    "sediment explore skill",
+)
+_RUNTIME_LEAK_WEAK_MARKERS = (
+    '"additionalproperties": false',
+    '"exploration_summary"',
+    '"entries_scanned"',
+    '"links_followed"',
+    '"properties": {"answer"',
+    '"confidence": {"type": "string"',
+    "the script layer already prepared deterministic context",
+)
+
+
+def _contains_runtime_prompt_leak(answer: str) -> bool:
+    lowered = answer.lower()
+    if any(marker in lowered for marker in _RUNTIME_LEAK_STRONG_MARKERS):
+        return True
+    weak_hits = sum(marker in lowered for marker in _RUNTIME_LEAK_WEAK_MARKERS)
+    return weak_hits >= 2
+
+
 def validate_answer(
     answer_payload: dict[str, Any],
     kb_path: str | Path | None = None,
@@ -555,6 +584,10 @@ def validate_answer(
 
     if not isinstance(normalized["answer"], str) or not normalized["answer"].strip():
         errors.append("answer must be a non-empty string")
+    elif _contains_runtime_prompt_leak(normalized["answer"]):
+        errors.append(
+            "answer appears to contain runtime prompt/schema leakage instead of user-facing content"
+        )
 
     if not isinstance(normalized["sources"], list) or not all(
         isinstance(item, str) and item.strip() for item in normalized["sources"]

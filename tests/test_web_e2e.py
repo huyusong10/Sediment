@@ -36,6 +36,8 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert 'class="brand-lockup"' in page.text
     assert 'data-shell-header-actions' in page.text
     assert 'data-shell-utility' in page.text
+    assert 'data-shell-nav-link="true"' in page.text
+    assert 'aria-current="page"' in page.text
     assert 'class="button nav-link primary"' in page.text
     assert 'class="button utility-action"' not in page.text
     assert 'class="stats stats-inline"' in page.text
@@ -78,6 +80,15 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert submit_page.status_code == 200
     assert 'data-testid="portal-page-title"' in submit_page.text
     assert 'data-testid="portal-submit-text-button"' in submit_page.text
+    assert 'data-testid="portal-submit-name"' in submit_page.text
+    assert 'data-testid="portal-submit-title"' in submit_page.text
+    assert 'data-testid="portal-submit-content"' in submit_page.text
+    assert 'data-testid="portal-upload-file-selection"' in submit_page.text
+    assert "Choose files" in submit_page.text
+    assert "Choose folder" in submit_page.text
+    assert "No files selected" in submit_page.text
+    assert "No folder selected" in submit_page.text
+    assert "未选择文件" not in submit_page.text
 
     submit_page_zh = client.get("/submit", headers={"accept-language": "zh-CN"})
     assert submit_page_zh.status_code == 200
@@ -94,9 +105,14 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     shell_asset = client.get("/ui-assets/web-shell.js")
     assert shell_asset.status_code == 200
     assert "window.SedimentShell" in shell_asset.text
+    assert "nav-active-indicator" in shell_asset.text
+    assert "navigateWithShellMotion" in shell_asset.text
+    assert "readSessionState" in shell_asset.text
+    assert "writeSessionState" in shell_asset.text
 
     portal_asset = client.get("/ui-assets/portal.js")
     assert portal_asset.status_code == 200
+    assert "PORTAL_PAGE_SESSION_KEY" in portal_asset.text
     assert "loadHome" in portal_asset.text
 
     home_response = client.get("/api/portal/home")
@@ -219,9 +235,15 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-kb-ingest-panel"' in kb_page.text
     assert 'data-testid="admin-kb-tidy-panel"' in kb_page.text
     assert 'data-testid="admin-kb-explore-panel"' in kb_page.text
+    assert 'data-testid="admin-runtime-console"' in kb_page.text
+    assert 'data-testid="admin-kb-result"' in kb_page.text
     assert 'data-testid="admin-kb-live-log"' in kb_page.text
     assert 'data-testid="admin-doc-browser"' not in kb_page.text
     assert 'data-testid="admin-editor-content"' not in kb_page.text
+    assert "Choose files" in kb_page.text
+    assert "Choose folder" in kb_page.text
+    assert "No files selected" in kb_page.text
+    assert "No folder selected" in kb_page.text
 
     files_page = client.get("/admin/files", headers={"accept-language": "en-US"})
     assert files_page.status_code == 200
@@ -409,6 +431,82 @@ def test_admin_explore_public_entrypoints_surface_runtime_failure(tmp_path: Path
 
     assert not any(event["type"] == "result" for event in events)
     assert any(event["type"] == "error" and "invalid JSON" in event["message"] for event in events)
+    done_event = next(event for event in events if event["type"] == "done")
+    assert done_event["ok"] is False
+
+
+def test_admin_explore_live_recovers_structured_output_summary(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_EXPLORE_STRUCTURED_SUMMARY", "1")
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+        admin_token="top-secret",
+    )
+
+    login = client.post("/api/admin/session", json={"token": "top-secret"})
+    assert login.status_code == 200
+    assert client.cookies.get(server_module.ADMIN_SESSION_COOKIE_NAME)
+
+    explore = client.post("/api/admin/explore", json={"question": "什么是热备份？"})
+    assert explore.status_code == 200
+    payload = explore.json()
+    assert payload["sources"] == ["热备份", "回音壁"]
+    assert payload["confidence"] == "high"
+    assert payload["exploration_summary"]["mode"] == "structured-output-summary"
+
+    with client.stream("POST", "/api/admin/explore/live", json={"question": "什么是热备份？"}) as explore_live:
+        assert explore_live.status_code == 200
+        events = [json.loads(line) for line in explore_live.iter_lines() if line]
+
+    command_event = next(event for event in events if event["type"] == "command")
+    assert command_event["backend"]
+    assert "Launching agent CLI" in command_event["message"]
+    assert "claude -p" not in command_event["message"]
+    assert "--json-schema" not in command_event["message"]
+    assert "internal Sediment explore runtime" not in command_event["message"]
+    assert any(
+        event["type"] == "status" and "structured-output summary" in event["message"]
+        for event in events
+    )
+    assert any(event["type"] == "result" for event in events)
+    done_event = next(event for event in events if event["type"] == "done")
+    assert done_event["ok"] is True
+
+
+def test_admin_explore_live_rejects_leaked_runtime_output(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_EXPLORE_LEAKED_ANSWER", "1")
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+        admin_token="top-secret",
+    )
+
+    login = client.post("/api/admin/session", json={"token": "top-secret"})
+    assert login.status_code == 200
+    assert client.cookies.get(server_module.ADMIN_SESSION_COOKIE_NAME)
+
+    with client.stream("POST", "/api/admin/explore/live", json={"question": "什么是热备份？"}) as explore_live:
+        assert explore_live.status_code == 200
+        events = [json.loads(line) for line in explore_live.iter_lines() if line]
+
+    assert not any(event["type"] == "result" for event in events)
+    assert any(event["type"] == "retry" and "prompt/schema leakage" in event.get("reason", "") for event in events)
+    assert any(
+        "You are the internal Sediment explore runtime"
+        in (
+            event.get("raw_excerpt", {}).get("excerpt", "")
+            if isinstance(event.get("raw_excerpt"), dict)
+            else str(event.get("raw_excerpt", ""))
+        )
+        for event in events
+        if event["type"] == "retry"
+    )
     done_event = next(event for event in events if event["type"] == "done")
     assert done_event["ok"] is False
 

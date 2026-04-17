@@ -35,10 +35,15 @@
     selectedDocumentName: null,
     selectedDocumentDetail: null,
     ingestFiles: [],
+    activeFileEntryTab: "index",
+    activeFileConsoleTab: "meta",
+    fileLoadedContent: "",
+    fileDirty: false,
+    pendingFileNavigation: null,
   };
   let fileSuggestionRequestId = 0;
-  let fileSearchAutoLoadTimer = 0;
   let persistStateTimer = 0;
+  let fileConsoleFocusTimer = 0;
 
   function trimPersistedText(value, limit = MAX_PERSISTED_TEXT_CHARS) {
     const text = String(value || "");
@@ -102,6 +107,16 @@
       };
     }
 
+    if (UI.section === "files") {
+      return {
+        ...base,
+        fileSearchQuery: trimPersistedText(nodeValue("admin-file-search"), 4000),
+        activeFileEntryTab: state.activeFileEntryTab,
+        activeFileConsoleTab: state.activeFileConsoleTab,
+        selectedDocumentName: String(state.selectedDocumentName || ""),
+      };
+    }
+
     return null;
   }
 
@@ -109,7 +124,7 @@
     writeSessionState(ADMIN_PAGE_SESSION_KEY, captureAdminPageState());
   }
 
-  function restoreAdminPageState() {
+  async function restoreAdminPageState() {
     const snapshot = readSessionState(ADMIN_PAGE_SESSION_KEY, null);
     if (!snapshot || typeof snapshot !== "object") return false;
     setNodeText("admin-message", snapshot.adminMessage || "");
@@ -143,6 +158,23 @@
       setNodeText("settings-config-path", snapshot.configPath || nodeText("settings-config-path"));
       setNodeText("settings-effective-text", snapshot.effectiveConfigText || nodeText("settings-effective-text"));
       return true;
+    }
+
+    if (UI.section === "files") {
+      setNodeValue("admin-file-search", snapshot.fileSearchQuery || "");
+      state.activeFileEntryTab = normalizeFileEntryTab(snapshot.activeFileEntryTab);
+      state.activeFileConsoleTab = normalizeFileConsoleTab(snapshot.activeFileConsoleTab);
+      syncFileEntryTabState();
+      syncFileConsoleTabState();
+      const selectedDocumentName = String(snapshot.selectedDocumentName || "").trim();
+      if (selectedDocumentName && state.documents?.documents_by_name?.[selectedDocumentName]) {
+        await performOpenDocument(selectedDocumentName, {
+          announce: false,
+          scrollEditor: false,
+          entryTab: state.activeFileEntryTab,
+        });
+      }
+      return Boolean(snapshot.fileSearchQuery || selectedDocumentName || snapshot.adminMessage);
     }
 
     return Boolean(snapshot.adminMessage);
@@ -395,21 +427,162 @@
     return group || "-";
   }
 
+  function normalizeFileEntryTab(value) {
+    return value === "health" ? "health" : "index";
+  }
+
+  function normalizeFileConsoleTab(value) {
+    return value === "issues" ? "issues" : "meta";
+  }
+
   function selectedDocumentRecord() {
     return state.documents?.documents_by_name?.[state.selectedDocumentName] || null;
+  }
+
+  function activeEditorContent() {
+    return String(document.getElementById("editor-content")?.value || "");
+  }
+
+  function resolveIssueDocumentName(issue) {
+    const explicitName = String(issue?.document_name || "").trim();
+    if (explicitName) return explicitName;
+    const target = String(issue?.target || "").trim();
+    return state.documents?.documents_by_name?.[target] ? target : "";
+  }
+
+  function currentDocumentIssues() {
+    const name = String(state.selectedDocumentName || "").trim();
+    if (!name) return [];
+    return (state.documents?.health_issues || []).filter((item) => resolveIssueDocumentName(item) === name);
+  }
+
+  function renderTagMarkup(text, variant = "") {
+    const classes = variant ? `tag ${variant}` : "tag";
+    return `<span class="${classes}">${escapeHtml(text)}</span>`;
+  }
+
+  function syncFileEntryTabState() {
+    const activeTab = normalizeFileEntryTab(state.activeFileEntryTab);
+    state.activeFileEntryTab = activeTab;
+    document
+      .querySelectorAll('#admin-file-entry-tabs [data-tab-group="file-entry"]')
+      .forEach((button) => {
+        const selected = button.dataset.tab === activeTab;
+        button.setAttribute("aria-selected", selected ? "true" : "false");
+      });
+    document.querySelectorAll("[data-tab-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.tabPanel !== activeTab;
+    });
+  }
+
+  function setActiveFileEntryTab(value, { persist = true } = {}) {
+    state.activeFileEntryTab = normalizeFileEntryTab(value);
+    syncFileEntryTabState();
+    if (persist) queuePersistAdminPageState();
+  }
+
+  function syncFileConsoleTabState() {
+    const activeTab = normalizeFileConsoleTab(state.activeFileConsoleTab);
+    state.activeFileConsoleTab = activeTab;
+    document
+      .querySelectorAll('#admin-file-console-tabs [data-console-tab]')
+      .forEach((button) => {
+        const selected = button.dataset.consoleTab === activeTab;
+        button.setAttribute("aria-selected", selected ? "true" : "false");
+      });
+    document.querySelectorAll("[data-console-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.consolePanel !== activeTab;
+    });
+  }
+
+  function setActiveFileConsoleTab(value, { persist = true } = {}) {
+    state.activeFileConsoleTab = normalizeFileConsoleTab(value);
+    syncFileConsoleTabState();
+    if (persist) queuePersistAdminPageState();
+  }
+
+  function renderEditorHeaderSummary() {
+    const detail = state.selectedDocumentDetail;
+    const record = selectedDocumentRecord();
+    const pathNode = document.getElementById("admin-file-current-path");
+    const tagsNode = document.getElementById("admin-file-current-tags");
+    if (pathNode) {
+      pathNode.textContent =
+        record?.relative_path ||
+        detail?.path ||
+        (hasSelectedDocument()
+          ? "-"
+          : (UI.file_current_path_empty || ""));
+    }
+    if (!tagsNode) return;
+    if (!detail && !record) {
+      tagsNode.innerHTML = "";
+      return;
+    }
+    const linkedIssues = currentDocumentIssues();
+    const tags = [
+      detail?.structured?.kind || record?.kind
+        ? `${UI.doc_kind_label || "Kind"}: ${detail?.structured?.kind || record?.kind || "-"}`
+        : "",
+      detail?.structured?.status || record?.status
+        ? `${UI.doc_status_label || "Status"}: ${detail?.structured?.status || record?.status || "-"}`
+        : "",
+      linkedIssues.length
+        ? `${linkedIssues.length} ${UI.doc_issues_label || "Issues"}`
+        : "",
+    ].filter(Boolean);
+    tagsNode.innerHTML = tags.map((item) => renderTagMarkup(item)).join("");
+  }
+
+  function syncPreviewDocumentLabel() {
+    const node = document.getElementById("admin-file-preview-name");
+    if (!node) return;
+    const detail = state.selectedDocumentDetail;
+    const record = selectedDocumentRecord();
+    node.textContent =
+      detail?.structured?.title ||
+      record?.title ||
+      state.selectedDocumentName ||
+      UI.doc_select_prompt ||
+      (isZh ? "请先选择文档。" : "Select a document first.");
+  }
+
+  function hasSelectedDocument() {
+    return Boolean(state.selectedDocumentName);
+  }
+
+  function updateFileDirtyState({ persist = true } = {}) {
+    state.fileDirty = hasSelectedDocument() && activeEditorContent() !== state.fileLoadedContent;
+    const dirtyNode = document.getElementById("admin-file-dirty-indicator");
+    const resetButton = document.getElementById("reset-entry-button");
+    if (dirtyNode) {
+      if (!hasSelectedDocument()) {
+        dirtyNode.hidden = true;
+      } else {
+        dirtyNode.hidden = false;
+        dirtyNode.className = `tag ${state.fileDirty ? "warn" : "ok"}`;
+        dirtyNode.textContent = state.fileDirty
+          ? (UI.file_dirty || (isZh ? "未保存修改" : "Unsaved changes"))
+          : (UI.file_clean || (isZh ? "已保存" : "Saved"));
+      }
+    }
+    if (resetButton) resetButton.disabled = !hasSelectedDocument() || !state.fileDirty;
+    renderEditorHeaderSummary();
+    if (persist) queuePersistAdminPageState();
   }
 
   function updateEditorPreview(content) {
     const node = document.getElementById("editor-preview");
     if (!node) return;
     const text = String(content || "");
-    if (!text.trim()) {
+    const previewText = text.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+    if (!previewText.trim()) {
       node.className = "markdown empty";
       node.textContent = UI.editor_preview_empty || "";
       return;
     }
     node.className = "markdown";
-    node.innerHTML = renderMarkdown(text);
+    node.innerHTML = renderMarkdown(previewText);
   }
 
   function renderFileCounts() {
@@ -426,7 +599,7 @@
     node.innerHTML = stats
       .map(
         ([label, value]) =>
-          `<div class="stat"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`
+          `<div class="file-count-chip"><strong>${escapeHtml(value)}</strong><span>${escapeHtml(label)}</span></div>`
       )
       .join("");
   }
@@ -442,25 +615,36 @@
       state.selectedDocumentName ||
       UI.doc_select_prompt ||
       (isZh ? "请先选择文档。" : "Select a document first.");
+    syncPreviewDocumentLabel();
   }
 
   function syncFileEditorState() {
     const editor = document.getElementById("editor-content");
+    const previewButton = document.getElementById("admin-file-preview-button");
+    const resetButton = document.getElementById("reset-entry-button");
+    const reloadButton = document.getElementById("reload-entry-button");
     const saveButton = document.getElementById("save-entry-button");
-    const hasSelection = Boolean(state.selectedDocumentName);
+    const hasSelection = hasSelectedDocument();
     if (editor) {
       editor.disabled = !hasSelection;
       if (!hasSelection) {
         editor.value = "";
         editor.dataset.hash = "";
+        state.fileLoadedContent = "";
       }
     }
+    if (previewButton) previewButton.disabled = !hasSelection;
+    if (resetButton) resetButton.disabled = !hasSelection || !state.fileDirty;
+    if (reloadButton) reloadButton.disabled = !hasSelection;
     if (saveButton) saveButton.disabled = !hasSelection;
     if (!hasSelection) {
+      closeFilePreviewModal();
       updateEditorPreview("");
       setSectionStatus("editor-status", UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
     }
     setCurrentDocumentLabel();
+    renderEditorHeaderSummary();
+    updateFileDirtyState({ persist: false });
   }
 
   function renderStats(overview) {
@@ -797,6 +981,9 @@
   }
 
   function renderDocumentButton(doc) {
+    const issueBadge = doc.issue_count
+      ? `<span class="doc-count-badge">${escapeHtml(doc.issue_count)}</span>`
+      : "";
     return `
       <button
         type="button"
@@ -805,7 +992,10 @@
         data-name="${escapeHtml(doc.name)}"
       >
         <span class="doc-button-label">
-          <span class="doc-button-title">${escapeHtml(doc.title || doc.name)}</span>
+          <span class="doc-tree-heading">
+            <span class="doc-button-title">${escapeHtml(doc.title || doc.name)}</span>
+            ${issueBadge}
+          </span>
           <span class="doc-button-meta">
             ${escapeHtml(doc.relative_path || "-")}
             ${doc.issue_count ? ` · ${escapeHtml(doc.issue_count)} ${escapeHtml(UI.doc_issues_label || "Issues")}` : ""}
@@ -818,15 +1008,33 @@
   function renderIndexNode(node, level = 0) {
     const directDocuments = Array.isArray(node.direct_documents) ? node.direct_documents : [];
     const childIndexes = Array.isArray(node.child_indexes) ? node.child_indexes : [];
-    const childMarkup = childIndexes.map((child) => renderIndexNode(child, level + 1)).join("");
+    const childResults = childIndexes.map((child) => renderIndexNode(child, level + 1));
+    const childMarkup = childResults.map((child) => child.markup).join("");
     const directDocMarkup = directDocuments.map((doc) => renderDocumentButton(doc)).join("");
     const itemCount = Number(node.reachable_document_count || 0);
     const tokenCount = Number(node.estimated_tokens || 0);
-    return `
-      <details class="doc-tree-group index-tree-group" ${level < 1 ? "open" : ""}>
+    const isSelectedIndex = node.name === state.selectedDocumentName;
+    const containsSelectedDirectDoc = directDocuments.some(
+      (doc) => doc.name === state.selectedDocumentName
+    );
+    const containsSelectedChild = childResults.some((child) => child.containsSelection);
+    const containsSelection = isSelectedIndex || containsSelectedDirectDoc || containsSelectedChild;
+    const issueTag = Number(node.issue_count || 0)
+      ? renderTagMarkup(`${node.issue_count} ${UI.doc_issues_label || "Issues"}`, "warn")
+      : "";
+    return {
+      containsSelection,
+      markup: `
+      <details class="doc-tree-group index-tree-group ${isSelectedIndex ? "selected" : ""}" ${level < 1 || containsSelection ? "open" : ""}>
         <summary>
           <span class="doc-tree-summary">
-            <strong>${escapeHtml(node.title || node.name)}</strong>
+            <span class="doc-tree-heading">
+              <strong>${escapeHtml(node.title || node.name)}</strong>
+              <span class="doc-tree-tags">
+                ${renderTagMarkup(node.name || "")}
+                ${issueTag}
+              </span>
+            </span>
             <span class="doc-button-meta">
               ${escapeHtml(node.name || "")}
               · ${escapeHtml(itemCount)} ${escapeHtml(UI.file_counts_indexed || "Indexed")}
@@ -857,7 +1065,8 @@
           }
         </div>
       </details>
-    `;
+    `,
+    };
   }
 
   function renderFileIndexTree() {
@@ -865,11 +1074,19 @@
     if (!node) return;
     const topIndexes = Array.isArray(state.documents?.top_indexes) ? state.documents.top_indexes : [];
     const unindexed = Array.isArray(state.documents?.unindexed_documents) ? state.documents.unindexed_documents : [];
-    const sections = topIndexes.map((item) => renderIndexNode(item));
+    const sections = topIndexes.map((item) => renderIndexNode(item).markup);
+    const hasSelectedUnindexed = unindexed.some((doc) => doc.name === state.selectedDocumentName);
     if (unindexed.length) {
       sections.push(`
-        <details class="doc-tree-group" open>
-          <summary>${escapeHtml(UI.file_unindexed_group || "Documents outside all indexes")} (${escapeHtml(unindexed.length)})</summary>
+        <details class="doc-tree-group ${hasSelectedUnindexed ? "selected" : ""}" ${state.activeFileEntryTab === "index" || hasSelectedUnindexed ? "open" : ""}>
+          <summary>
+            <span class="doc-tree-summary">
+              <span class="doc-tree-heading">
+                <strong>${escapeHtml(UI.file_unindexed_group || "Documents outside all indexes")}</strong>
+                <span class="doc-tree-tags">${renderTagMarkup(String(unindexed.length))}</span>
+              </span>
+            </span>
+          </summary>
           <div class="doc-tree-list">
             ${unindexed.map((doc) => renderDocumentButton(doc)).join("")}
           </div>
@@ -896,9 +1113,7 @@
       doc?.links ||
       [];
     const indexes = doc?.indexes || [];
-    const linkedIssues = (state.documents?.health_issues || []).filter(
-      (item) => item.document_name === (detail?.name || doc?.name)
-    );
+    const linkedIssues = currentDocumentIssues();
     const blocks = [
       [UI.doc_path_label || "Path", doc?.relative_path || detail?.path || "-"],
       [UI.doc_kind_label || "Kind", detail?.structured?.kind || doc?.kind || "-"],
@@ -912,7 +1127,7 @@
     node.innerHTML = blocks
       .map(
         ([label, value]) => `
-          <div class="detail-block">
+          <div class="file-meta-row">
             <strong>${escapeHtml(label)}</strong>
             <p>${escapeHtml(value)}</p>
           </div>
@@ -926,35 +1141,71 @@
     const node = document.getElementById("admin-doc-health-list");
     if (!node) return;
     const issues = state.documents?.health_issues || [];
-    node.innerHTML = issues.length
-      ? issues.map((item) => {
+    const severityWeight = { blocking: 4, high: 3, medium: 2, low: 1 };
+    const grouped = new Map();
+    issues.forEach((item) => {
+      const documentName = resolveIssueDocumentName(item);
+      if (!documentName) return;
+      if (!grouped.has(documentName)) {
+        grouped.set(documentName, {
+          name: documentName,
+          title: state.documents?.documents_by_name?.[documentName]?.title || documentName,
+          relative_path: state.documents?.documents_by_name?.[documentName]?.relative_path || "-",
+          highestSeverity: "low",
+          issues: [],
+        });
+      }
+      const bucket = grouped.get(documentName);
+      bucket.issues.push(item);
+      if ((severityWeight[item.severity] || 0) > (severityWeight[bucket.highestSeverity] || 0)) {
+        bucket.highestSeverity = item.severity || bucket.highestSeverity;
+      }
+    });
+    const cards = [...grouped.values()].sort((left, right) => {
+      const severityDiff =
+        (severityWeight[right.highestSeverity] || 0) - (severityWeight[left.highestSeverity] || 0);
+      if (severityDiff) return severityDiff;
+      const issueDiff = right.issues.length - left.issues.length;
+      if (issueDiff) return issueDiff;
+      return String(left.title || left.name).localeCompare(String(right.title || right.name));
+    });
+    node.innerHTML = cards.length
+      ? cards.map((item) => {
           const severityClass =
-            item.severity === "blocking" || item.severity === "high"
+            item.highestSeverity === "blocking" || item.highestSeverity === "high"
               ? "danger"
-              : item.severity === "medium"
+              : item.highestSeverity === "medium"
                 ? "warn"
                 : "ok";
+          const selected = item.name === state.selectedDocumentName ? "selected" : "";
+          const firstIssue = item.issues[0] || {};
+          const typeSummary = item.issues
+            .slice(0, 3)
+            .map((issue) => String(issue.type || "").trim())
+            .filter(Boolean)
+            .join(" · ");
           return `
-            <div class="card">
-              <div class="row spread">
-                <strong>${escapeHtml(item.document_name || item.target || "-")}</strong>
-                <span class="tag ${severityClass}">${escapeHtml(item.severity || "")}</span>
+            <button
+              type="button"
+              class="health-document-card ${selected}"
+              data-action="open-document"
+              data-name="${escapeHtml(item.name)}"
+              data-source-tab="health"
+              data-focus-console-section="issues"
+            >
+              <div class="card interactive ${selected}">
+                <div class="row spread">
+                  <strong>${escapeHtml(item.title || item.name)}</strong>
+                  <span class="tag ${severityClass}">${escapeHtml(item.highestSeverity || "")}</span>
+                </div>
+                <div class="subtle">${escapeHtml(item.relative_path || "-")}</div>
+                <div class="subtle">${escapeHtml(firstIssue.summary || "")}</div>
+                <div class="issue-card-meta">
+                  ${renderTagMarkup(`${item.issues.length} ${UI.doc_issues_label || "Issues"}`)}
+                  ${typeSummary ? renderTagMarkup(typeSummary) : ""}
+                </div>
               </div>
-              <div class="subtle">${escapeHtml(item.summary || "")}</div>
-              <div class="issue-card-meta">
-                <span class="tag">${escapeHtml(item.type || "")}</span>
-                ${item.document_name ? `<span class="tag">${escapeHtml(UI.issue_open_document || "Open document")}</span>` : ""}
-              </div>
-              ${
-                item.document_name
-                  ? `
-                    <div class="row" style="margin-top:10px;">
-                      <button data-action="open-document" data-name="${escapeHtml(item.document_name)}">${escapeHtml(UI.issue_open_document || "Open document")}</button>
-                    </div>
-                  `
-                  : ""
-              }
-            </div>
+            </button>
           `;
         }).join("")
       : `<div class="empty">${escapeHtml(UI.doc_health_empty)}</div>`;
@@ -963,8 +1214,7 @@
   function renderLinkedIssues() {
     const node = document.getElementById("admin-doc-linked-issues");
     if (!node) return;
-    const name = state.selectedDocumentName;
-    const issues = (state.documents?.health_issues || []).filter((item) => item.document_name === name);
+    const issues = currentDocumentIssues();
     node.innerHTML = issues.length
       ? issues.map((item) => `
           <div class="card">
@@ -976,6 +1226,30 @@
           </div>
         `).join("")
       : `<div class="empty">${escapeHtml(UI.editor_linked_issues_empty)}</div>`;
+  }
+
+  function focusFileConsoleSection(sectionName) {
+    const normalizedSection = normalizeFileConsoleTab(sectionName);
+    setActiveFileConsoleTab(normalizedSection, { persist: false });
+    const node = document.getElementById(
+      normalizedSection === "issues" ? "admin-file-console-issues" : "admin-file-console-meta"
+    );
+    if (!node) return;
+    window.clearTimeout(fileConsoleFocusTimer);
+    document.querySelectorAll(".file-console-section").forEach((section) => {
+      section.classList.remove("console-section-focus");
+      section.removeAttribute("data-highlighted");
+    });
+    node.classList.add("console-section-focus");
+    node.setAttribute("data-highlighted", "true");
+    node.scrollIntoView({
+      block: window.innerWidth > 960 ? "center" : "start",
+      behavior: "auto",
+    });
+    fileConsoleFocusTimer = window.setTimeout(() => {
+      node.classList.remove("console-section-focus");
+      node.removeAttribute("data-highlighted");
+    }, 1800);
   }
 
   function syncReviewActionState() {
@@ -1009,8 +1283,6 @@
   function hideFileSuggestions() {
     const node = document.getElementById("admin-file-suggestions");
     const input = document.getElementById("admin-file-search");
-    window.clearTimeout(fileSearchAutoLoadTimer);
-    fileSearchAutoLoadTimer = 0;
     if (node) {
       node.hidden = true;
       node.innerHTML = "";
@@ -1028,12 +1300,13 @@
     return state.fileSuggestions[index] || null;
   }
 
-  function renderFileSuggestions(suggestions) {
+  function renderFileSuggestions(suggestions, { preserveSelection = false } = {}) {
     const node = document.getElementById("admin-file-suggestions");
     const input = document.getElementById("admin-file-search");
     if (!node || !input) return;
     const items = Array.isArray(suggestions) ? suggestions : [];
     const keepSelection =
+      preserveSelection &&
       items.length === state.fileSuggestions.length &&
       items.every((item, index) => item.name === state.fileSuggestions[index]?.name);
     state.fileSuggestions = items;
@@ -1089,14 +1362,13 @@
     const total = state.fileSuggestions.length;
     const current = state.activeFileSuggestionIndex >= 0 ? state.activeFileSuggestionIndex : 0;
     state.activeFileSuggestionIndex = (current + step + total) % total;
-    renderFileSuggestions(state.fileSuggestions);
+    renderFileSuggestions(state.fileSuggestions, { preserveSelection: true });
   }
 
   async function updateFileSuggestions() {
     const input = document.getElementById("admin-file-search");
     if (!input) return;
     const query = String(input.value || "").trim();
-    window.clearTimeout(fileSearchAutoLoadTimer);
     fileSuggestionRequestId += 1;
     const requestId = fileSuggestionRequestId;
     if (!query) {
@@ -1116,23 +1388,6 @@
       "admin-file-search-status",
       `${state.fileSuggestions.length} ${UI.file_search_matches || "matches"}`
     );
-    const normalizedQuery = query.toLowerCase();
-    const exactMatch = state.fileSuggestions.find((item) => {
-      const candidates = [item.name, item.title].filter(Boolean).map((value) => String(value).toLowerCase());
-      return candidates.includes(normalizedQuery);
-    });
-    if (exactMatch && exactMatch.name !== state.selectedDocumentName) {
-      setSectionStatus(
-        "admin-file-search-status",
-        `${UI.file_search_auto_loading || "Exact match detected, loading: "}${exactMatch.name}`
-      );
-      fileSearchAutoLoadTimer = window.setTimeout(() => {
-        const latestQuery = String(document.getElementById("admin-file-search")?.value || "").trim().toLowerCase();
-        if (latestQuery === normalizedQuery) {
-          openDocument(exactMatch.name).catch(createErrorHandler({ statusIds: ["editor-status"] }));
-        }
-      }, 180);
-    }
   }
 
   async function loadFileManager() {
@@ -1143,9 +1398,13 @@
       if (!known) {
         state.selectedDocumentName = null;
         state.selectedDocumentDetail = null;
+        state.fileLoadedContent = "";
+        state.fileDirty = false;
       }
     }
     renderFileCounts();
+    syncFileEntryTabState();
+    syncFileConsoleTabState();
     renderFileIndexTree();
     renderDocHealthList();
     renderDocumentMeta();
@@ -1504,31 +1763,113 @@
     await refreshCurrentPage();
   }
 
-  async function openDocument(nameOverride) {
+  function openFileSwitchModal(targetName, options = {}) {
+    state.pendingFileNavigation = {
+      name: String(targetName || "").trim(),
+      options,
+    };
+    const modal = document.getElementById("admin-file-switch-modal");
+    const target = document.getElementById("admin-file-switch-target");
+    if (target) target.textContent = String(options.targetLabel || targetName || "");
+    if (modal) modal.hidden = false;
+    document.getElementById("admin-file-switch-confirm")?.focus();
+  }
+
+  function closeFileSwitchModal() {
+    const modal = document.getElementById("admin-file-switch-modal");
+    if (modal) modal.hidden = true;
+    state.pendingFileNavigation = null;
+  }
+
+  async function confirmFileSwitchModal() {
+    const pending = state.pendingFileNavigation;
+    closeFileSwitchModal();
+    if (!pending?.name) return;
+    await performOpenDocument(pending.name, pending.options || {});
+  }
+
+  function openFilePreviewModal() {
+    if (!hasSelectedDocument()) return;
+    updateEditorPreview(activeEditorContent());
+    syncPreviewDocumentLabel();
+    const modal = document.getElementById("admin-file-preview-modal");
+    if (modal) modal.hidden = false;
+    document.getElementById("admin-file-preview-close")?.focus();
+  }
+
+  function closeFilePreviewModal() {
+    const modal = document.getElementById("admin-file-preview-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  function scrollEditorIntoView() {
+    if (window.innerWidth > 960) return;
+    document
+      .getElementById("admin-file-editor-pane")
+      ?.scrollIntoView({ block: "start", behavior: "auto" });
+  }
+
+  async function performOpenDocument(nameOverride, options = {}) {
     const name = String(nameOverride || "").trim();
     if (!name) {
       throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
     }
-    window.clearTimeout(fileSearchAutoLoadTimer);
-    fileSearchAutoLoadTimer = 0;
     const payload = await fetchAdmin(`/api/admin/entries/${encodeURIComponent(name)}`);
     state.selectedDocumentName = payload.name || name;
     state.selectedDocumentDetail = payload;
-    const searchInput = document.getElementById("admin-file-search");
-    if (searchInput) searchInput.value = payload.name || name;
+    state.fileLoadedContent = payload.content || "";
     const editor = document.getElementById("editor-content");
     if (editor) {
       editor.value = payload.content || "";
       editor.dataset.hash = payload.content_hash || "";
     }
     hideFileSuggestions();
+    if (options.entryTab) setActiveFileEntryTab(options.entryTab, { persist: false });
     updateEditorPreview(payload.content || "");
     renderFileIndexTree();
+    renderDocHealthList();
     renderDocumentMeta();
     renderLinkedIssues();
     syncFileEditorState();
-    document.getElementById("editor-status").textContent = `${UI.editor_loaded} ${payload.name} · hash=${String(payload.content_hash || "").slice(0, 12)}`;
-    setAdminMessage(`${UI.doc_selected || UI.editor_loaded} ${payload.name}`);
+    const statusLabel = options.reload
+      ? (UI.editor_reloaded || (isZh ? "已重新载入服务器版本" : "Reloaded the latest server version"))
+      : UI.editor_loaded;
+    document.getElementById("editor-status").textContent = `${statusLabel} ${payload.name} · hash=${String(payload.content_hash || "").slice(0, 12)}`;
+    if (options.announce !== false) {
+      setAdminMessage(
+        options.reload
+          ? `${statusLabel} ${payload.name}`
+          : `${UI.doc_selected || UI.editor_loaded} ${payload.name}`
+      );
+    }
+    if (options.focusConsoleSection) {
+      focusFileConsoleSection(options.focusConsoleSection);
+    } else if (options.scrollEditor !== false) {
+      scrollEditorIntoView();
+    }
+    queuePersistAdminPageState();
+    return payload;
+  }
+
+  async function requestOpenDocument(nameOverride, options = {}) {
+    const name = String(nameOverride || "").trim();
+    if (!name) {
+      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+    }
+    if (name === state.selectedDocumentName) {
+      if (options.entryTab) setActiveFileEntryTab(options.entryTab);
+      if (options.focusConsoleSection) {
+        focusFileConsoleSection(options.focusConsoleSection);
+      } else if (options.scrollEditor !== false) {
+        scrollEditorIntoView();
+      }
+      return;
+    }
+    if (state.fileDirty) {
+      openFileSwitchModal(name, options);
+      return;
+    }
+    await performOpenDocument(name, options);
   }
 
   async function saveEntry() {
@@ -1545,9 +1886,11 @@
     });
     state.selectedDocumentName = payload.name || name;
     state.selectedDocumentDetail = payload;
+    state.fileLoadedContent = payload.content || "";
     document.getElementById("editor-status").textContent = `${UI.editor_saved}: ${payload.name}`;
     document.getElementById("editor-content").dataset.hash = payload.content_hash || "";
     updateEditorPreview(payload.content || "");
+    renderDocHealthList();
     renderDocumentMeta();
     renderLinkedIssues();
     syncFileEditorState();
@@ -1555,6 +1898,38 @@
     if (UI.section === "files") {
       await loadFileManager();
     }
+  }
+
+  function resetEntry() {
+    const name = String(state.selectedDocumentName || "").trim();
+    if (!name) {
+      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+    }
+    const editor = document.getElementById("editor-content");
+    if (!editor) return;
+    editor.value = state.fileLoadedContent || "";
+    updateEditorPreview(editor.value || "");
+    updateFileDirtyState({ persist: false });
+    setSectionStatus("editor-status", UI.editor_reset || (isZh ? "已恢复到最近一次载入的内容" : "Reset to the last loaded content"));
+    setAdminMessage(`${UI.editor_reset || (isZh ? "已恢复到最近一次载入的内容" : "Reset to the last loaded content")} · ${name}`);
+    editor.focus();
+    queuePersistAdminPageState();
+  }
+
+  async function reloadEntry() {
+    const name = String(state.selectedDocumentName || "").trim();
+    if (!name) {
+      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+    }
+    if (state.fileDirty) {
+      openFileSwitchModal(name, {
+        reload: true,
+        scrollEditor: false,
+        targetLabel: UI.editor_reload_target || (isZh ? "重新载入当前文档" : "Reload current document"),
+      });
+      return;
+    }
+    await performOpenDocument(name, { reload: true, scrollEditor: false });
   }
 
   function currentIngestFiles() {
@@ -1764,21 +2139,30 @@
   });
 
   bindClick("admin-file-index-tree", async (event) => {
-    const button = event.target.closest('button[data-action="open-document"]');
+    const button = event.target.closest('[data-action="open-document"]');
     if (!button) return;
-    await withBusyButton(button, UI.busy_loading, () => openDocument(button.dataset.name || ""));
+    await withBusyButton(button, UI.busy_loading, () =>
+      requestOpenDocument(button.dataset.name || "", {
+        entryTab: button.dataset.sourceTab || "index",
+      })
+    );
   });
 
   bindClick("admin-doc-health-list", async (event) => {
-    const button = event.target.closest('button[data-action="open-document"]');
+    const button = event.target.closest('[data-action="open-document"]');
     if (!button) return;
-    await withBusyButton(button, UI.busy_loading, () => openDocument(button.dataset.name || ""));
+    await withBusyButton(button, UI.busy_loading, () =>
+      requestOpenDocument(button.dataset.name || "", {
+        entryTab: button.dataset.sourceTab || "health",
+        focusConsoleSection: button.dataset.focusConsoleSection || "issues",
+      })
+    );
   });
 
   bindClick("admin-file-suggestions", async (event) => {
-    const button = event.target.closest('button[data-action="open-document"]');
+    const button = event.target.closest('[data-action="open-document"]');
     if (!button) return;
-    await withBusyButton(button, UI.busy_loading, () => openDocument(button.dataset.name || ""));
+    await withBusyButton(button, UI.busy_loading, () => requestOpenDocument(button.dataset.name || ""));
   });
 
   document.getElementById("admin-logout-button")?.addEventListener("click", () => logout().catch(showAdminError));
@@ -1798,6 +2182,19 @@
       createErrorHandler({ statusIds: ["editor-status"] })
     )
   );
+  document.getElementById("reset-entry-button")?.addEventListener("click", () => {
+    try {
+      resetEntry();
+    } catch (error) {
+      createErrorHandler({ statusIds: ["editor-status"] })(error);
+    }
+  });
+  document.getElementById("reload-entry-button")?.addEventListener("click", () =>
+    withBusyButton(document.getElementById("reload-entry-button"), UI.busy_loading, reloadEntry).catch(
+      createErrorHandler({ statusIds: ["editor-status"] })
+    )
+  );
+  document.getElementById("admin-file-preview-button")?.addEventListener("click", openFilePreviewModal);
   document.getElementById("create-user-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("create-user-button"), UI.busy_saving, createUser).catch(showAdminError)
   );
@@ -1839,12 +2236,24 @@
   document.getElementById("admin-kb-live-clear")?.addEventListener("click", clearLiveLog);
   document.getElementById("editor-content")?.addEventListener("input", (event) => {
     updateEditorPreview(event.target.value || "");
+    updateFileDirtyState({ persist: false });
     queuePersistAdminPageState();
+  });
+  document.getElementById("admin-file-entry-tabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-tab-group="file-entry"]');
+    if (!button) return;
+    setActiveFileEntryTab(button.dataset.tab || "index");
+  });
+  document.getElementById("admin-file-console-tabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-console-tab]');
+    if (!button) return;
+    setActiveFileConsoleTab(button.dataset.consoleTab || "meta");
   });
   document.getElementById("tidy-reason")?.addEventListener("input", queuePersistAdminPageState);
   document.getElementById("admin-explore-input")?.addEventListener("input", queuePersistAdminPageState);
   document.getElementById("settings-raw-text")?.addEventListener("input", queuePersistAdminPageState);
   document.getElementById("admin-file-search")?.addEventListener("input", () => {
+    queuePersistAdminPageState();
     updateFileSuggestions().catch(createErrorHandler({ statusIds: ["admin-file-search-status"] }));
   });
   document.getElementById("admin-file-search")?.addEventListener("keydown", (event) => {
@@ -1864,23 +2273,34 @@
     }
     if (event.key !== "Enter") return;
     event.preventDefault();
-    const query = String(event.target.value || "").trim().toLowerCase();
-    const exactMatch = state.fileSuggestions.find((item) => {
-      const candidates = [item.name, item.title]
-        .filter(Boolean)
-        .map((value) => String(value).toLowerCase());
-      return candidates.includes(query);
-    });
-    const selected = exactMatch || activeFileSuggestion();
+    const selected = activeFileSuggestion();
     if (selected) {
-      openDocument(selected.name).catch(createErrorHandler({ statusIds: ["editor-status"] }));
+      requestOpenDocument(selected.name).catch(createErrorHandler({ statusIds: ["editor-status"] }));
     }
   });
   document.getElementById("admin-file-search")?.addEventListener("blur", () => {
     window.setTimeout(() => hideFileSuggestions(), 120);
   });
   document.getElementById("admin-file-search")?.addEventListener("focus", () => {
-    if (state.fileSuggestions.length) renderFileSuggestions(state.fileSuggestions);
+    if (state.fileSuggestions.length) {
+      renderFileSuggestions(state.fileSuggestions, { preserveSelection: true });
+    }
+  });
+  document.addEventListener("click", (event) => {
+    const root = document.querySelector('#admin-file-source-pane [data-search-popover-root]');
+    if (!root || root.contains(event.target)) return;
+    hideFileSuggestions();
+  });
+  document.getElementById("admin-file-switch-cancel")?.addEventListener("click", closeFileSwitchModal);
+  document.getElementById("admin-file-switch-confirm")?.addEventListener("click", () => {
+    confirmFileSwitchModal().catch(createErrorHandler({ statusIds: ["editor-status"] }));
+  });
+  document.getElementById("admin-file-preview-close")?.addEventListener("click", closeFilePreviewModal);
+  document.getElementById("admin-file-preview-modal")?.addEventListener("click", (event) => {
+    if (event.target?.id === "admin-file-preview-modal") closeFilePreviewModal();
+  });
+  document.getElementById("admin-file-switch-modal")?.addEventListener("click", (event) => {
+    if (event.target?.id === "admin-file-switch-modal") closeFileSwitchModal();
   });
   document.getElementById("admin-ingest-file")?.addEventListener("change", () => {
     state.ingestFiles = [];
@@ -1918,13 +2338,34 @@
   }
 
   window.addEventListener("pagehide", persistAdminPageState);
+  window.addEventListener("beforeunload", (event) => {
+    if (!state.fileDirty) return;
+    event.preventDefault();
+    event.returnValue = UI.file_exit_warning || "";
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !document.getElementById("admin-file-preview-modal")?.hidden) {
+      closeFilePreviewModal();
+      return;
+    }
+    if (event.key === "Escape" && !document.getElementById("admin-file-switch-modal")?.hidden) {
+      closeFileSwitchModal();
+      return;
+    }
+    if (!(event.metaKey || event.ctrlKey) || String(event.key).toLowerCase() !== "s") return;
+    if (UI.section !== "files" || !hasSelectedDocument()) return;
+    event.preventDefault();
+    withBusyButton(document.getElementById("save-entry-button"), UI.busy_saving, saveEntry).catch(
+      createErrorHandler({ statusIds: ["editor-status"] })
+    );
+  });
 
   refreshCurrentPage()
-    .then(() => {
+    .then(async () => {
       updateIngestSelection();
       syncFileEditorState();
       updateEditorPreview(document.getElementById("editor-content")?.value || "");
-      const restored = restoreAdminPageState();
+      const restored = await restoreAdminPageState();
       if (!restored) {
         setAdminMessage(isZh ? "管理台已就绪。" : "Admin ready.");
       } else {

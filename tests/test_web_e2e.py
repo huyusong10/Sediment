@@ -105,8 +105,8 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     shell_asset = client.get("/ui-assets/web-shell.js")
     assert shell_asset.status_code == 200
     assert "window.SedimentShell" in shell_asset.text
-    assert "nav-active-indicator" in shell_asset.text
-    assert "navigateWithShellMotion" in shell_asset.text
+    assert "navigateWithShellMotion" not in shell_asset.text
+    assert "nav-active-indicator" not in shell_asset.text
     assert "readSessionState" in shell_asset.text
     assert "writeSessionState" in shell_asset.text
 
@@ -247,9 +247,26 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     files_page = client.get("/admin/files", headers={"accept-language": "en-US"})
     assert files_page.status_code == 200
+    assert 'data-testid="admin-files-layout"' in files_page.text
+    assert 'data-testid="admin-file-source-pane"' in files_page.text
+    assert 'data-testid="admin-file-editor-pane"' in files_page.text
+    assert 'data-testid="admin-file-editor-console"' in files_page.text
+    assert 'data-testid="admin-file-entry-tabs"' in files_page.text
+    assert 'data-testid="admin-file-console-tabs"' in files_page.text
+    assert 'data-testid="admin-file-console-panel"' in files_page.text
+    assert 'data-testid="admin-file-preview-button"' in files_page.text
+    assert 'data-testid="admin-reset-entry-button"' in files_page.text
+    assert 'data-testid="admin-reload-entry-button"' in files_page.text
+    assert 'data-testid="admin-file-preview-modal"' in files_page.text
+    assert 'data-testid="admin-file-console-issues"' in files_page.text
+    assert 'data-testid="admin-file-console-meta"' in files_page.text
     assert 'data-testid="admin-file-index-tree"' in files_page.text
     assert 'data-testid="admin-file-search"' in files_page.text
     assert 'data-testid="admin-editor-content"' in files_page.text
+    assert 'data-testid="admin-file-inspector-tabs"' not in files_page.text
+    assert 'data-testid="admin-file-preview-panel"' not in files_page.text
+    assert 'data-testid="admin-file-issues-panel"' not in files_page.text
+    assert 'data-testid="admin-file-meta-panel"' not in files_page.text
     assert "<title>File management | Test Knowledge Base</title>" in files_page.text
 
     review_page = client.get("/admin/reviews", headers={"accept-language": "en-US"})
@@ -286,12 +303,17 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert files_page_zh.status_code == 200
     assert "<title>文件管理 | Test Knowledge Base</title>" in files_page_zh.text
     assert "Files 文件管理" not in files_page_zh.text
-    assert "Files 文件结构" not in files_page_zh.text
-    assert "Index 结构浏览" not in files_page_zh.text
-    assert "Index 治理约定" not in files_page_zh.text
-    assert ">文件结构<" in files_page_zh.text
-    assert ">索引结构浏览<" in files_page_zh.text
-    assert ">索引治理约定<" in files_page_zh.text
+    assert "Files 文件入口" not in files_page_zh.text
+    assert "Index 索引导航" not in files_page_zh.text
+    assert ">文件入口<" in files_page_zh.text
+    assert ">索引导航<" in files_page_zh.text
+    assert ">健康队列<" in files_page_zh.text
+    assert ">编辑控制台<" in files_page_zh.text
+    assert ">预览<" in files_page_zh.text
+    assert ">恢复<" in files_page_zh.text
+    assert ">重新载入<" in files_page_zh.text
+    assert ">关联问题<" in files_page_zh.text
+    assert ">元数据<" in files_page_zh.text
 
     with client.stream("POST", "/api/admin/explore/live", json={"question": "什么是热备份？"}) as explore_live:
         assert explore_live.status_code == 200

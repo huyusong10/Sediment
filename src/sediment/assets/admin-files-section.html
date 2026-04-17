@@ -1,77 +1,128 @@
-<section class="panel">
-  <div class="row spread">
-    <h2>__FILE_BROWSER_TITLE__</h2>
-    <span class="tabs-note">__FILE_BROWSER_NOTE__</span>
+<section class="master-detail admin-files-layout" data-testid="admin-files-layout">
+  <div class="panel master-pane admin-file-source-pane" id="admin-file-source-pane" data-testid="admin-file-source-pane">
+    <div class="row spread">
+      <h2>__FILE_BROWSER_TITLE__</h2>
+      <div class="panel-header-tip">__FILE_BROWSER_TIP__</div>
+    </div>
+    <div class="stack files-workspace">
+      <div class="file-count-chips" id="admin-file-counts" data-testid="admin-file-counts"></div>
+      <label>__FILE_SEARCH_LABEL__
+        <div class="search-field" data-search-popover-root>
+          <input
+            id="admin-file-search"
+            data-testid="admin-file-search"
+            placeholder="__FILE_SEARCH_PLACEHOLDER__"
+            autocomplete="off"
+            spellcheck="false"
+            aria-autocomplete="list"
+            aria-controls="admin-file-suggestions"
+            aria-expanded="false"
+            aria-haspopup="listbox"
+          />
+          <div
+            class="search-suggestions-popover"
+            id="admin-file-suggestions"
+            data-testid="admin-file-suggestions"
+            role="listbox"
+            hidden
+          ></div>
+        </div>
+      </label>
+      <div id="admin-file-search-status" data-testid="admin-file-search-status" class="subtle search-status-line" role="status" aria-live="polite">__FILE_SEARCH_STATUS__</div>
+      <div class="workspace-tabs" id="admin-file-entry-tabs" data-testid="admin-file-entry-tabs" role="tablist" aria-label="__FILE_ENTRY_TABS_LABEL__">
+        <button type="button" class="workspace-tab" data-tab-group="file-entry" data-tab="index" role="tab" aria-selected="true" aria-controls="admin-file-index-panel">__FILE_ENTRY_TAB_INDEX__</button>
+        <button type="button" class="workspace-tab" data-tab-group="file-entry" data-tab="health" role="tab" aria-selected="false" aria-controls="admin-file-health-panel">__FILE_ENTRY_TAB_HEALTH__</button>
+      </div>
+      <div class="workspace-panel-stack">
+        <section class="workspace-panel" id="admin-file-index-panel" data-tab-panel="index" data-testid="admin-file-index-panel">
+          <div class="row spread">
+            <h3>__DOC_STRUCTURE_TITLE__</h3>
+            <span class="tabs-note">__DOC_STRUCTURE_NOTE__</span>
+          </div>
+          <div class="stack doc-browser-groups scroll-list file-index-tree" id="admin-file-index-tree" data-testid="admin-file-index-tree"></div>
+        </section>
+        <section class="workspace-panel" id="admin-file-health-panel" data-tab-panel="health" data-testid="admin-file-health-panel" hidden>
+          <div class="row spread">
+            <h3>__DOC_HEALTH_TITLE__</h3>
+            <span class="tabs-note">__DOC_HEALTH_NOTE__</span>
+          </div>
+          <div class="list scroll-list" id="admin-doc-health-list" data-testid="admin-doc-health-list"></div>
+        </section>
+      </div>
+    </div>
   </div>
-  <div class="stack files-workspace">
-    <div class="stats stats-inline" id="admin-file-counts" data-testid="admin-file-counts"></div>
-    <label>__FILE_SEARCH_LABEL__
-      <div class="search-field">
-        <input
-          id="admin-file-search"
-          data-testid="admin-file-search"
-          placeholder="__FILE_SEARCH_PLACEHOLDER__"
-          autocomplete="off"
-          spellcheck="false"
-          aria-autocomplete="list"
-          aria-controls="admin-file-suggestions"
-          aria-expanded="false"
-          aria-haspopup="listbox"
-        />
-        <div
-          class="search-suggestions-popover"
-          id="admin-file-suggestions"
-          data-testid="admin-file-suggestions"
-          role="listbox"
-          hidden
-        ></div>
+
+  <div class="panel detail-pane admin-file-editor-pane" id="admin-file-editor-pane" data-testid="admin-file-editor-pane">
+    <div class="admin-file-editor-console" data-testid="admin-file-editor-console">
+      <div class="admin-file-editor-header" data-testid="admin-file-editor-header">
+        <div class="row spread editor-header-row">
+          <div class="stack editor-heading">
+            <h2>__EDITOR_TITLE__</h2>
+            <span class="tabs-note">__EDITOR_NOTE__</span>
+          </div>
+          <div class="editor-header-actions" data-testid="admin-editor-actions">
+            <button id="admin-file-preview-button" data-testid="admin-file-preview-button">__EDITOR_PREVIEW_BUTTON__</button>
+            <button id="reset-entry-button" data-testid="admin-reset-entry-button">__RESET_ENTRY_BUTTON__</button>
+            <button id="reload-entry-button" data-testid="admin-reload-entry-button">__RELOAD_ENTRY_BUTTON__</button>
+            <button class="primary" id="save-entry-button" data-testid="admin-save-entry-button">__SAVE_ENTRY_BUTTON__</button>
+          </div>
+        </div>
+        <div class="editor-header-summary">
+          <div class="file-current-doc">
+            <strong>__EDITOR_CURRENT_LABEL__</strong>
+            <p id="admin-file-current-name" data-testid="admin-file-current-name">__EDITOR_CURRENT_EMPTY__</p>
+            <div id="admin-file-current-path" data-testid="admin-file-current-path" class="subtle">__EDITOR_CURRENT_PATH_EMPTY__</div>
+          </div>
+          <div class="editor-header-tags" id="admin-file-current-tags" data-testid="admin-file-current-tags"></div>
+          <span class="tag" id="admin-file-dirty-indicator" data-testid="admin-file-dirty-indicator" hidden>__EDITOR_CLEAN_LABEL__</span>
+        </div>
+        <div id="editor-status" data-testid="admin-editor-status" class="subtle editor-status-line" role="status" aria-live="polite">__EDITOR_STATUS__</div>
       </div>
-    </label>
-    <div id="admin-file-search-status" data-testid="admin-file-search-status" class="subtle search-status-line" role="status" aria-live="polite">__FILE_SEARCH_STATUS__</div>
-    <div class="detail-block">
-      <strong>__FILE_BROWSE_HINT_TITLE__</strong>
-      <p>__FILE_BROWSE_HINT_BODY__</p>
-    </div>
-    <div>
-      <div class="row spread">
-        <h3>__DOC_STRUCTURE_TITLE__</h3>
-        <span class="tabs-note">__DOC_STRUCTURE_NOTE__</span>
+
+      <div class="stack file-editor-workspace">
+        <div class="admin-file-console-top">
+          <div class="inspector-tabs admin-file-console-tabs" id="admin-file-console-tabs" data-testid="admin-file-console-tabs" role="tablist" aria-label="__EDITOR_CONSOLE_TABS_LABEL__">
+            <button type="button" class="inspector-tab" data-console-tab="meta" role="tab" aria-selected="true" aria-controls="admin-file-console-meta">__EDITOR_CONSOLE_TAB_META__</button>
+            <button type="button" class="inspector-tab" data-console-tab="issues" role="tab" aria-selected="false" aria-controls="admin-file-console-issues">__EDITOR_CONSOLE_TAB_ISSUES__</button>
+          </div>
+          <div class="panel panel-compact admin-file-console-panel" data-testid="admin-file-console-panel">
+            <section class="file-console-section" id="admin-file-console-meta" data-testid="admin-file-console-meta" data-console-panel="meta">
+              <div class="file-meta-list" id="admin-doc-meta" data-testid="admin-doc-meta"></div>
+            </section>
+            <section class="file-console-section" id="admin-file-console-issues" data-testid="admin-file-console-issues" data-console-panel="issues" hidden>
+              <div id="admin-doc-linked-issues" data-testid="admin-doc-linked-issues" class="list file-console-scroll"></div>
+            </section>
+          </div>
+        </div>
+        <label class="file-editor-label">__EDITOR_CONTENT_LABEL__<textarea class="file-editor-area" id="editor-content" data-testid="admin-editor-content"></textarea></label>
       </div>
-      <div class="stack doc-browser-groups scroll-list file-index-tree" id="admin-file-index-tree" data-testid="admin-file-index-tree"></div>
-    </div>
-    <div>
-      <div class="row spread">
-        <h3>__DOC_HEALTH_TITLE__</h3>
-        <span class="tabs-note">__DOC_HEALTH_NOTE__</span>
-      </div>
-      <div class="list scroll-list" id="admin-doc-health-list" data-testid="admin-doc-health-list"></div>
     </div>
   </div>
 </section>
 
-<section class="panel">
-  <div class="row spread">
-    <h2>__EDITOR_TITLE__</h2>
-    <span class="tabs-note">__EDITOR_NOTE__</span>
+<div id="admin-file-preview-modal" class="modal-backdrop" data-testid="admin-file-preview-modal" hidden>
+  <div class="modal-card preview-modal-card">
+    <div class="row spread">
+      <div class="stack preview-modal-heading">
+        <h2>__EDITOR_PREVIEW_TITLE__</h2>
+        <span id="admin-file-preview-name" data-testid="admin-file-preview-name" class="subtle preview-modal-name">__EDITOR_CURRENT_EMPTY__</span>
+      </div>
+      <button id="admin-file-preview-close" data-testid="admin-file-preview-close">__EDITOR_PREVIEW_CLOSE__</button>
+    </div>
+    <div id="editor-preview" data-testid="admin-editor-preview" class="markdown empty">__EDITOR_PREVIEW_EMPTY__</div>
   </div>
-  <div class="stack file-editor-workspace">
-    <div class="detail-meta-grid" id="admin-doc-meta" data-testid="admin-doc-meta"></div>
-    <div class="detail-block file-current-doc">
-      <strong>__EDITOR_CURRENT_LABEL__</strong>
-      <p id="admin-file-current-name" data-testid="admin-file-current-name">__EDITOR_CURRENT_EMPTY__</p>
+</div>
+
+<div id="admin-file-switch-modal" class="modal-backdrop" data-testid="admin-file-switch-modal" hidden>
+  <div class="modal-card">
+    <div class="row spread">
+      <h2>__EDITOR_SWITCH_TITLE__</h2>
+      <span id="admin-file-switch-target" data-testid="admin-file-switch-target" class="tabs-note"></span>
     </div>
-    <div class="action-row" data-testid="admin-editor-actions">
-      <button class="primary" id="save-entry-button" data-testid="admin-save-entry-button">__SAVE_ENTRY_BUTTON__</button>
-    </div>
-    <label>__EDITOR_CONTENT_LABEL__<textarea class="file-editor-area" id="editor-content" data-testid="admin-editor-content"></textarea></label>
-    <div id="editor-status" data-testid="admin-editor-status" class="subtle" role="status" aria-live="polite">__EDITOR_STATUS__</div>
-    <div class="panel panel-compact entry-markdown-panel">
-      <h3>__EDITOR_PREVIEW_TITLE__</h3>
-      <div id="editor-preview" data-testid="admin-editor-preview" class="markdown empty">__EDITOR_PREVIEW_EMPTY__</div>
-    </div>
-    <div class="panel panel-compact">
-      <h3>__EDITOR_LINKED_ISSUES_TITLE__</h3>
-      <div id="admin-doc-linked-issues" data-testid="admin-doc-linked-issues" class="list"></div>
+    <p class="subtle">__EDITOR_SWITCH_BODY__</p>
+    <div class="action-row">
+      <button id="admin-file-switch-cancel" data-testid="admin-file-switch-cancel">__EDITOR_SWITCH_CANCEL__</button>
+      <button class="primary" id="admin-file-switch-confirm" data-testid="admin-file-switch-confirm">__EDITOR_SWITCH_CONFIRM__</button>
     </div>
   </div>
-</section>
+</div>

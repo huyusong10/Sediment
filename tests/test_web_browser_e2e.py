@@ -82,7 +82,6 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.locator("[data-shell-nav] a.nav-link")).to_have_count(5)
             expect(page.locator("[data-shell-utility] .utility-icon-button")).to_have_count(2)
             expect(page.locator("[data-shell-nav] a[aria-current='page']")).to_have_count(1)
-            expect(page.locator("[data-shell-nav] .nav-active-indicator")).to_have_count(1)
             expect(page.locator(".brand svg.brand-lockup")).to_be_visible()
             expect(page.locator('a[href^="/admin"]')).to_have_count(0)
             assert page.locator('a[href="/submit?lang=zh"]').count() == 1
@@ -92,12 +91,8 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             assert nav_row_box["y"] > brand_box["y"]
             overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
             tutorial_box = page.locator("[data-shell-nav] a.nav-link").nth(2).bounding_box()
-            indicator_box = page.locator("[data-shell-nav] .nav-active-indicator").bounding_box()
             assert overview_box is not None and tutorial_box is not None
-            assert indicator_box is not None
             assert abs(overview_box["width"] - tutorial_box["width"]) < 2
-            assert abs(indicator_box["x"] - overview_box["x"]) < 4
-            assert abs(indicator_box["width"] - overview_box["width"]) < 4
 
             page.goto(f"{live['base_url']}/?lang=en", wait_until="domcontentloaded")
             overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
@@ -383,6 +378,22 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
 
             page.goto(f"{live['base_url']}/admin/files", wait_until="domcontentloaded")
             expect(page.locator('[data-testid="admin-load-entry-button"]')).to_have_count(0)
+            source_pane = page.get_by_test_id("admin-file-source-pane")
+            editor_pane = page.get_by_test_id("admin-file-editor-pane")
+            editor_header = page.get_by_test_id("admin-file-editor-header")
+            source_box = source_pane.bounding_box()
+            editor_pane_box = editor_pane.bounding_box()
+            editor_header_box = editor_header.bounding_box()
+            assert source_box is not None and editor_pane_box is not None and editor_header_box is not None
+            assert editor_pane_box["x"] > source_box["x"]
+            assert abs(editor_pane_box["y"] - source_box["y"]) < 4
+            assert editor_header_box["y"] < editor_pane_box["y"] + 32
+            assert (
+                page.evaluate(
+                    "() => getComputedStyle(document.querySelector('[data-testid=\"admin-file-editor-header\"]')).position"
+                )
+                == "static"
+            )
             search_input = page.get_by_test_id("admin-file-search")
             search_input.fill("薄弱")
             expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
@@ -394,13 +405,15 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
                 "aria-selected", "true"
             )
             search_input.press("Enter")
-            tree_box = page.get_by_test_id("admin-file-index-tree").bounding_box()
+            save_box = page.get_by_test_id("admin-save-entry-button").bounding_box()
             editor = page.get_by_test_id("admin-editor-content")
             editor_box = editor.bounding_box()
-            assert tree_box is not None and editor_box is not None
-            assert editor_box["y"] > tree_box["y"]
+            assert save_box is not None and editor_box is not None
+            assert save_box["y"] < editor_box["y"]
+            assert save_box["y"] + save_box["height"] <= editor_header_box["y"] + editor_header_box["height"] + 4
             expect(page.get_by_test_id("admin-file-current-name")).to_have_text("index.root")
             expect(editor).to_have_value(re.compile("entry_count"))
+            expect(page.get_by_test_id("admin-reload-entry-button")).to_be_enabled()
             search_input.fill("薄弱条目")
             expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
             search_input.press("Enter")
@@ -411,9 +424,87 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
                 "## Related\n- [[暗流]] - 单一关系",
                 "## Scope\n适用于浏览器 E2E 编辑。\n\n## Related\n- [[暗流]] - 单一关系",
             )
+            expect(page.get_by_test_id("admin-reset-entry-button")).to_be_disabled()
+            editor.fill(updated)
+            expect(page.get_by_test_id("admin-file-dirty-indicator")).to_contain_text("未保存修改")
+            expect(page.get_by_test_id("admin-reset-entry-button")).to_be_enabled()
+            page.get_by_test_id("admin-reset-entry-button").click()
+            expect(editor).to_have_value(original)
+            expect(page.get_by_test_id("admin-editor-status")).to_contain_text("已恢复到最近一次载入的内容")
+            expect(page.get_by_test_id("admin-file-dirty-indicator")).to_contain_text("已保存")
+            expect(page.get_by_test_id("admin-reset-entry-button")).to_be_disabled()
+            assert page.evaluate(
+                """() => {
+                    const node = document.getElementById('admin-doc-meta');
+                    if (!node) return false;
+                    const style = getComputedStyle(node);
+                    return style.overflowY === 'auto' && node.scrollHeight > node.clientHeight;
+                }"""
+            )
+            editor.fill(updated)
+            expect(page.get_by_test_id("admin-reset-entry-button")).to_be_enabled()
+            page.get_by_test_id("admin-reload-entry-button").click()
+            expect(page.get_by_test_id("admin-file-switch-modal")).to_be_visible()
+            expect(page.get_by_test_id("admin-file-switch-target")).to_contain_text("重新载入当前文档")
+            page.get_by_test_id("admin-file-switch-cancel").click()
+            expect(page.get_by_test_id("admin-file-switch-modal")).to_be_hidden()
+            expect(editor).to_have_value(re.compile("适用于浏览器 E2E 编辑"))
+            page.get_by_test_id("admin-reload-entry-button").click()
+            expect(page.get_by_test_id("admin-file-switch-modal")).to_be_visible()
+            page.get_by_test_id("admin-file-switch-confirm").click()
+            expect(editor).to_have_value(original)
+            expect(page.get_by_test_id("admin-editor-status")).to_contain_text("已重新载入服务器版本")
+            expect(page.get_by_test_id("admin-file-dirty-indicator")).to_contain_text("已保存")
+            editor.fill(updated)
+            page.get_by_test_id("admin-file-preview-button").click()
+            expect(page.get_by_test_id("admin-file-preview-modal")).to_be_visible()
+            expect(page.get_by_test_id("admin-file-preview-name")).to_have_text("薄弱条目")
+            expect(page.get_by_test_id("admin-editor-preview")).to_contain_text("适用于浏览器 E2E 编辑")
+            expect(page.get_by_test_id("admin-editor-preview")).not_to_contain_text("type:")
+            expect(page.get_by_test_id("admin-editor-preview")).not_to_contain_text("status:")
+            preview_name_box = page.get_by_test_id("admin-file-preview-name").bounding_box()
+            assert preview_name_box is not None
+            assert preview_name_box["width"] > preview_name_box["height"]
+            page.get_by_test_id("admin-file-preview-close").click()
+            expect(page.get_by_test_id("admin-file-preview-modal")).to_be_hidden()
+            page.get_by_role("tab", name="健康队列").click()
+            health_card = page.locator('#admin-doc-health-list [data-action="open-document"]').filter(
+                has_text="回音壁"
+            ).first
+            expect(health_card).to_be_visible()
+            health_card.click()
+            expect(page.get_by_test_id("admin-file-switch-modal")).to_be_visible()
+            expect(page.get_by_test_id("admin-file-switch-target")).to_contain_text("回音壁")
+            page.get_by_test_id("admin-file-switch-cancel").click()
+            expect(page.get_by_test_id("admin-file-switch-modal")).to_be_hidden()
+            expect(page.get_by_test_id("admin-file-current-name")).to_have_text("薄弱条目")
+            expect(editor).to_have_value(re.compile("适用于浏览器 E2E 编辑"))
+            health_card.click()
+            expect(page.get_by_test_id("admin-file-switch-modal")).to_be_visible()
+            page.get_by_test_id("admin-file-switch-confirm").click()
+            expect(page.get_by_test_id("admin-file-current-name")).to_have_text("回音壁")
+            expect(page.locator('#admin-file-console-tabs [aria-selected="true"]')).to_have_text("关联问题")
+            assert page.evaluate(
+                """() => {
+                    const node = document.getElementById('admin-doc-linked-issues');
+                    if (!node) return false;
+                    return getComputedStyle(node).overflowY === 'auto';
+                }"""
+            )
+            expect(page.get_by_test_id("admin-file-console-issues")).to_have_attribute(
+                "data-highlighted", "true"
+            )
+            page.get_by_role("tab", name="索引导航").click()
+            search_input.fill("薄弱条目")
+            expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
+            search_input.press("Enter")
+            expect(page.get_by_test_id("admin-file-current-name")).to_have_text("薄弱条目")
+            expect(editor).to_have_value(re.compile("单一关系"))
+            expect(editor).not_to_have_value(re.compile("适用于浏览器 E2E 编辑"))
             editor.fill(updated)
             page.get_by_test_id("admin-save-entry-button").click()
             expect(page.get_by_test_id("admin-editor-status")).to_contain_text("保存成功")
+            expect(page.get_by_test_id("admin-file-dirty-indicator")).to_contain_text("已保存")
 
             page.goto(f"{live['base_url']}/search", wait_until="domcontentloaded")
             page.get_by_test_id("portal-search-input").fill("薄弱条目")
@@ -452,6 +543,43 @@ def test_admin_browser_e2e_keeps_leaked_runtime_output_out_of_result_panel(
             expect(page.get_by_test_id("admin-kb-live-log")).to_have_value(
                 re.compile("internal Sediment explore runtime")
             )
+
+
+def test_admin_browser_e2e_files_workspace_collapses_to_single_column_on_mobile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
+        with _browser_page() as page:
+            page.set_viewport_size({"width": 390, "height": 900})
+            page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
+            page.get_by_test_id("admin-login-token").fill("top-secret")
+            page.get_by_test_id("admin-login-button").click()
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("总览")
+            page.goto(f"{live['base_url']}/admin/files", wait_until="domcontentloaded")
+
+            source_box = page.get_by_test_id("admin-file-source-pane").bounding_box()
+            editor_box = page.get_by_test_id("admin-file-editor-pane").bounding_box()
+            assert source_box is not None and editor_box is not None
+            assert abs(source_box["x"] - editor_box["x"]) < 2
+            assert editor_box["y"] > source_box["y"]
+            assert page.evaluate(
+                "() => document.documentElement.scrollWidth <= window.innerWidth + 1"
+            )
+
+            search_input = page.get_by_test_id("admin-file-search")
+            search_input.fill("薄弱条目")
+            expect(page.get_by_test_id("admin-file-suggestions")).to_contain_text("薄弱条目")
+            search_input.press("Enter")
+            expect(page.get_by_test_id("admin-file-current-name")).to_have_text("薄弱条目")
+
+            editor_box_after_open = page.get_by_test_id("admin-file-editor-pane").bounding_box()
+            console_panel_box = page.get_by_test_id("admin-file-console-panel").bounding_box()
+            console_tabs_box = page.get_by_test_id("admin-file-console-tabs").bounding_box()
+            assert editor_box_after_open is not None
+            assert console_panel_box is not None and console_tabs_box is not None
+            assert editor_box_after_open["y"] < 180
+            assert console_tabs_box["y"] < console_panel_box["y"]
+            assert console_panel_box["height"] >= 200
 
 
 def test_admin_browser_e2e_recovers_structured_output_summary(

@@ -909,37 +909,66 @@ def admin_html(
         ),
         "files": _render_html_template(
             "admin-files-section.html",
-            FILE_BROWSER_TITLE="文件结构" if is_zh else "File browser",
-            FILE_BROWSER_NOTE=(
-                "按 index 导航组织文档，而不是把所有 Markdown 平铺出来。"
-                if is_zh
-                else "Browse documents through the index network instead of a flat markdown dump."
+            FILE_BROWSER_TITLE="文件入口" if is_zh else "File entry points",
+            FILE_BROWSER_TIP=_tutorial_tip(
+                (
+                    "索引导航和健康队列并列作为入口，右侧编辑器保持常驻。"
+                    if is_zh
+                    else "Keep index navigation and the health queue as parallel entry points while the editor stays persistent on the right."
+                ),
+                (
+                    "Tidy 会维护 index.root 与分段 index 的可导航性；文件管理页复用这套结构，并把治理健康队列作为同级入口，方便先定位、再编辑。"
+                    if is_zh
+                    else "Tidy maintains the navigability of index.root and segment indexes. This page reuses that structure and promotes the governance queue to a peer entry point so people can locate first and edit second."
+                ),
+                locale=active_locale,
+                testid="admin-files-entry-tip",
             ),
             FILE_COUNTS_INDEXED="已纳入索引" if is_zh else "Indexed",
             FILE_COUNTS_UNINDEXED="未纳入索引" if is_zh else "Unindexed",
             FILE_SEARCH_LABEL="搜索并直接打开文档" if is_zh else "Search and open a document",
             FILE_SEARCH_PLACEHOLDER="输入标题、别名、路径或索引名称" if is_zh else "Search by title, alias, path, or index name",
-            FILE_SEARCH_STATUS="输入后会显示自动建议；选中后直接载入编辑区。" if is_zh else "Suggestions appear as you type and open directly in the editor.",
-            FILE_BROWSE_HINT_TITLE="索引治理约定" if is_zh else "Index governance",
-            FILE_BROWSE_HINT_BODY=(
-                "Tidy 会负责维护 index.root 与分段 index 的可导航性；文件管理页沿用这套结构来浏览与修订文档。"
+            FILE_SEARCH_STATUS=(
+                "输入后显示自动建议；用上下键选择，再按回车打开。"
                 if is_zh
-                else "Tidy maintains index.root and segment indexes; this page reuses that structure for browsing and editing."
+                else "Suggestions appear as you type. Use arrow keys to choose one, then press Enter to open it."
             ),
-            DOC_STRUCTURE_TITLE="索引结构浏览" if is_zh else "Index structure",
-            DOC_STRUCTURE_NOTE="按根索引与分段索引展开" if is_zh else "expand root and segment indexes",
-            DOC_HEALTH_TITLE="健康队列联动" if is_zh else "Health-driven selection",
-            DOC_HEALTH_NOTE="可从治理问题直接跳到对应文档" if is_zh else "jump from a governance issue straight into the related document",
-            EDITOR_TITLE="Markdown 编辑器" if is_zh else "Markdown editor",
-            EDITOR_NOTE="复用门户渲染，保存前先看预览与关联问题" if is_zh else "reuse the portal renderer and inspect linked issues before saving",
+            FILE_ENTRY_TABS_LABEL="文件入口视图" if is_zh else "File entry views",
+            FILE_ENTRY_TAB_INDEX="索引导航" if is_zh else "Index navigation",
+            FILE_ENTRY_TAB_HEALTH="健康队列" if is_zh else "Health queue",
+            DOC_STRUCTURE_TITLE="索引导航" if is_zh else "Index navigation",
+            DOC_STRUCTURE_NOTE="按根索引与分段索引展开" if is_zh else "root and segment indexes",
+            DOC_HEALTH_TITLE="健康队列" if is_zh else "Health queue",
+            DOC_HEALTH_NOTE="按文档聚合并直达编辑器" if is_zh else "grouped by document and linked straight to the editor",
+            EDITOR_TITLE="编辑控制台" if is_zh else "Editor console",
+            EDITOR_NOTE="核心信息、预览、恢复和保存都集中在同一处" if is_zh else "Keep key context, preview, reset, and save controls together",
             EDITOR_CURRENT_LABEL="当前文档" if is_zh else "Current document",
             EDITOR_CURRENT_EMPTY="还没有选中文档。" if is_zh else "No document selected yet.",
+            EDITOR_CURRENT_PATH_EMPTY="选择文档后在这里显示路径。" if is_zh else "The document path appears here after you open one.",
             EDITOR_CONTENT_LABEL="Markdown 内容" if is_zh else "Markdown content",
+            EDITOR_PREVIEW_BUTTON="预览" if is_zh else "Preview",
+            EDITOR_PREVIEW_CLOSE="关闭预览" if is_zh else "Close preview",
+            EDITOR_CONSOLE_TABS_LABEL="文档信息视图" if is_zh else "Document info views",
+            EDITOR_CONSOLE_TAB_META="元数据" if is_zh else "Metadata",
+            EDITOR_CONSOLE_TAB_ISSUES="关联问题" if is_zh else "Linked issues",
+            RESET_ENTRY_BUTTON="恢复" if is_zh else "Reset",
+            RELOAD_ENTRY_BUTTON="重新载入" if is_zh else "Reload",
+            EDITOR_RELOAD_TARGET="重新载入当前文档" if is_zh else "Reload current document",
             SAVE_ENTRY_BUTTON="保存 Markdown" if is_zh else "Save markdown",
+            EDITOR_CLEAN_LABEL="已保存" if is_zh else "Saved",
             EDITOR_PREVIEW_TITLE="预览" if is_zh else "Preview",
-            EDITOR_PREVIEW_EMPTY="选中文档后，这里会复用门户的 Markdown 渲染方式预览。" if is_zh else "After you select a document, the portal-style Markdown preview appears here.",
-            EDITOR_LINKED_ISSUES_TITLE="关联治理问题" if is_zh else "Linked governance issues",
+            EDITOR_PREVIEW_EMPTY="选中文档后，可在弹窗里查看实时 Markdown 预览。" if is_zh else "After you select a document, open the modal to inspect the live Markdown preview.",
+            EDITOR_LINKED_ISSUES_TITLE="关联问题" if is_zh else "Linked issues",
+            EDITOR_META_TITLE="元数据" if is_zh else "Metadata",
             EDITOR_STATUS="这里会显示校验结果、保存反馈和冲突提示。" if is_zh else "Validation, save feedback, and conflict hints appear here.",
+            EDITOR_SWITCH_TITLE="未保存的修改" if is_zh else "Unsaved changes",
+            EDITOR_SWITCH_BODY=(
+                "当前文件还有未保存的修改。继续操作会丢失这些内容。"
+                if is_zh
+                else "The current file has unsaved changes. Continuing will discard them."
+            ),
+            EDITOR_SWITCH_CANCEL="继续编辑" if is_zh else "Keep editing",
+            EDITOR_SWITCH_CONFIRM="放弃并继续" if is_zh else "Discard and continue",
         ),
         "reviews": _render_html_template(
             "admin-reviews-section.html",
@@ -1057,8 +1086,22 @@ def admin_html(
                 "diff_empty": "选择待审补丁后在这里查看差异。" if is_zh else "Select a pending review to inspect its diff here.",
                 "editor_loaded": "已加载" if is_zh else "Loaded",
                 "editor_saved": "保存成功" if is_zh else "Saved",
+                "editor_reset": "已恢复到最近一次载入的内容" if is_zh else "Reset to the last loaded content",
+                "editor_reloaded": "已重新载入服务器版本" if is_zh else "Reloaded the latest server version",
                 "editor_preview_empty": "预览将在这里显示。" if is_zh else "Preview appears here.",
                 "editor_linked_issues_empty": "当前文档没有关联治理问题。" if is_zh else "No linked governance issues for this document.",
+                "file_dirty": "未保存修改" if is_zh else "Unsaved changes",
+                "file_clean": "已保存" if is_zh else "Saved",
+                "file_current_path_empty": (
+                    "选择文档后在这里显示路径。"
+                    if is_zh
+                    else "The document path appears here after you open one."
+                ),
+                "file_exit_warning": (
+                    "当前文件还有未保存的修改。"
+                    if is_zh
+                    else "The current file has unsaved changes."
+                ),
                 "explore_answer": "回答" if is_zh else "Answer",
                 "explore_sources": "来源" if is_zh else "Sources",
                 "explore_gaps": "缺口" if is_zh else "Gaps",
@@ -1114,7 +1157,7 @@ def admin_html(
                 "doc_browser_empty": "没有匹配的文档。" if is_zh else "No matching documents.",
                 "doc_health_empty": "当前没有可联动的治理问题。" if is_zh else "No governance issues to link right now.",
                 "doc_selected": "已选中文档：" if is_zh else "Selected document: ",
-                "doc_select_prompt": "请先从左侧选择一个文档。" if is_zh else "Select a document from the left first.",
+                "doc_select_prompt": "请先从左侧入口选择一个文档。" if is_zh else "Select a document from the left entry pane first.",
                 "doc_path_label": "路径" if is_zh else "Path",
                 "doc_kind_label": "类别" if is_zh else "Kind",
                 "doc_status_label": "状态" if is_zh else "Status",
@@ -1184,9 +1227,12 @@ def admin_html(
                 "file_counts_indexed": "已纳入索引" if is_zh else "Indexed",
                 "file_counts_unindexed": "未纳入索引" if is_zh else "Unindexed",
                 "file_search_empty": "没有匹配的文档。" if is_zh else "No matching documents.",
-                "file_search_hint": "输入后会显示自动建议；选中后直接载入编辑区。" if is_zh else "Suggestions appear as you type and open directly in the editor.",
+                "file_search_hint": (
+                    "输入后显示自动建议；用上下键选择，再按回车打开。"
+                    if is_zh
+                    else "Suggestions appear as you type. Use arrow keys to choose one, then press Enter to open it."
+                ),
                 "file_search_matches": "条匹配" if is_zh else "matches",
-                "file_search_auto_loading": "检测到精确匹配，正在载入：" if is_zh else "Exact match detected, loading: ",
                 "file_unindexed_group": "未纳入任何索引的文档" if is_zh else "Documents outside all indexes",
                 "file_index_direct_docs": "直接文档" if is_zh else "Direct documents",
                 "file_index_child_indexes": "子索引" if is_zh else "Child indexes",

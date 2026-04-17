@@ -23,12 +23,6 @@
         };
   }
 
-  function prefersReducedMotion() {
-    return Boolean(
-      window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    );
-  }
-
   function applyInitialTheme() {
     const savedTheme = localStorage.getItem("theme");
     if (savedTheme === "dark") {
@@ -42,103 +36,6 @@
     if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
       document.documentElement.classList.add("dark");
     }
-  }
-
-  function applyMotionPreference() {
-    document.body.dataset.motionPreference = prefersReducedMotion() ? "reduce" : "full";
-  }
-
-  function isPlainPrimaryActivation(event) {
-    return (
-      event.button === 0 &&
-      !event.defaultPrevented &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      !event.shiftKey &&
-      !event.altKey
-    );
-  }
-
-  function isNavigableSameOriginLink(link) {
-    if (!link || link.tagName !== "A") return false;
-    if (link.target && link.target.toLowerCase() === "_blank") return false;
-    if (link.hasAttribute("download")) return false;
-    const href = link.getAttribute("href");
-    if (!href) return false;
-    try {
-      const targetUrl = new URL(link.href, window.location.href);
-      const currentUrl = new URL(window.location.href);
-      if (targetUrl.origin !== currentUrl.origin) return false;
-      if (!/^https?:$/.test(targetUrl.protocol)) return false;
-      if (
-        targetUrl.pathname === currentUrl.pathname &&
-        targetUrl.search === currentUrl.search &&
-        targetUrl.hash === currentUrl.hash
-      ) {
-        return false;
-      }
-      return true;
-    } catch (_error) {
-      return false;
-    }
-  }
-
-  function navMotionLink(nav) {
-    return (
-      nav.querySelector('[data-shell-nav-link][aria-current="page"]') ||
-      nav.querySelector(".nav-link.primary") ||
-      nav.querySelector("[data-shell-nav-link]")
-    );
-  }
-
-  function navIndicator(nav) {
-    let indicator = nav.querySelector(".nav-active-indicator");
-    if (!indicator) {
-      indicator = document.createElement("div");
-      indicator.className = "nav-active-indicator";
-      indicator.setAttribute("aria-hidden", "true");
-      nav.appendChild(indicator);
-    }
-    return indicator;
-  }
-
-  function positionNavIndicator(nav, link) {
-    if (!nav || !link) return;
-    const indicator = navIndicator(nav);
-    const navRect = nav.getBoundingClientRect();
-    const linkRect = link.getBoundingClientRect();
-    const x = Math.round(linkRect.left - navRect.left);
-    const y = Math.round(linkRect.bottom - navRect.top + 5);
-    indicator.style.width = `${Math.round(linkRect.width)}px`;
-    indicator.style.transform = `translate3d(${x}px, ${y}px, 0)`;
-    nav.classList.add("shell-nav-enhanced");
-  }
-
-  function syncAllNavIndicators() {
-    document.querySelectorAll("[data-shell-nav]").forEach((nav) => {
-      positionNavIndicator(nav, navMotionLink(nav));
-    });
-  }
-
-  function navigateWithShellMotion(event) {
-    const link = event.currentTarget;
-    if (!isPlainPrimaryActivation(event) || !isNavigableSameOriginLink(link)) {
-      return;
-    }
-    event.preventDefault();
-    if (prefersReducedMotion()) {
-      window.location.href = link.href;
-      return;
-    }
-    document.querySelectorAll('[data-shell-nav-link][data-nav-activating="true"]').forEach((node) => {
-      delete node.dataset.navActivating;
-    });
-    link.dataset.navActivating = "true";
-    positionNavIndicator(link.closest("[data-shell-nav]"), link);
-    document.body.dataset.pageTransition = "leaving";
-    window.setTimeout(() => {
-      window.location.href = link.href;
-    }, 150);
   }
 
   function attachShellNav() {
@@ -191,19 +88,6 @@
         utility.dataset.enhanced = "true";
       }
 
-      nav.querySelectorAll("[data-shell-nav-link]").forEach((link) => {
-        if (link.dataset.shellMotionBound !== "true") {
-          link.addEventListener("click", navigateWithShellMotion);
-          link.dataset.shellMotionBound = "true";
-        }
-      });
-      positionNavIndicator(nav, navMotionLink(nav));
-      if (nav.dataset.navMotionReady !== "true") {
-        window.requestAnimationFrame(() => {
-          nav.classList.add("shell-nav-motion-ready");
-          nav.dataset.navMotionReady = "true";
-        });
-      }
     });
   }
 
@@ -424,9 +308,7 @@
 
   applyInitialTheme();
   document.addEventListener("DOMContentLoaded", () => {
-    applyMotionPreference();
     attachShellNav();
     enhanceLocalizedFilePickers();
-    window.addEventListener("resize", syncAllNavIndicators, { passive: true });
   });
 })();

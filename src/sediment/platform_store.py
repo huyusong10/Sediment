@@ -65,6 +65,7 @@ class PlatformStore:
                     id TEXT PRIMARY KEY,
                     job_type TEXT NOT NULL,
                     source_submission_id TEXT,
+                    source_batch_id TEXT,
                     target_entry_name TEXT,
                     status TEXT NOT NULL,
                     attempt_count INTEGER NOT NULL DEFAULT 0,
@@ -76,6 +77,9 @@ class PlatformStore:
                     error_message TEXT,
                     last_heartbeat_at TEXT,
                     cancel_requested_at TEXT,
+                    commit_sha TEXT,
+                    revert_commit_sha TEXT,
+                    committed_at TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     finished_at TEXT
@@ -129,6 +133,63 @@ class PlatformStore:
 
                 CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires
                 ON admin_sessions(expires_at DESC);
+
+                CREATE TABLE IF NOT EXISTS inbox_items (
+                    id TEXT PRIMARY KEY,
+                    item_type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body_text TEXT NOT NULL,
+                    stored_file_path TEXT,
+                    original_filename TEXT,
+                    mime_type TEXT,
+                    submitter_name TEXT NOT NULL,
+                    submitter_ip TEXT NOT NULL,
+                    submitter_user_id TEXT,
+                    status TEXT NOT NULL,
+                    dedupe_hash TEXT NOT NULL,
+                    notes TEXT,
+                    version INTEGER NOT NULL DEFAULT 1,
+                    ingest_batch_id TEXT,
+                    job_id TEXT,
+                    commit_sha TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_inbox_items_status
+                ON inbox_items(status, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_inbox_items_type_status
+                ON inbox_items(item_type, status, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_inbox_items_ip_created
+                ON inbox_items(submitter_ip, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS ingest_batches (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    document_count INTEGER NOT NULL DEFAULT 0,
+                    created_by_id TEXT,
+                    created_by_name TEXT NOT NULL,
+                    job_id TEXT,
+                    commit_sha TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ingest_batches_status
+                ON ingest_batches(status, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS repo_locks (
+                    id TEXT PRIMARY KEY,
+                    owner_id TEXT,
+                    owner_name TEXT NOT NULL,
+                    owner_role TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    target_id TEXT,
+                    acquired_at TEXT NOT NULL
+                );
                 """
             )
             self._ensure_column(
@@ -159,6 +220,30 @@ class PlatformStore:
                 conn,
                 table="jobs",
                 column="cancel_requested_at",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="jobs",
+                column="source_batch_id",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="jobs",
+                column="commit_sha",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="jobs",
+                column="revert_commit_sha",
+                definition="TEXT",
+            )
+            self._ensure_column(
+                conn,
+                table="jobs",
+                column="committed_at",
                 definition="TEXT",
             )
             self._ensure_column(
@@ -362,11 +447,465 @@ class PlatformStore:
         self._update_row("submissions", submission_id, fields)
         return self.get_submission(submission_id)
 
+    def create_inbox_item_checked(
+        self,
+        *,
+        item_type: str,
+        title: str,
+        body_text: str,
+        stored_file_path: str | None,
+        original_filename: str | None,
+        mime_type: str | None,
+        submitter_name: str,
+        submitter_ip: str,
+        submitter_user_id: str | None,
+        dedupe_hash: str,
+        rate_limit_count: int,
+        rate_limit_window_seconds: int,
+        dedupe_window_seconds: int,
+        status: str,
+        notes: str | None = None,
+    ) -> dict[str, Any]:
+        item_id = uuid.uuid4().hex
+        now = utc_now()
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._enforce_inbox_constraints_txn(
+                    conn,
+                    submitter_ip=submitter_ip,
+                    dedupe_hash=dedupe_hash,
+                    rate_limit_count=rate_limit_count,
+                    rate_limit_window_seconds=rate_limit_window_seconds,
+                    dedupe_window_seconds=dedupe_window_seconds,
+                )
+                conn.execute(
+                    """
+                    INSERT INTO inbox_items (
+                        id,
+                        item_type,
+                        title,
+                        body_text,
+                        stored_file_path,
+                        original_filename,
+                        mime_type,
+                        submitter_name,
+                        submitter_ip,
+                        submitter_user_id,
+                        status,
+                        dedupe_hash,
+                        notes,
+                        version,
+                        ingest_batch_id,
+                        job_id,
+                        commit_sha,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item_id,
+                        item_type,
+                        title,
+                        body_text,
+                        stored_file_path,
+                        original_filename,
+                        mime_type,
+                        submitter_name,
+                        submitter_ip,
+                        submitter_user_id,
+                        status,
+                        dedupe_hash,
+                        notes,
+                        1,
+                        None,
+                        None,
+                        None,
+                        now,
+                        now,
+                    ),
+                )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        item = self.get_inbox_item(item_id)
+        assert item is not None
+        return item
+
+    def get_inbox_item(self, item_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM inbox_items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def list_inbox_items(
+        self,
+        *,
+        item_type: str | None = None,
+        status: str | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 500))
+        query = "SELECT * FROM inbox_items"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if item_type:
+            clauses.append("item_type = ?")
+            params.append(item_type)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def inbox_status_counts(self) -> dict[str, int]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM inbox_items
+                GROUP BY status
+                """
+            ).fetchall()
+        return {row["status"]: int(row["count"]) for row in rows}
+
+    def update_inbox_item(
+        self,
+        item_id: str,
+        *,
+        expected_version: int | None = None,
+        **fields: Any,
+    ) -> dict[str, Any] | None:
+        if not fields:
+            return self.get_inbox_item(item_id)
+        now = utc_now()
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                current = conn.execute(
+                    "SELECT version FROM inbox_items WHERE id = ?",
+                    (item_id,),
+                ).fetchone()
+                if current is None:
+                    conn.execute("ROLLBACK")
+                    return None
+                current_version = int(current["version"])
+                if expected_version is not None and current_version != int(expected_version):
+                    raise RuntimeError("inbox item changed since it was loaded; refresh first")
+                assignments: list[str] = []
+                values: list[Any] = []
+                for key, value in fields.items():
+                    assignments.append(f"{key} = ?")
+                    values.append(value)
+                assignments.extend(["version = ?", "updated_at = ?"])
+                values.extend([current_version + 1, now, item_id])
+                conn.execute(
+                    f"UPDATE inbox_items SET {', '.join(assignments)} WHERE id = ?",
+                    tuple(values),
+                )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        return self.get_inbox_item(item_id)
+
+    def create_ingest_batch(
+        self,
+        *,
+        item_versions: dict[str, int],
+        created_by_name: str,
+        created_by_id: str | None = None,
+        title: str,
+    ) -> dict[str, Any]:
+        item_ids = [item_id for item_id in item_versions if str(item_id).strip()]
+        if not item_ids:
+            raise ValueError("at least one ready document is required")
+        batch_id = uuid.uuid4().hex
+        now = utc_now()
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                placeholders = ", ".join("?" for _ in item_ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT id, status, version, item_type
+                    FROM inbox_items
+                    WHERE id IN ({placeholders})
+                    """,
+                    tuple(item_ids),
+                ).fetchall()
+                loaded = {str(row["id"]): row for row in rows}
+                if len(loaded) != len(item_ids):
+                    raise FileNotFoundError("one or more inbox items no longer exist")
+                for item_id in item_ids:
+                    row = loaded[item_id]
+                    if row["item_type"] != "uploaded_document":
+                        raise ValueError("only uploaded documents can be ingested")
+                    if row["status"] != "ready":
+                        raise RuntimeError("one or more documents are no longer ready to ingest")
+                    if int(row["version"]) != int(item_versions[item_id]):
+                        raise RuntimeError("one or more documents changed since selection; refresh first")
+                conn.execute(
+                    """
+                    INSERT INTO ingest_batches (
+                        id,
+                        title,
+                        status,
+                        document_count,
+                        created_by_id,
+                        created_by_name,
+                        job_id,
+                        commit_sha,
+                        created_at,
+                        updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        batch_id,
+                        title,
+                        "ingesting",
+                        len(item_ids),
+                        created_by_id,
+                        created_by_name,
+                        None,
+                        None,
+                        now,
+                        now,
+                    ),
+                )
+                for item_id in item_ids:
+                    conn.execute(
+                        """
+                        UPDATE inbox_items
+                        SET status = 'ingesting',
+                            ingest_batch_id = ?,
+                            version = version + 1,
+                            updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (batch_id, now, item_id),
+                    )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        batch = self.get_ingest_batch(batch_id)
+        assert batch is not None
+        return batch
+
+    def get_ingest_batch(self, batch_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM ingest_batches WHERE id = ?",
+                (batch_id,),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def list_ingest_batch_items(self, batch_id: str) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM inbox_items
+                WHERE ingest_batch_id = ?
+                ORDER BY created_at ASC
+                """,
+                (batch_id,),
+            ).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def attach_job_to_ingest_batch(self, batch_id: str, job_id: str) -> dict[str, Any] | None:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE ingest_batches
+                SET job_id = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (job_id, now, batch_id),
+            )
+            conn.execute(
+                """
+                UPDATE inbox_items
+                SET job_id = ?,
+                    version = version + 1,
+                    updated_at = ?
+                WHERE ingest_batch_id = ?
+                """,
+                (job_id, now, batch_id),
+            )
+        return self.get_ingest_batch(batch_id)
+
+    def finalize_ingest_batch(
+        self,
+        *,
+        batch_id: str,
+        job_id: str,
+        commit_sha: str,
+    ) -> dict[str, Any] | None:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    """
+                    UPDATE ingest_batches
+                    SET status = 'ingested',
+                        job_id = ?,
+                        commit_sha = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (job_id, commit_sha, now, batch_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE inbox_items
+                    SET status = 'ingested',
+                        job_id = ?,
+                        commit_sha = ?,
+                        version = version + 1,
+                        updated_at = ?
+                    WHERE ingest_batch_id = ?
+                    """,
+                    (job_id, commit_sha, now, batch_id),
+                )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        return self.get_ingest_batch(batch_id)
+
+    def restore_ingest_batch_to_ready(
+        self,
+        *,
+        batch_id: str,
+        status: str = "ready",
+    ) -> dict[str, Any] | None:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    """
+                    UPDATE ingest_batches
+                    SET status = 'failed',
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, batch_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE inbox_items
+                    SET status = ?,
+                        version = version + 1,
+                        updated_at = ?,
+                        job_id = NULL
+                    WHERE ingest_batch_id = ?
+                      AND status = 'ingesting'
+                    """,
+                    (status, now, batch_id),
+                )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        return self.get_ingest_batch(batch_id)
+
+    def claim_repo_lock(
+        self,
+        *,
+        owner_name: str,
+        owner_role: str,
+        operation: str,
+        owner_id: str | None = None,
+        target_id: str | None = None,
+    ) -> dict[str, Any]:
+        lock_id = "default"
+        now = utc_now()
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                existing = conn.execute(
+                    "SELECT * FROM repo_locks WHERE id = ?",
+                    (lock_id,),
+                ).fetchone()
+                if existing is not None:
+                    raise RuntimeError("repository is busy")
+                conn.execute(
+                    """
+                    INSERT INTO repo_locks (
+                        id,
+                        owner_id,
+                        owner_name,
+                        owner_role,
+                        operation,
+                        target_id,
+                        acquired_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        lock_id,
+                        owner_id,
+                        owner_name,
+                        owner_role,
+                        operation,
+                        target_id,
+                        now,
+                    ),
+                )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        lock = self.get_repo_lock()
+        assert lock is not None
+        return lock
+
+    def get_repo_lock(self) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM repo_locks WHERE id = ?",
+                ("default",),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def release_repo_lock(self) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM repo_locks WHERE id = ?",
+                ("default",),
+            )
+
     def create_job(
         self,
         *,
         job_type: str,
         source_submission_id: str | None = None,
+        source_batch_id: str | None = None,
         target_entry_name: str | None = None,
         status: str = "queued",
         attempt_count: int = 0,
@@ -385,6 +924,7 @@ class PlatformStore:
                 job_id=job_id,
                 job_type=job_type,
                 source_submission_id=source_submission_id,
+                source_batch_id=source_batch_id,
                 target_entry_name=target_entry_name,
                 status=status,
                 attempt_count=attempt_count,
@@ -465,6 +1005,7 @@ class PlatformStore:
                     job_id=job_id,
                     job_type="ingest",
                     source_submission_id=submission_id,
+                    source_batch_id=None,
                     target_entry_name=target_entry_name,
                     status="queued",
                     max_attempts=max_attempts,
@@ -479,6 +1020,80 @@ class PlatformStore:
                     WHERE id = ?
                     """,
                     (now, submission_id),
+                )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        return self.get_job(job_id)
+
+    def create_ingest_job_for_batch(
+        self,
+        *,
+        batch_id: str,
+        target_entry_name: str | None,
+        max_attempts: int,
+        request_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        job_id = uuid.uuid4().hex
+        now = utc_now()
+        placeholders = ", ".join("?" for _ in ACTIVE_INGEST_JOB_STATUSES)
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                batch = conn.execute(
+                    "SELECT * FROM ingest_batches WHERE id = ?",
+                    (batch_id,),
+                ).fetchone()
+                if batch is None:
+                    raise FileNotFoundError("ingest batch not found")
+                active_job = conn.execute(
+                    f"""
+                    SELECT id
+                    FROM jobs
+                    WHERE source_batch_id = ?
+                      AND job_type = 'ingest'
+                      AND status IN ({placeholders})
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (batch_id, *ACTIVE_INGEST_JOB_STATUSES),
+                ).fetchone()
+                if active_job is not None:
+                    raise RuntimeError("an ingest job is already active for this batch")
+                self._insert_job_txn(
+                    conn,
+                    job_id=job_id,
+                    job_type="ingest",
+                    source_submission_id=None,
+                    source_batch_id=batch_id,
+                    target_entry_name=target_entry_name,
+                    status="queued",
+                    max_attempts=max_attempts,
+                    request_payload=request_payload,
+                    now=now,
+                )
+                conn.execute(
+                    """
+                    UPDATE ingest_batches
+                    SET status = 'ingesting',
+                        job_id = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (job_id, now, batch_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE inbox_items
+                    SET job_id = ?,
+                        version = version + 1,
+                        updated_at = ?
+                    WHERE ingest_batch_id = ?
+                    """,
+                    (job_id, now, batch_id),
                 )
             except Exception:
                 conn.execute("ROLLBACK")
@@ -1308,6 +1923,43 @@ class PlatformStore:
                     "duplicate submission already exists in the review buffer"
                 )
 
+    def _enforce_inbox_constraints_txn(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        submitter_ip: str,
+        dedupe_hash: str,
+        rate_limit_count: int,
+        rate_limit_window_seconds: int,
+        dedupe_window_seconds: int,
+    ) -> None:
+        if rate_limit_count > 0:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM inbox_items
+                WHERE submitter_ip = ?
+                  AND created_at >= ?
+                """,
+                (submitter_ip, utc_seconds_ago(max(1, rate_limit_window_seconds))),
+            ).fetchone()
+            if row is not None and int(row["count"]) >= max(1, rate_limit_count):
+                raise PermissionError("submission rate limit exceeded for this IP")
+        if dedupe_window_seconds > 0:
+            duplicate = conn.execute(
+                """
+                SELECT id
+                FROM inbox_items
+                WHERE dedupe_hash = ?
+                  AND created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (dedupe_hash, utc_seconds_ago(dedupe_window_seconds)),
+            ).fetchone()
+            if duplicate is not None:
+                raise FileExistsError("duplicate submission already exists in the inbox")
+
     def _insert_job_txn(
         self,
         conn: sqlite3.Connection,
@@ -1315,6 +1967,7 @@ class PlatformStore:
         job_id: str,
         job_type: str,
         source_submission_id: str | None = None,
+        source_batch_id: str | None = None,
         target_entry_name: str | None = None,
         status: str = "queued",
         attempt_count: int = 0,
@@ -1333,6 +1986,7 @@ class PlatformStore:
                 id,
                 job_type,
                 source_submission_id,
+                source_batch_id,
                 target_entry_name,
                 status,
                 attempt_count,
@@ -1344,15 +1998,19 @@ class PlatformStore:
                 error_message,
                 last_heartbeat_at,
                 cancel_requested_at,
+                commit_sha,
+                revert_commit_sha,
+                committed_at,
                 created_at,
                 started_at,
                 finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job_id,
                 job_type,
                 source_submission_id,
+                source_batch_id,
                 target_entry_name,
                 status,
                 max(0, int(attempt_count)),
@@ -1362,6 +2020,9 @@ class PlatformStore:
                 self._encode_json(request_payload),
                 self._encode_json(result_payload),
                 error_message,
+                None,
+                None,
+                None,
                 None,
                 None,
                 now,

@@ -61,6 +61,14 @@ def write_test_config(
         "knowledge": {
             "name": knowledge_label,
         },
+        "git": {
+            "enabled": True,
+            "repo_root": str(root),
+            "tracked_paths": ["knowledge-base"],
+            "remote_name": "origin",
+            "system_author_name": "Sediment System",
+            "system_author_email": "sediment-system@local",
+        },
     }
     if auth_users is not None:
         payload["auth"] = {

@@ -93,7 +93,7 @@ def _portal_page_title(page: str, *, is_zh: bool, entry_name: str = "") -> str:
         "home": "知识库概览" if is_zh else "Knowledge base overview",
         "search": "全文搜索" if is_zh else "Full-text search",
         "entry": entry_name or ("条目详情" if is_zh else "Entry detail"),
-        "submit": "提交缓冲区" if is_zh else "Buffered submission",
+        "submit": "提交入口" if is_zh else "Submit",
         "tutorial": "接入教程" if is_zh else "Integration guide",
     }[page]
 
@@ -103,7 +103,9 @@ def _admin_page_title(section: str, *, is_zh: bool) -> str:
         "overview": "总览" if is_zh else "Overview",
         "kb": "知识库管理" if is_zh else "Knowledge base management",
         "files": "文件管理" if is_zh else "File management",
-        "reviews": "评审" if is_zh else "Reviews",
+        "inbox": "提交收件箱" if is_zh else "Submission Inbox",
+        "version_control": "版本管理" if is_zh else "Version control",
+        "reviews": "提交收件箱" if is_zh else "Submission Inbox",
         "users": "用户" if is_zh else "Users",
         "system": "设置" if is_zh else "Settings",
     }[section]
@@ -451,7 +453,7 @@ def portal_html(
         "home": "搜索" if is_zh else "Search",
         "search": "全文搜索" if is_zh else "Full-text search",
         "entry": "正式条目" if is_zh else "Canonical entry",
-        "submit": "提交缓冲区" if is_zh else "Buffered submission",
+        "submit": "提交入口" if is_zh else "Submit",
         "tutorial": "接入" if is_zh else "Access",
     }
     common = {
@@ -473,7 +475,12 @@ def portal_html(
         "ENTRY_SIGNALS_TITLE": "条目信号" if is_zh else "Entry signals",
         "ENTRY_SECTIONS_TITLE": "结构化分区" if is_zh else "Structured sections",
         "ENTRY_BODY_TITLE": "Markdown 正文" if is_zh else "Markdown body",
-        "TEXT_SUBMISSION_TITLE": "文本提交" if is_zh else "Text submission",
+        "TEXT_SUBMISSION_TITLE": "文本意见" if is_zh else "Text feedback",
+        "TEXT_SUBMISSION_NOTE": (
+            "提交后会进入提交收件箱，由 committer 人工查看并处理。"
+            if is_zh
+            else "After submission, this goes to the Submission Inbox for manual committer handling."
+        ),
         "DOCUMENT_UPLOAD_TITLE": "文档上传" if is_zh else "Document upload",
         "SUBMITTER_NAME_LABEL": "提交者" if is_zh else "Your name",
         "SUBMITTER_NAME_PLACEHOLDER": "例如：Alice" if is_zh else "Example: Alice",
@@ -483,10 +490,6 @@ def portal_html(
             if is_zh
             else "Example: verify hot backup takeover chain before flood release"
         ),
-        "SUBMISSION_TYPE_LABEL": "类型" if is_zh else "Type",
-        "TYPE_CONCEPT": "概念" if is_zh else "Concept",
-        "TYPE_LESSON": "经验" if is_zh else "Lesson",
-        "TYPE_FEEDBACK": "反馈" if is_zh else "Feedback",
         "SUBMISSION_CONTENT_LABEL": "内容" if is_zh else "Content",
         "SUBMIT_TEXT_BUTTON": "提交文本" if is_zh else "Submit text",
         "UPLOAD_FILES_LABEL": "上传文件" if is_zh else "Upload files",
@@ -611,7 +614,7 @@ def portal_html(
             "formal_entries": "正式条目" if is_zh else "Formal entries",
             "placeholders": "待补全概念" if is_zh else "Placeholders",
             "indexes": "索引" if is_zh else "Indexes",
-            "pending": "待审提交" if is_zh else "Pending submissions",
+            "pending": "待处理收件" if is_zh else "Pending inbox items",
             "health": "治理问题" if is_zh else "Health issues",
             "updates_empty": "暂无最近更新" if is_zh else "No recent updates yet.",
             "home_ready": "知识库已就绪。" if is_zh else "Knowledge base ready.",
@@ -646,21 +649,14 @@ def portal_html(
             "detail_empty": "条目加载中..." if is_zh else "Loading entry...",
             "no_content": "暂无内容" if is_zh else "No content",
             "unknown": "未知" if is_zh else "unknown",
-            "submit_text_busy": "分析中..." if is_zh else "Analyzing...",
+            "submit_text_busy": "提交中..." if is_zh else "Submitting...",
             "submit_file_busy": "上传中..." if is_zh else "Uploading...",
             "file_required": "请先选择文件、压缩包或文件夹" if is_zh else "Select a file, folder, or archive first.",
             "file_read_error": "读取文件失败" if is_zh else "Failed to read file.",
-            "analysis_title": "智能建议" if is_zh else "Agent recommendation",
-            "analysis_related_empty": "暂无明显关联条目" if is_zh else "No obvious related entries.",
-            "analysis_title_label": "建议标题" if is_zh else "Suggested title",
-            "analysis_type_label": "建议类型" if is_zh else "Suggested type",
-            "analysis_risk_label": "风险" if is_zh else "Risk",
-            "analysis_action_label": "下一步" if is_zh else "Next step",
-            "analysis_note_label": "提交者提示" if is_zh else "Committer note",
-            "submit_text_success": "文本提交成功，submission_id=" if is_zh else "Text submission created, submission_id=",
-            "submit_file_success": "文档提交成功，submission_id=" if is_zh else "Document submission created, submission_id=",
-            "submitted_text_prefix": "已提交文本草案：" if is_zh else "Submitted text draft: ",
-            "submitted_file_prefix": "已提交文档：" if is_zh else "Submitted document bundle: ",
+            "submit_text_success": "文本意见已提交，item_id=" if is_zh else "Text feedback submitted, item_id=",
+            "submit_file_success": "文档已暂存，item_id=" if is_zh else "Document staged, item_id=",
+            "submitted_text_prefix": "已提交文本意见：" if is_zh else "Submitted text feedback: ",
+            "submitted_file_prefix": "已暂存文档：" if is_zh else "Staged document: ",
             "unknown_error": "未知错误" if is_zh else "Unknown error",
         },
     }
@@ -763,7 +759,9 @@ def admin_html(
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
-    allowed_sections = {"overview", "kb", "files", "reviews", "users", "system"}
+    allowed_sections = {"overview", "kb", "files", "inbox", "version_control", "reviews", "users", "system"}
+    if section == "reviews":
+        section = "inbox"
     section = section if section in allowed_sections else "overview"
     page_title = _admin_page_title(section, is_zh=is_zh)
     is_owner = bool(current_user and current_user.get("role") == "owner")
@@ -783,10 +781,15 @@ def admin_html(
             _localized_path("/admin/files", active_locale),
             primary=section == "files",
         ),
-        "REVIEWS_LINK": _nav_link(
-            "评审" if is_zh else "Reviews",
-            _localized_path("/admin/reviews", active_locale),
-            primary=section == "reviews",
+        "INBOX_LINK": _nav_link(
+            "提交收件箱" if is_zh else "Submission Inbox",
+            _localized_path("/admin/inbox", active_locale),
+            primary=section == "inbox",
+        ),
+        "VERSION_CONTROL_LINK": _nav_link(
+            "版本管理" if is_zh else "Version control",
+            _localized_path("/admin/version-control", active_locale),
+            primary=section == "version_control",
         ),
         "USERS_LINK": (
             _nav_link(
@@ -825,9 +828,9 @@ def admin_html(
             INGEST_TIP=_tutorial_tip(
                 "拖入文档后直接入队。" if is_zh else "Drop documents and enqueue immediately.",
                 (
-                    "支持 Markdown、文本、DOCX、PPTX 和 zip；也可以直接选择文件或文件夹。上传后会先创建 submission，再由 ingest 任务进入评审队列。"
+                    "支持 Markdown、文本、DOCX、PPTX 和 zip；也可以直接选择文件或文件夹。这里负责执行 ingest，不再展示独立 review 队列。"
                     if is_zh
-                    else "Supports Markdown, text, DOCX, PPTX, and zip. You can also choose files or folders directly. Uploads first create a submission, then enqueue an ingest job for review."
+                    else "Supports Markdown, text, DOCX, PPTX, and zip. You can also choose files or folders directly. This page executes ingest runs directly instead of sending them to a separate review queue."
                 ),
                 locale=active_locale,
                 testid="admin-kb-ingest-tip",
@@ -970,20 +973,38 @@ def admin_html(
             EDITOR_SWITCH_CANCEL="继续编辑" if is_zh else "Keep editing",
             EDITOR_SWITCH_CONFIRM="放弃并继续" if is_zh else "Discard and continue",
         ),
-        "reviews": _render_html_template(
-            "admin-reviews-section.html",
-            PENDING_REVIEWS_TITLE="待审补丁" if is_zh else "Pending reviews",
-            PENDING_REVIEWS_NOTE="先选中补丁，再进入详情和决策" if is_zh else "Select a patch first, then review details and decide",
-            DETAIL_TITLE="评审详情" if is_zh else "Review detail",
-            DETAIL_NOTE="按条查看来源、摘要与补丁差异，再给出结论" if is_zh else "Inspect source context, summary, and diff before deciding",
-            DETAIL_EMPTY="选择左侧待审补丁后，在这里展开完整上下文。" if is_zh else "Select a pending review on the left to open its full context here.",
-            REVIEW_COMMENT_LABEL="评审备注" if is_zh else "Review comment",
-            REVIEW_COMMENT_PLACEHOLDER="为批准、退回或拒绝留下简短原因。" if is_zh else "Leave a short rationale for approval, changes, or rejection.",
-            APPROVE_BUTTON="批准合并" if is_zh else "Approve merge",
-            REJECT_BUTTON="退回 / 拒绝" if is_zh else "Request changes / reject",
-            DIFF_EMPTY="选择待审补丁后在这里查看差异。" if is_zh else "Select a pending review to inspect its diff here.",
-            JOB_TITLE="任务" if is_zh else "Jobs",
-            JOB_NOTE="用来观察导入 / 整理 / 评审的后续状态" if is_zh else "Track follow-up state for ingest, tidy, and review jobs",
+        "inbox": _render_html_template(
+            "admin-inbox-section.html",
+            OPEN_FEEDBACK_TITLE="文本意见" if is_zh else "Text feedback",
+            OPEN_FEEDBACK_NOTE="人工查看后标记已解决，必要时可再恢复。" if is_zh else "Review manually, resolve when handled, and reopen when needed.",
+            STAGED_TITLE="文档暂存区" if is_zh else "Document staging",
+            STAGED_NOTE="上传原件先停在这里，可下载、移除或放入待导入区。" if is_zh else "Uploaded originals land here first. Download, remove, or move them to ready-to-ingest.",
+            READY_TITLE="Ready To Ingest" if is_zh else "Ready To Ingest",
+            READY_NOTE="勾选待导入文档后，跳转到知识库管理页并自动触发 ingest。" if is_zh else "Select ready documents, then jump to KB management and auto-start ingest.",
+            INGESTING_TITLE="处理中" if is_zh else "In progress",
+            INGESTING_NOTE="展示已经绑定到 ingest 批次、正在运行的文档。" if is_zh else "Documents already bound to an ingest batch and currently running.",
+            HISTORY_TITLE="历史" if is_zh else "History",
+            HISTORY_NOTE="已解决意见、已导入文档和移除记录都会沉到这里。" if is_zh else "Resolved feedback, ingested documents, and removed uploads land here.",
+            READY_BUTTON="创建导入批次" if is_zh else "Create ingest batch",
+            READY_STATUS="收件箱操作结果会显示在这里。" if is_zh else "Inbox action results appear here.",
+        ),
+        "version_control": _render_html_template(
+            "admin-version-control-section.html",
+            STATUS_TITLE="仓库状态" if is_zh else "Repository status",
+            STATUS_NOTE="查看当前分支、工作区变更和仓库锁。" if is_zh else "Inspect the current branch, working tree changes, and repo lock.",
+            COMMIT_TITLE="手工提交" if is_zh else "Manual commit",
+            COMMIT_NOTE="文件管理页的修改会留在工作区，必须在这里填写理由后提交。" if is_zh else "Edits from file management stay in the working tree until you commit them here with a reason.",
+            COMMIT_REASON_LABEL="提交理由" if is_zh else "Commit reason",
+            COMMIT_REASON_PLACEHOLDER=(
+                "第一行写摘要，后续补充原因或上下文。"
+                if is_zh
+                else "Use the first line as the summary, then add any context below."
+            ),
+            COMMIT_BUTTON="提交 tracked changes" if is_zh else "Commit tracked changes",
+            PUSH_BUTTON="推送当前分支" if is_zh else "Push current branch",
+            STATUS_LINE="版本管理操作反馈会显示在这里。" if is_zh else "Version-control action feedback appears here.",
+            CHANGES_TITLE="待提交改动" if is_zh else "Pending tracked changes",
+            COMMITS_TITLE="最近提交" if is_zh else "Recent commits",
         ),
         "users": _render_html_template(
             "admin-users-section.html",
@@ -1071,7 +1092,7 @@ def admin_html(
                 "stats_pending": "待审提交" if is_zh else "Pending submissions",
                 "stats_queue": "排队任务" if is_zh else "Queued jobs",
                 "stats_running": "运行中任务" if is_zh else "Running jobs",
-                "stats_reviews": "待审评审" if is_zh else "Pending reviews",
+                "stats_reviews": "待处理反馈" if is_zh else "Open feedback",
                 "stats_blocking": "阻断问题" if is_zh else "Blocking issues",
                 "stats_stale": "陈旧任务" if is_zh else "Stale jobs",
                 "issue_empty": "当前没有需要立即处理的问题。" if is_zh else "No urgent issues right now.",
@@ -1080,6 +1101,26 @@ def admin_html(
                 "issue_target_label": "目标" if is_zh else "Target",
                 "issue_open_document": "打开文档" if is_zh else "Open document",
                 "submission_empty": "暂无待处理提交。" if is_zh else "No buffered submissions right now.",
+                "inbox_empty": "收件箱当前为空。" if is_zh else "The inbox is empty right now.",
+                "inbox_feedback_empty": "当前没有待处理文本意见。" if is_zh else "No open text feedback right now.",
+                "inbox_documents_empty": "当前没有暂存文档。" if is_zh else "No staged documents right now.",
+                "inbox_ready_empty": "当前没有 ready to ingest 文档。" if is_zh else "No ready-to-ingest documents right now.",
+                "inbox_ingesting_empty": "当前没有正在 ingest 的文档。" if is_zh else "No documents are ingesting right now.",
+                "inbox_history_empty": "当前还没有历史记录。" if is_zh else "No inbox history yet.",
+                "inbox_resolve": "已解决" if is_zh else "Resolve",
+                "inbox_reopen": "恢复为未解决" if is_zh else "Reopen",
+                "inbox_mark_ready": "放入待导入区" if is_zh else "Move to ready",
+                "inbox_move_to_staged": "移回暂存区" if is_zh else "Move back to staged",
+                "inbox_remove": "移除" if is_zh else "Remove",
+                "inbox_download": "下载原件" if is_zh else "Download",
+                "inbox_resolved": "文本意见已标记为已解决。" if is_zh else "Feedback marked as resolved.",
+                "inbox_reopened": "文本意见已恢复为未解决。" if is_zh else "Feedback reopened.",
+                "inbox_marked_ready": "文档已放入待导入区。" if is_zh else "Document moved to ready.",
+                "inbox_moved_to_staged": "文档已移回暂存区。" if is_zh else "Document moved back to staged.",
+                "inbox_removed": "文档已移除。" if is_zh else "Document removed.",
+                "inbox_select_ready_required": "请至少选择一个 ready 文档。" if is_zh else "Select at least one ready document.",
+                "inbox_batch_created": "已创建导入批次，正在跳转到知识库管理。" if is_zh else "Ingest batch created. Redirecting to KB management.",
+                "inbox_batch_redirected": "已为批次自动触发 ingest：" if is_zh else "Auto-started ingest for batch: ",
                 "review_empty": "暂无待审补丁。" if is_zh else "No pending reviews right now.",
                 "job_empty": "暂无任务。" if is_zh else "No jobs right now.",
                 "audit_empty": "暂无审计日志。" if is_zh else "No audit logs yet.",
@@ -1186,6 +1227,28 @@ def admin_html(
                 "review_rejected": "已退回评审：" if is_zh else "Rejected review: ",
                 "job_retried": "任务已重新入队：" if is_zh else "Requeued job: ",
                 "job_cancelled": "任务已请求取消：" if is_zh else "Cancellation requested for job: ",
+                "job_running_prefix": "任务状态：" if is_zh else "Job status: ",
+                "job_completed_prefix": "已生成提交：" if is_zh else "Committed as: ",
+                "job_monitor_timeout": "等待任务结果超时，请稍后刷新页面。" if is_zh else "Timed out while waiting for the job result. Refresh the page in a moment.",
+                "job_monitor_missing": "缺少任务编号。" if is_zh else "Missing job id.",
+                "job_result_empty": "任务已完成，但没有返回摘要。" if is_zh else "The job finished without a summary.",
+                "job_type_label": "任务类型" if is_zh else "Job type",
+                "job_change_count_label": "变更文件数" if is_zh else "Changed files",
+                "job_commit_label": "提交" if is_zh else "Commit",
+                "job_changed_items_label": "变更条目" if is_zh else "Changed items",
+                "version_repo_root": "仓库根目录" if is_zh else "Repo root",
+                "version_branch": "当前分支" if is_zh else "Current branch",
+                "version_upstream": "上游状态" if is_zh else "Upstream",
+                "version_upstream_ready": "已配置 upstream" if is_zh else "Upstream configured",
+                "version_upstream_missing": "未配置 upstream" if is_zh else "No upstream configured",
+                "version_repo_lock": "仓库锁" if is_zh else "Repo lock",
+                "version_repo_lock_free": "空闲" if is_zh else "Idle",
+                "version_no_changes": "tracked 路径当前没有未提交改动。" if is_zh else "No uncommitted changes under tracked paths.",
+                "version_commits_empty": "还没有可显示的提交记录。" if is_zh else "No recent commits to show.",
+                "version_revert": "回退" if is_zh else "Revert",
+                "version_commit_done": "已创建提交：" if is_zh else "Created commit: ",
+                "version_push_done": "已推送分支：" if is_zh else "Pushed branch: ",
+                "version_revert_done": "已创建回退提交：" if is_zh else "Created revert commit: ",
                 "quartz_ready": "Quartz 站点已就绪" if is_zh else "Quartz site is ready",
                 "quartz_missing_site": "尚未构建实例站点" if is_zh else "Instance site is not built yet",
                 "quartz_missing_runtime": "Quartz 运行时不可用" if is_zh else "Quartz runtime is unavailable",

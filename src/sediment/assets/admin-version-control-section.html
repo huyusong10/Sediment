@@ -1,0 +1,39 @@
+<section class="split version-control-workspace" data-testid="admin-version-control-layout">
+  <div class="stack">
+    <div class="panel" data-testid="admin-version-status-panel">
+      <div class="row spread">
+        <h2>__STATUS_TITLE__</h2>
+        <div class="panel-header-tip">__STATUS_NOTE__</div>
+      </div>
+      <div class="stack">
+        <div id="version-status-summary" data-testid="admin-version-status-summary" class="list"></div>
+        <div>
+          <strong>__CHANGES_TITLE__</strong>
+          <div class="list" id="version-tracked-changes-list" data-testid="admin-version-tracked-changes-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" data-testid="admin-version-commit-panel">
+      <div class="row spread">
+        <h2>__COMMIT_TITLE__</h2>
+        <div class="panel-header-tip">__COMMIT_NOTE__</div>
+      </div>
+      <div class="stack">
+        <label>__COMMIT_REASON_LABEL__<textarea id="version-commit-reason" data-testid="admin-version-commit-reason" placeholder="__COMMIT_REASON_PLACEHOLDER__"></textarea></label>
+        <div class="row actions">
+          <button class="primary" id="version-commit-button" data-testid="admin-version-commit-button">__COMMIT_BUTTON__</button>
+          <button id="version-push-button" data-testid="admin-version-push-button">__PUSH_BUTTON__</button>
+        </div>
+        <div id="version-status-line" data-testid="admin-version-status-line" class="subtle" role="status" aria-live="polite">__STATUS_LINE__</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" data-testid="admin-version-commits-panel">
+    <div class="row spread">
+      <h2>__COMMITS_TITLE__</h2>
+    </div>
+    <div class="list" id="version-commits-list" data-testid="admin-version-commits-list"></div>
+  </div>
+</section>

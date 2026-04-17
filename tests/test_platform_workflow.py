@@ -34,6 +34,43 @@ from tests.support.platform_harness import (
 pytestmark = pytest.mark.integration
 
 
+def _upload_document_to_inbox(
+    client: TestClient,
+    *,
+    filename: str = "bundle.md",
+    mime_type: str = "text/markdown",
+    content: str = "# Bundle\n\n同一文档重复提交。\n",
+    submitter_name: str = "Alice",
+) -> dict[str, object]:
+    response = client.post(
+        "/api/portal/submissions/document",
+        json={
+            "filename": filename,
+            "mime_type": mime_type,
+            "content_base64": base64.b64encode(content.encode("utf-8")).decode("ascii"),
+            "submitter_name": submitter_name,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()["item"]
+
+
+def _create_ready_ingest_batch(client: TestClient) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
+    staged_item = _upload_document_to_inbox(client)
+    ready = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
+    )
+    assert ready.status_code == 200
+    ready_item = ready.json()["item"]
+    batch_response = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"], "version": ready_item["version"]}]},
+    )
+    assert batch_response.status_code == 201
+    return staged_item, ready_item, batch_response.json()["batch"]
+
+
 def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     client, _server_module, _worker_module = configure_server(
@@ -54,10 +91,10 @@ def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> N
     )
     assert response.status_code == 201
     payload = response.json()
-    assert payload["status"] == "pending"
-    assert payload["submitter_name"] == "Alice"
-    assert payload["analysis"]["recommended_type"] == "concept"
-    assert payload["analysis"]["related_entries"]
+    assert payload["status"] == "open"
+    assert payload["item"]["submitter_name"] == "Alice"
+    assert payload["item"]["item_type"] == "text_feedback"
+    assert payload["item"]["body_text"] == "这是一条新的概念提案。"
 
     limited = client.post(
         "/api/portal/submissions/text",
@@ -71,7 +108,7 @@ def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> N
     assert limited.status_code == 429
 
 
-def test_ingest_job_review_and_apply(tmp_path: Path, monkeypatch) -> None:
+def test_ingest_batch_auto_commits_and_updates_inbox_history(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     state_dir = tmp_path / "state"
     client, _server_module, worker_module = configure_server(
@@ -81,42 +118,35 @@ def test_ingest_job_review_and_apply(tmp_path: Path, monkeypatch) -> None:
         state_dir,
     )
 
-    submission = client.post(
-        "/api/portal/submissions/text",
-        json={
-            "title": "热备份提案",
-            "content": "我们需要把热备份相关经验沉淀成概念。",
-            "submitter_name": "Alice",
-            "submission_type": "concept",
-        },
-    ).json()
-
-    run = client.post(f"/api/admin/submissions/{submission['id']}/run-ingest")
+    staged_item, ready_item, batch = _create_ready_ingest_batch(client)
+    run = client.post("/api/admin/ingest/document", json={"ingest_batch_id": batch["id"]})
     assert run.status_code == 202
-    job_id = run.json()["id"]
+    job_id = run.json()["job"]["id"]
 
     processed = worker_module.process_queue_until_idle(max_jobs=1)
     assert processed == 1
 
     for _ in range(10):
         job = client.get(f"/api/admin/jobs/{job_id}").json()
-        if job["status"] == "awaiting_review":
+        if job["status"] == "succeeded":
             break
         time.sleep(0.05)
     else:
-        raise AssertionError("ingest job did not reach awaiting_review")
+        raise AssertionError(f"ingest job did not succeed: {job}")
 
-    reviews = client.get("/api/admin/reviews?decision=pending").json()["reviews"]
-    assert reviews
-    review_id = reviews[0]["id"]
+    assert job["commit_sha"]
+    assert job["result_payload"]["commit_sha"] == job["commit_sha"]
+    assert job["result_payload"]["apply_result"]["operations"][0]["change_type"] == "create"
 
-    approve = client.post(
-        f"/api/admin/reviews/{review_id}/approve",
-        json={"reviewer_name": "Committer"},
-    )
-    assert approve.status_code == 200
-    apply_result = approve.json()["apply_result"]
-    assert apply_result["operations"][0]["change_type"] == "create"
+    inbox = client.get("/api/admin/inbox").json()
+    history_ids = {item["id"]: item for item in inbox["items"]["history_documents"]}
+    assert staged_item["id"] in history_ids
+    assert history_ids[staged_item["id"]]["status"] == "ingested"
+    assert history_ids[staged_item["id"]]["commit_sha"] == job["commit_sha"]
+
+    version_status = client.get("/api/admin/version/status").json()
+    assert version_status["recent_commits"][0]["sha"] == job["commit_sha"]
+    assert version_status["recent_commits"][0]["revertible"] is True
 
     entry = client.get(
         "/api/portal/entries/"
@@ -151,12 +181,13 @@ def test_portal_document_archive_submission(tmp_path: Path, monkeypatch) -> None
     )
     assert response.status_code == 201
     payload = response.json()
-    assert payload["mime_type"] == "application/zip"
-    assert payload["title"] == "bundle"
-    assert "notes/one.md" in payload["extracted_text"]
+    assert payload["status"] == "staged"
+    assert payload["item"]["mime_type"] == "application/zip"
+    assert payload["item"]["title"] == "bundle"
+    assert Path(payload["item"]["stored_file_path"]).exists()
 
 
-def test_ingest_job_review_and_apply_with_symlinked_kb_path(tmp_path: Path, monkeypatch) -> None:
+def test_ingest_batch_auto_commits_with_symlinked_kb_path(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     linked_kb = tmp_path / "kb-link"
     linked_kb.symlink_to(kb_path, target_is_directory=True)
@@ -168,33 +199,24 @@ def test_ingest_job_review_and_apply_with_symlinked_kb_path(tmp_path: Path, monk
         state_dir,
     )
 
-    submission = client.post(
-        "/api/portal/submissions/text",
-        json={
-            "title": "热备份提案",
-            "content": "我们需要把热备份相关经验沉淀成概念。",
-            "submitter_name": "Alice",
-            "submission_type": "concept",
-        },
-    ).json()
-
-    run = client.post(f"/api/admin/submissions/{submission['id']}/run-ingest")
+    _staged_item, _ready_item, batch = _create_ready_ingest_batch(client)
+    run = client.post("/api/admin/ingest/document", json={"ingest_batch_id": batch["id"]})
     assert run.status_code == 202
-    job_id = run.json()["id"]
+    job_id = run.json()["job"]["id"]
 
     processed = worker_module.process_queue_until_idle(max_jobs=1)
     assert processed == 1
 
     for _ in range(10):
         job = client.get(f"/api/admin/jobs/{job_id}").json()
-        if job["status"] == "awaiting_review":
+        if job["status"] == "succeeded":
             break
         time.sleep(0.05)
     else:
-        raise AssertionError(f"ingest job did not reach awaiting_review: {job}")
+        raise AssertionError(f"ingest job did not succeed: {job}")
 
-    reviews = client.get("/api/admin/reviews?decision=pending").json()["reviews"]
-    assert reviews
+    assert job["commit_sha"]
+    assert (kb_path / "entries" / "热备份提交草案.md").exists()
 
 
 def test_admin_save_entry_and_health_issue_queue(tmp_path: Path, monkeypatch) -> None:
@@ -419,16 +441,10 @@ def test_job_cancel_retry_and_stale_recovery(tmp_path: Path, monkeypatch) -> Non
         state_dir,
     )
 
-    submission = client.post(
-        "/api/portal/submissions/text",
-        json={
-            "title": "需要重试的提案",
-            "content": "这条提案先被取消，再重试进入队列。",
-            "submitter_name": "Alice",
-            "submission_type": "concept",
-        },
-    ).json()
-    enqueued = client.post(f"/api/admin/submissions/{submission['id']}/run-ingest")
+    enqueued = client.post(
+        "/api/admin/tidy",
+        json={"scope": "graph", "reason": "这条任务先被取消，再重试进入队列。"},
+    )
     assert enqueued.status_code == 202
     job_id = enqueued.json()["id"]
 
@@ -556,7 +572,7 @@ def test_duplicate_document_submission_keeps_original_upload(
 
     first = client.post("/api/portal/submissions/document", json=payload)
     assert first.status_code == 201
-    stored_path = Path(first.json()["stored_file_path"])
+    stored_path = Path(first.json()["item"]["stored_file_path"])
     assert stored_path.exists()
 
     second = client.post("/api/portal/submissions/document", json=payload)
@@ -565,24 +581,11 @@ def test_duplicate_document_submission_keeps_original_upload(
     assert stored_path.read_text(encoding="utf-8") == "# Bundle\n\n同一文档重复提交。\n"
 
 
-def test_text_submission_constraints_are_serialized(tmp_path: Path, monkeypatch) -> None:
+def test_text_feedback_constraints_are_serialized(tmp_path: Path, monkeypatch) -> None:
     store = PlatformStore(tmp_path / "platform.db")
     store.init()
     kb_path = tmp_path / "knowledge-base"
     kb_path.mkdir()
-    monkeypatch.setattr(
-        platform_services_module,
-        "analyze_text_submission",
-        lambda **_: {
-            "summary": "ok",
-            "recommended_title": "并发提交",
-            "recommended_type": "concept",
-            "duplicate_risk": "medium",
-            "committer_action": "manual_review",
-            "committer_note": "test",
-            "related_entries": [],
-        },
-    )
 
     barrier = threading.Barrier(2)
     outcomes: list[str] = []
@@ -615,7 +618,7 @@ def test_text_submission_constraints_are_serialized(tmp_path: Path, monkeypatch)
     assert len(outcomes) == 2
     assert len([item for item in outcomes if len(item) == 32]) == 1
     assert outcomes.count("PermissionError") == 1
-    assert len(store.list_submissions(limit=10)) == 1
+    assert len(store.list_inbox_items(limit=10)) == 1
 
 
 def test_admin_logout_revokes_existing_cookie(tmp_path: Path, monkeypatch) -> None:
@@ -644,7 +647,7 @@ def test_admin_logout_revokes_existing_cookie(tmp_path: Path, monkeypatch) -> No
     assert copied.get("/api/admin/overview").status_code == 401
 
 
-def test_invalid_submission_triage_status_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_inbox_document_state_conflict_returns_409(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     client, _server_module, _worker_module = configure_server(
         monkeypatch,
@@ -653,53 +656,48 @@ def test_invalid_submission_triage_status_is_rejected(tmp_path: Path, monkeypatc
         tmp_path / "state",
     )
 
-    submission = client.post(
-        "/api/portal/submissions/text",
-        json={
-            "title": "待归类提案",
-            "content": "这条提案只用于 triage 校验。",
-            "submitter_name": "Alice",
-            "submission_type": "concept",
-        },
-    ).json()
-
-    response = client.post(
-        f"/api/admin/submissions/{submission['id']}/triage",
-        json={"status": "totally-invalid"},
+    staged_item = _upload_document_to_inbox(client)
+    first = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
     )
-    assert response.status_code == 400
-    assert client.get(f"/api/admin/submissions/{submission['id']}").json()["submission"][
-        "status"
-    ] == "pending"
+    assert first.status_code == 200
 
-
-def test_duplicate_ingest_enqueue_returns_conflict(tmp_path: Path, monkeypatch) -> None:
-    project_root, kb_path = build_platform_project(tmp_path)
-    client, _server_module, _worker_module = configure_server(
-        monkeypatch,
-        project_root,
-        kb_path,
-        tmp_path / "state",
+    second = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
     )
-
-    submission = client.post(
-        "/api/portal/submissions/text",
-        json={
-            "title": "排队一次即可",
-            "content": "重复点击 run-ingest 不应创建多个活动任务。",
-            "submitter_name": "Alice",
-            "submission_type": "concept",
-        },
-    ).json()
-
-    first = client.post(f"/api/admin/submissions/{submission['id']}/run-ingest")
-    assert first.status_code == 202
-
-    second = client.post(f"/api/admin/submissions/{submission['id']}/run-ingest")
     assert second.status_code == 409
 
-    jobs = client.get(f"/api/admin/submissions/{submission['id']}").json()["jobs"]
-    assert len(jobs) == 1
+
+def test_duplicate_ingest_batch_creation_returns_conflict(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    staged_item = _upload_document_to_inbox(client)
+    ready = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
+    )
+    assert ready.status_code == 200
+    ready_item = ready.json()["item"]
+
+    first = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"], "version": ready_item["version"]}]},
+    )
+    assert first.status_code == 201
+
+    second = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"], "version": ready_item["version"]}]},
+    )
+    assert second.status_code == 409
 
 
 def test_admin_save_missing_entry_returns_404(tmp_path: Path, monkeypatch) -> None:
@@ -964,5 +962,6 @@ def test_agent_runner_uses_workspace_snapshot_and_cleans_up(
     assert not workspace_root.exists()
     latest_job = store.get_job(job["id"])
     assert latest_job is not None
-    assert latest_job["status"] == "awaiting_review"
+    assert latest_job["status"] == "succeeded"
+    assert latest_job["commit_sha"]
     assert latest_job["workspace_path"] is None

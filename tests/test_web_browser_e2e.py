@@ -136,20 +136,19 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             assert signals_panel_box is not None and sections_panel_box is not None
             assert signals_panel_box["width"] < sections_panel_box["width"]
             page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
-            expect(page.locator("body")).to_contain_text("文本提交")
-            expect(page.locator("body")).not_to_contain_text("Text Submission")
+            expect(page.locator("body")).to_contain_text("文本意见")
+            expect(page.locator("body")).not_to_contain_text("Text submission")
 
             page.locator("#submit-name").fill("Alice")
             page.locator("#submit-title").fill("浏览器提案")
             page.locator("#submit-content").fill("这是一条来自真实浏览器流程的提案。")
             page.get_by_test_id("portal-submit-text-button").click()
-            expect(page.locator("#submit-text-status")).to_contain_text("submission_id=")
-            expect(page.locator("#submit-text-analysis")).to_contain_text("智能建议")
-            expect(page.get_by_test_id("portal-message")).to_contain_text("已提交文本草案")
+            expect(page.locator("#submit-text-status")).to_contain_text("item_id=")
+            expect(page.get_by_test_id("portal-message")).to_contain_text("已提交文本意见")
 
             page.goto(f"{live['base_url']}/submit?lang=en", wait_until="domcontentloaded")
-            expect(page.locator("body")).to_contain_text("Text submission")
-            expect(page.locator("body")).not_to_contain_text("文本提交")
+            expect(page.locator("body")).to_contain_text("Text feedback")
+            expect(page.locator("body")).not_to_contain_text("文本意见")
             page.locator("#upload-name").fill("Alice")
             expect(page.get_by_test_id("portal-upload-file-selection")).to_have_text("No files selected")
             page.get_by_test_id("portal-upload-file").set_input_files(
@@ -169,7 +168,7 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.get_by_test_id("portal-upload-file-selection")).to_contain_text("Selected 2 files")
             expect(page.get_by_test_id("portal-upload-file-selection")).to_contain_text("bundle-a.md")
             page.get_by_test_id("portal-submit-file-button").click()
-            expect(page.locator("#submit-file-status")).to_contain_text("submission_id=")
+            expect(page.locator("#submit-file-status")).to_contain_text("item_id=")
 
 
 def test_portal_browser_e2e_submit_draft_survives_primary_nav_switch(
@@ -240,10 +239,20 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
             page.locator("#submit-name").fill("Alice")
-            page.locator("#submit-title").fill("浏览器管理台提案")
-            page.locator("#submit-content").fill("这条提交需要经历 ingest、review 和在线编辑。")
+            page.locator("#submit-title").fill("浏览器管理台文本意见")
+            page.locator("#submit-content").fill("这条提交会进入提交收件箱，并由 committer 手工解决。")
             page.get_by_test_id("portal-submit-text-button").click()
-            expect(page.locator("#submit-text-status")).to_contain_text("submission_id=")
+            expect(page.locator("#submit-text-status")).to_contain_text("item_id=")
+            page.locator("#upload-name").fill("Alice")
+            page.get_by_test_id("portal-upload-file").set_input_files(
+                {
+                    "name": "browser-admin-bundle.md",
+                    "mimeType": "text/markdown",
+                    "buffer": "# Browser Admin Bundle\n\n这份文档会被放进 ready to ingest。\n".encode("utf-8"),
+                }
+            )
+            page.get_by_test_id("portal-submit-file-button").click()
+            expect(page.locator("#submit-file-status")).to_contain_text("item_id=")
 
             page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
             expect(page.get_by_test_id("admin-page-title")).to_have_text("管理台登录")
@@ -356,25 +365,33 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             assert "claude -p" not in live_log
             assert "--json-schema" not in live_log
             assert len([line for line in live_log.splitlines() if line.strip()]) >= 3
-            submission_card = page.locator("#submission-list .card").filter(
-                has_text="浏览器管理台提案"
+
+            page.goto(f"{live['base_url']}/admin/inbox", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-page-title")).to_have_text("提交收件箱")
+            feedback_card = page.locator("#inbox-open-feedback-list .card").filter(
+                has_text="浏览器管理台文本意见"
             ).first
-            expect(submission_card).to_be_visible()
-            expect(submission_card).to_contain_text("执行导入")
-            submission_card.locator('button[data-action="run-ingest"]').click()
-            expect(page.get_by_test_id("admin-message")).to_contain_text("创建导入任务")
+            expect(feedback_card).to_be_visible()
+            feedback_card.get_by_role("button", name="已解决").click()
+            expect(page.get_by_test_id("admin-inbox-history-list")).to_contain_text("浏览器管理台文本意见")
+
+            staged_card = page.locator("#inbox-staged-documents-list .card").filter(
+                has_text="browser-admin-bundle"
+            ).first
+            expect(staged_card).to_be_visible()
+            staged_card.get_by_role("button", name="放入待导入区").click()
+            ready_card = page.locator("#inbox-ready-documents-list .card").filter(
+                has_text="browser-admin-bundle"
+            ).first
+            expect(ready_card).to_be_visible()
+            ready_card.locator('input[type="checkbox"]').check()
+            page.get_by_test_id("admin-inbox-create-batch-button").click()
+            expect(page).to_have_url(re.compile("/admin/kb\\?ingest_batch=.*"))
 
             assert live["worker_module"].process_queue_until_idle(max_jobs=1) == 1
-
-            page.goto(f"{live['base_url']}/admin/reviews", wait_until="domcontentloaded")
-            review_card = page.locator('#review-list button[data-action="select-review"]').first
-            expect(review_card).to_be_visible()
-            review_card.click()
-            page.get_by_test_id("admin-review-comment").fill("浏览器流程批准")
-            expect(page.get_by_test_id("admin-diff-view")).not_to_contain_text("选择待审补丁")
-
-            page.get_by_test_id("admin-approve-review-button").click()
-            expect(page.get_by_test_id("admin-message")).to_contain_text("已批准")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("Generated one conservative ingest draft.")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("提交")
+            expect(page.get_by_test_id("admin-kb-result")).to_contain_text("热备份提交草案")
 
             page.goto(f"{live['base_url']}/admin/files", wait_until="domcontentloaded")
             expect(page.locator('[data-testid="admin-load-entry-button"]')).to_have_count(0)
@@ -505,6 +522,15 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             page.get_by_test_id("admin-save-entry-button").click()
             expect(page.get_by_test_id("admin-editor-status")).to_contain_text("保存成功")
             expect(page.get_by_test_id("admin-file-dirty-indicator")).to_contain_text("已保存")
+
+            page.goto(f"{live['base_url']}/admin/version-control", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("admin-version-tracked-changes-list")).to_contain_text("薄弱条目.md")
+            page.get_by_test_id("admin-version-commit-reason").fill(
+                "edit: keep browser E2E scope change\n\nCommit the manual edit from the file manager."
+            )
+            page.get_by_test_id("admin-version-commit-button").click()
+            expect(page.get_by_test_id("admin-version-status-line")).to_contain_text("已创建提交")
+            expect(page.get_by_test_id("admin-version-tracked-changes-list")).to_contain_text("tracked 路径当前没有未提交改动")
 
             page.goto(f"{live['base_url']}/search", wait_until="domcontentloaded")
             page.get_by_test_id("portal-search-input").fill("薄弱条目")

@@ -135,6 +135,18 @@ def platform_paths() -> dict[str, Path]:
     }
 
 
+def git_repo_root() -> Path:
+    return Path(load_settings()["git"]["repo_root"])
+
+
+def git_tracked_paths() -> list[str]:
+    return [str(item) for item in load_settings()["git"]["tracked_paths"]]
+
+
+def git_remote_name() -> str:
+    return str(load_settings()["git"]["remote_name"])
+
+
 def quartz_runtime_dir() -> Path:
     override = os.environ.get("SEDIMENT_QUARTZ_RUNTIME_PATH", "").strip()
     if override:

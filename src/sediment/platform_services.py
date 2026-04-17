@@ -430,6 +430,55 @@ def prepare_document_submission(
     }
 
 
+def prepare_document_staging_upload(
+    *,
+    filename: str,
+    mime_type: str,
+    file_bytes: bytes,
+    uploads: list[dict[str, Any]] | None,
+    max_upload_bytes: int,
+) -> dict[str, Any]:
+    normalized_uploads, skipped = _expand_document_uploads(
+        filename=filename,
+        mime_type=mime_type,
+        file_bytes=file_bytes,
+        uploads=uploads,
+        max_upload_bytes=max_upload_bytes,
+    )
+    if not normalized_uploads:
+        raise ValueError("could not find a supported document to stage")
+
+    source_label = _bundle_label(filename=filename, uploads=normalized_uploads)
+    notes_parts: list[str] = []
+    if skipped:
+        notes_parts.append("Skipped unsupported files: " + ", ".join(skipped[:8]))
+    original_is_archive = mime_type in ZIP_MIME_TYPES
+    if uploads or len(normalized_uploads) > 1 or original_is_archive:
+        if original_is_archive and not uploads:
+            stored_bytes = file_bytes
+            stored_filename = sanitize_filename(filename or "upload.zip")
+        else:
+            stored_bytes = _zip_document_bundle(normalized_uploads)
+            stored_filename = sanitize_filename(source_label)
+            if not stored_filename.lower().endswith(".zip"):
+                stored_filename = f"{stored_filename}.zip"
+        stored_mime_type = "application/zip"
+    else:
+        only = normalized_uploads[0]
+        stored_bytes = only["file_bytes"]
+        stored_filename = sanitize_filename(only["filename"])
+        stored_mime_type = only["mime_type"]
+
+    return {
+        "title": source_label,
+        "filename": stored_filename,
+        "mime_type": stored_mime_type,
+        "file_bytes": stored_bytes,
+        "notes": " | ".join(notes_parts) if notes_parts else None,
+        "file_count": len(normalized_uploads),
+    }
+
+
 def _build_submission_analysis_prompt(
     *,
     title: str,
@@ -883,6 +932,128 @@ def submit_document(
     return record
 
 
+def submit_feedback_item(
+    *,
+    store: PlatformStore,
+    title: str,
+    content: str,
+    submitter_name: str,
+    submitter_ip: str,
+    submitter_user_id: str | None = None,
+    notes: str | None = None,
+    rate_limit_count: int = 1,
+    rate_limit_window_seconds: int = 60,
+    max_text_chars: int = 20_000,
+    dedupe_window_seconds: int = 86_400,
+) -> dict[str, Any]:
+    cleaned_title = normalize_name(title, fallback="Untitled feedback")
+    cleaned_content = content.strip()
+    cleaned_submitter = normalize_name(submitter_name, fallback="Anonymous")
+    if not cleaned_content:
+        raise ValueError("submission content must not be empty")
+    if len(cleaned_content) > max(1, max_text_chars):
+        raise ValueError("submission content is too large")
+    item = store.create_inbox_item_checked(
+        item_type="text_feedback",
+        title=cleaned_title,
+        body_text=cleaned_content,
+        stored_file_path=None,
+        original_filename=None,
+        mime_type="text/plain",
+        submitter_name=cleaned_submitter,
+        submitter_ip=submitter_ip,
+        submitter_user_id=submitter_user_id,
+        dedupe_hash=build_submission_hash(cleaned_title, cleaned_content),
+        rate_limit_count=max(1, rate_limit_count),
+        rate_limit_window_seconds=max(1, rate_limit_window_seconds),
+        dedupe_window_seconds=max(0, dedupe_window_seconds),
+        status="open",
+        notes=notes,
+    )
+    store.add_audit_log(
+        actor_name=cleaned_submitter,
+        actor_id=submitter_user_id,
+        actor_role="contributor",
+        action="inbox.create_text_feedback",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={"item_type": "text_feedback"},
+    )
+    return item
+
+
+def submit_uploaded_document_item(
+    *,
+    store: PlatformStore,
+    uploads_dir: str | Path,
+    filename: str,
+    mime_type: str,
+    file_bytes: bytes,
+    uploads: list[dict[str, Any]] | None = None,
+    submitter_name: str,
+    submitter_ip: str,
+    submitter_user_id: str | None = None,
+    notes: str | None = None,
+    rate_limit_count: int = 1,
+    rate_limit_window_seconds: int = 60,
+    max_upload_bytes: int = 10 * 1024 * 1024,
+    dedupe_window_seconds: int = 86_400,
+) -> dict[str, Any]:
+    if not uploads and len(file_bytes) > max(1, max_upload_bytes):
+        raise ValueError("uploaded file is too large")
+    cleaned_submitter = normalize_name(submitter_name, fallback="Anonymous")
+    prepared = prepare_document_staging_upload(
+        filename=filename,
+        mime_type=mime_type,
+        file_bytes=file_bytes,
+        uploads=uploads,
+        max_upload_bytes=max_upload_bytes,
+    )
+    safe_filename = sanitize_filename(prepared["filename"] or "upload.bin")
+    stored_path = Path(uploads_dir) / f"{uuid.uuid4().hex}_{safe_filename}"
+    stored_path.parent.mkdir(parents=True, exist_ok=True)
+    stored_path.write_bytes(prepared["file_bytes"])
+    try:
+        item = store.create_inbox_item_checked(
+            item_type="uploaded_document",
+            title=str(prepared["title"]),
+            body_text="",
+            stored_file_path=str(stored_path),
+            original_filename=safe_filename,
+            mime_type=str(prepared["mime_type"]),
+            submitter_name=cleaned_submitter,
+            submitter_ip=submitter_ip,
+            submitter_user_id=submitter_user_id,
+            dedupe_hash=build_submission_hash(
+                safe_filename,
+                prepared["mime_type"],
+                base64.b64encode(prepared["file_bytes"]).decode("ascii"),
+            ),
+            rate_limit_count=max(1, rate_limit_count),
+            rate_limit_window_seconds=max(1, rate_limit_window_seconds),
+            dedupe_window_seconds=max(0, dedupe_window_seconds),
+            status="staged",
+            notes=prepared["notes"] or notes,
+        )
+    except Exception:
+        stored_path.unlink(missing_ok=True)
+        raise
+    store.add_audit_log(
+        actor_name=cleaned_submitter,
+        actor_id=submitter_user_id,
+        actor_role="contributor",
+        action="inbox.create_uploaded_document",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={
+            "filename": safe_filename,
+            "mime_type": prepared["mime_type"],
+            "file_count": prepared["file_count"],
+        },
+    )
+    return item
+
+
 def sanitize_filename(filename: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", filename.strip())
     return cleaned or "upload.bin"
@@ -891,6 +1062,7 @@ def sanitize_filename(filename: str) -> str:
 def get_portal_home(kb_path: str | Path, *, store: PlatformStore) -> dict[str, Any]:
     data = inventory(kb_path)
     report = audit_kb(kb_path)
+    inbox_counts = store.inbox_status_counts() if hasattr(store, "inbox_status_counts") else {}
     docs = data["docs"]
     recent = sorted(
         (
@@ -913,7 +1085,12 @@ def get_portal_home(kb_path: str | Path, *, store: PlatformStore) -> dict[str, A
             "formal_entries": len(data["entries"]),
             "placeholders": len(data["placeholders"]),
             "indexes": len(data["indexes"]),
-            "pending_submissions": store.submission_status_counts().get("pending", 0),
+            "pending_submissions": (
+                inbox_counts.get("open", 0)
+                + inbox_counts.get("staged", 0)
+                + inbox_counts.get("ready", 0)
+                + inbox_counts.get("ingesting", 0)
+            ),
             "health_issues": len(build_health_issue_queue(kb_path)),
         },
         "recent_updates": recent,

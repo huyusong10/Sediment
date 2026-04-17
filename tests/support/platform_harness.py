@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import subprocess
 import sys
 import textwrap
 import threading
@@ -13,6 +14,7 @@ import uvicorn
 from starlette.testclient import TestClient
 
 from sediment import server, worker
+from sediment.git_ops import write_managed_gitignore
 from tests.config_helpers import write_test_config
 
 
@@ -113,6 +115,12 @@ def build_platform_project(tmp_path: Path) -> tuple[Path, Path]:
         - [[薄弱条目]]
         """,
     )
+    write_managed_gitignore(project_root)
+    subprocess.run(["git", "init"], cwd=project_root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "Sediment Tests"], cwd=project_root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "sediment-tests@local"], cwd=project_root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "add", "--", "knowledge-base", ".gitignore"], cwd=project_root, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "test fixture"], cwd=project_root, check=True, capture_output=True, text=True)
     return project_root, kb_path
 
 

@@ -80,6 +80,14 @@ DEFAULT_CONFIG = {
             "segment_glob": "index*.md",
         },
     },
+    "git": {
+        "enabled": True,
+        "repo_root": "../..",
+        "tracked_paths": ["knowledge-base"],
+        "remote_name": "origin",
+        "system_author_name": "Sediment System",
+        "system_author_email": "sediment-system@local",
+    },
 }
 
 _ACTIVE_CONFIG_PATH: Path | None = None
@@ -268,6 +276,25 @@ def load_settings_for_path(
     merged["knowledge"]["index"]["segment_glob"] = str(
         merged["knowledge"]["index"].get("segment_glob", "index*.md")
     ).strip() or "index*.md"
+    merged["git"]["enabled"] = _to_bool(merged["git"].get("enabled"), True)
+    merged["git"]["repo_root"] = _resolve_path(
+        merged["git"].get("repo_root", "../.."),
+        base=resolved_config_path.parent,
+    )
+    merged["git"]["tracked_paths"] = [
+        _normalize_relative_repo_path(item)
+        for item in _string_list(merged["git"].get("tracked_paths", ["knowledge-base"]))
+        if _normalize_relative_repo_path(item)
+    ] or ["knowledge-base"]
+    merged["git"]["remote_name"] = str(merged["git"].get("remote_name", "origin")).strip() or "origin"
+    merged["git"]["system_author_name"] = (
+        str(merged["git"].get("system_author_name", "Sediment System")).strip()
+        or "Sediment System"
+    )
+    merged["git"]["system_author_email"] = (
+        str(merged["git"].get("system_author_email", "sediment-system@local")).strip()
+        or "sediment-system@local"
+    )
 
     override_run_jobs = _argv_run_jobs_override(argv)
     if override_run_jobs is not None:
@@ -408,6 +435,19 @@ def _normalize_public_base_url(value: str) -> str:
     if not raw:
         return ""
     return raw.rstrip("/")
+
+
+def _normalize_relative_repo_path(value: Any) -> str:
+    raw = str(value or "").strip().replace("\\", "/")
+    if not raw:
+        return ""
+    candidate = Path(raw)
+    normalized = str(candidate).replace("\\", "/")
+    if normalized in {".", ""}:
+        return ""
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    return normalized.strip("/")
 
 
 def _string_list(value: Any) -> list[str]:

@@ -90,7 +90,7 @@ def test_kb_explore_command_json_surfaces_runtime_error_without_fixed_answer(
     assert "answer" in payload
 
 
-def test_kb_tidy_process_once_creates_review(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_kb_tidy_process_once_auto_commits(monkeypatch, tmp_path: Path, capsys) -> None:
     configure_cli_config(tmp_path)
 
     rc = cli.main(
@@ -110,13 +110,9 @@ def test_kb_tidy_process_once_creates_review(monkeypatch, tmp_path: Path, capsys
     payload = json.loads(capsys.readouterr().out)
     job = payload["job"]
     assert job["job_type"] == "tidy"
-    assert job["status"] == "awaiting_review"
+    assert job["status"] == "succeeded"
+    assert job["commit_sha"]
     assert payload["scope"] == "graph"
-
-    store = PlatformStore(Path(tmp_path / "state" / "platform.db"))
-    store.init()
-    reviews = store.list_reviews(decision="pending")
-    assert reviews
 
 
 def test_mcp_status_and_tidy_tools_share_runtime(monkeypatch, tmp_path: Path) -> None:
@@ -712,7 +708,7 @@ def test_official_sample_workspace_uses_standard_kb_layout() -> None:
     assert not (workspace / "manifest.json").exists()
 
 
-def test_review_commands_and_instance_switching(tmp_path: Path, monkeypatch, capsys) -> None:
+def test_instance_switching_keeps_tidy_auto_commit_flow(tmp_path: Path, monkeypatch, capsys) -> None:
     configure_cli_config(tmp_path)
     config = current_config_path()
     register_instance(
@@ -738,38 +734,15 @@ def test_review_commands_and_instance_switching(tmp_path: Path, monkeypatch, cap
     )
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    review_job = payload["job"]
-    store = PlatformStore(Path(tmp_path / "state" / "platform.db"))
-    store.init()
-    review = store.list_reviews(decision="pending")[0]
+    job = payload["job"]
+    assert job["status"] == "succeeded"
+    assert job["commit_sha"]
 
-    rc = cli.main(["--instance", "test-instance", "review", "list", "--json"])
+    rc = cli.main(["--instance", "test-instance", "status", "--json"])
     assert rc == 0
-    list_payload = json.loads(capsys.readouterr().out)
-    assert list_payload["reviews"][0]["id"] == review["id"]
-
-    rc = cli.main(["--instance", "test-instance", "review", "show", review["id"]])
-    assert rc == 0
-    shown = capsys.readouterr().out
-    assert review["id"] in shown
-    assert "diff:" in shown
-
-    rc = cli.main(
-        [
-            "--instance",
-            "test-instance",
-            "review",
-            "approve",
-            review["id"],
-            "--reviewer-name",
-            "alice",
-        ]
-    )
-    assert rc == 0
-    capsys.readouterr()
-
-    assert store.get_job(review_job["id"])["status"] == "succeeded"
-    assert store.get_review(review["id"])["decision"] == "approve"
+    status_payload = json.loads(capsys.readouterr().out)
+    assert status_payload["instance"]["name"] == "test-instance"
+    assert status_payload["queue"]["pending_reviews"] == 0
 
 
 def test_logs_and_help_commands(tmp_path: Path, capsys) -> None:
@@ -879,9 +852,8 @@ def test_submit_text_command_and_status_urls(tmp_path: Path, capsys) -> None:
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["title"] == "CLI 提案"
-    assert payload["status"] == "pending"
-    assert payload["analysis"]["recommended_type"] == "concept"
-    assert payload["analysis"]["committer_action"] == "ingest"
+    assert payload["status"] == "open"
+    assert payload["item_type"] == "text_feedback"
 
     rc = cli.main(["status"])
     assert rc == 0
@@ -914,7 +886,7 @@ def test_submit_file_command_uses_shared_submission_backend(tmp_path: Path, caps
     )
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["submission_type"] == "document"
+    assert payload["item_type"] == "uploaded_document"
     assert payload["submitter_name"] == "alice"
 
 
@@ -938,6 +910,6 @@ def test_submit_file_command_accepts_directories(tmp_path: Path, capsys) -> None
     )
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["submission_type"] == "document"
+    assert payload["item_type"] == "uploaded_document"
     assert payload["mime_type"] == "application/zip"
     assert payload["title"] == "bundle"

@@ -167,13 +167,13 @@ flowchart LR
 职责：
 
 - 前台：浏览知识库、搜索、查看概念、提交材料和意见
-- 后台：审核、编辑、健康面板、任务管理、diff 审阅
+- 后台：提交收件箱、知识库管理、文件管理、版本管理、健康面板和任务管理
 - 两者共享基础 shell，但在导航、权限和配色上彻底独立
 
 当前 IA：
 
 - Public Knowledge Base UI：`/`、`/search`、`/tutorial`、`/entries/{name}`、`/submit`、`/quartz/`
-- Admin Console：`/admin/overview`、`/admin/kb`（知识库管理）、`/admin/files`（文件管理）、`/admin/reviews`、`/admin/users`、`/admin/system`（设置）
+- Admin Console：`/admin/overview`、`/admin/kb`（知识库管理）、`/admin/files`（文件管理）、`/admin/inbox`（提交收件箱）、`/admin/version-control`（版本管理）、`/admin/users`、`/admin/system`（设置）
 - 兼容路径：`/portal`、`/portal/graph-view`、`/admin`
 
 ### 3.9 Diagnostic Logging

@@ -10,8 +10,8 @@ from sediment.platform_services import (
     get_health_payload,
     infer_mime_type,
     list_reviews_with_jobs,
-    submit_document,
-    submit_text,
+    submit_feedback_item,
+    submit_uploaded_document_item,
 )
 from sediment.platform_store import PlatformStore
 
@@ -103,14 +103,12 @@ def submit_text_request(
     max_text_chars: int = 20_000,
     dedupe_window_seconds: int = 86_400,
 ) -> dict[str, Any]:
-    return submit_text(
+    return submit_feedback_item(
         store=store,
-        kb_path=kb_path,
         title=title,
         content=content,
         submitter_name=submitter_name,
         submitter_ip=submitter_ip,
-        submission_type=submission_type,
         submitter_user_id=submitter_user_id,
         notes=notes,
         rate_limit_count=rate_limit_count,
@@ -138,7 +136,7 @@ def submit_document_request(
     dedupe_window_seconds: int = 86_400,
 ) -> dict[str, Any]:
     resolved_mime = (mime_type or "").strip() or infer_mime_type(filename or "") or ""
-    return submit_document(
+    return submit_uploaded_document_item(
         store=store,
         uploads_dir=uploads_dir,
         filename=filename,
@@ -159,21 +157,47 @@ def submit_document_request(
 def enqueue_ingest_job(
     *,
     store: PlatformStore,
-    submission_id: str,
+    submission_id: str | None = None,
+    ingest_batch_id: str | None = None,
     actor_name: str,
     actor_id: str | None = None,
     actor_role: str = "committer",
     max_attempts: int,
 ) -> dict[str, Any]:
-    submission = store.get_submission(submission_id)
-    if submission is None:
-        raise FileNotFoundError("submission not found")
-    job = store.create_ingest_job_for_submission(
-        submission_id=submission_id,
-        target_entry_name=submission["title"],
-        max_attempts=max_attempts,
-        request_payload={"submission_id": submission_id},
-    )
+    if submission_id:
+        submission = store.get_submission(submission_id)
+        if submission is None:
+            raise FileNotFoundError("submission not found")
+        job = store.create_ingest_job_for_submission(
+            submission_id=submission_id,
+            target_entry_name=submission["title"],
+            max_attempts=max_attempts,
+            request_payload={
+                "submission_id": submission_id,
+                "actor_name": actor_name,
+                "actor_id": actor_id,
+                "actor_role": actor_role,
+            },
+        )
+        details = {"submission_id": submission_id}
+    elif ingest_batch_id:
+        batch = store.get_ingest_batch(ingest_batch_id)
+        if batch is None:
+            raise FileNotFoundError("ingest batch not found")
+        job = store.create_ingest_job_for_batch(
+            batch_id=ingest_batch_id,
+            target_entry_name=batch["title"],
+            max_attempts=max_attempts,
+            request_payload={
+                "ingest_batch_id": ingest_batch_id,
+                "actor_name": actor_name,
+                "actor_id": actor_id,
+                "actor_role": actor_role,
+            },
+        )
+        details = {"ingest_batch_id": ingest_batch_id}
+    else:
+        raise ValueError("submission_id or ingest_batch_id is required")
     store.add_audit_log(
         actor_name=actor_name,
         actor_id=actor_id,
@@ -181,7 +205,7 @@ def enqueue_ingest_job(
         action="job.enqueue_ingest",
         target_type="job",
         target_id=job["id"],
-        details={"submission_id": submission_id},
+        details=details,
     )
     LOGGER.info(
         "job.enqueue_ingest",
@@ -189,7 +213,7 @@ def enqueue_ingest_job(
         job_id=job["id"],
         submission_id=submission_id,
         actor_id=actor_id,
-        details={"actor_role": actor_role},
+        details={"actor_role": actor_role, **details},
     )
     return job
 
@@ -212,6 +236,9 @@ def enqueue_tidy_job(
         reason=reason,
         issue=issue,
     )
+    request_payload["actor_name"] = actor_name
+    request_payload["actor_id"] = actor_id
+    request_payload["actor_role"] = actor_role
     job = store.create_job(
         job_type="tidy",
         target_entry_name=None,
@@ -253,11 +280,24 @@ def admin_overview_payload(
 ) -> dict[str, Any]:
     health = get_health_payload(kb_path)
     jobs = store.list_jobs(limit=200)
+    inbox_counts = store.inbox_status_counts() if hasattr(store, "inbox_status_counts") else {}
+    pending_inbox = (
+        inbox_counts.get("open", 0)
+        + inbox_counts.get("staged", 0)
+        + inbox_counts.get("ready", 0)
+        + inbox_counts.get("ingesting", 0)
+    )
     return {
-        "submission_counts": store.submission_status_counts(),
+        "submission_counts": {
+            **store.submission_status_counts(),
+            "pending": pending_inbox,
+        },
         "running_jobs": sum(1 for item in jobs if item["status"] == "running"),
         "queued_jobs": sum(1 for item in jobs if item["status"] == "queued"),
-        "pending_reviews": len(store.list_reviews(decision="pending", limit=200)),
+        "pending_reviews": 0,
+        "open_feedback": inbox_counts.get("open", 0),
+        "staged_documents": inbox_counts.get("staged", 0),
+        "ready_documents": inbox_counts.get("ready", 0),
         "severity_counts": health["severity_counts"],
         "health_summary": health["summary"],
         "cancel_requested_jobs": sum(
@@ -294,6 +334,7 @@ def system_status_payload(
 ) -> dict[str, Any]:
     jobs = store.list_jobs(limit=200)
     stale_jobs = store.list_stale_jobs(stale_after_seconds=job_stale_after_seconds)
+    inbox_counts = store.inbox_status_counts() if hasattr(store, "inbox_status_counts") else {}
     query_host = "127.0.0.1" if host in {"0.0.0.0", "::", "[::]"} else host
     base_url = str(public_base_url or "").strip().rstrip("/") or f"http://{query_host}:{port}"
 
@@ -339,8 +380,16 @@ def system_status_payload(
                 1 for job in jobs if job["status"] == "cancel_requested"
             ),
             "stale_jobs": len(stale_jobs),
-            "pending_reviews": len(store.list_reviews(decision="pending", limit=200)),
-            "pending_submissions": store.submission_status_counts().get("pending", 0),
+            "pending_reviews": 0,
+            "pending_submissions": (
+                inbox_counts.get("open", 0)
+                + inbox_counts.get("staged", 0)
+                + inbox_counts.get("ready", 0)
+                + inbox_counts.get("ingesting", 0)
+            ),
+            "open_feedback": inbox_counts.get("open", 0),
+            "staged_documents": inbox_counts.get("staged", 0),
+            "ready_documents": inbox_counts.get("ready", 0),
         },
         "health": get_health_payload(kb_path)["summary"],
         "paths": {
@@ -436,7 +485,7 @@ def platform_status_payload(
         kb_path=kb_path,
         stale_after_seconds=job_stale_after_seconds,
     )
-    payload["recent_reviews"] = list_reviews_with_jobs(store=store, decision="pending")[:5]
+    payload["recent_reviews"] = []
     return payload
 
 

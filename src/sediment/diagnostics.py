@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 _LEVELS = {
+    "OFF": 100,
     "DEBUG": 10,
     "INFO": 20,
     "WARNING": 30,

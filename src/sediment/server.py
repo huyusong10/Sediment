@@ -74,6 +74,13 @@ from sediment.control import (
     system_status_payload,
 )
 from sediment.diagnostics import DiagnosticLogger, bind_log_context
+from sediment.git_ops import (
+    GitOperationError,
+    commit_tracked_changes,
+    git_status,
+    push_current_branch,
+    revert_commit,
+)
 from sediment.i18n import tr
 from sediment.instances import user_state_root
 from sediment.kb import resolve_kb_document_path
@@ -4056,7 +4063,15 @@ async def _admin_files_page(request):
 
 
 async def _admin_reviews_page(request):
-    return await _admin_section_page(request, section="reviews")
+    return _redirect(_path_with_locale("/admin/inbox", _request_locale(request)))
+
+
+async def _admin_inbox_page(request):
+    return await _admin_section_page(request, section="inbox")
+
+
+async def _admin_version_control_page(request):
+    return await _admin_section_page(request, section="version_control")
 
 
 async def _admin_users_page(request):
@@ -4140,7 +4155,6 @@ async def _api_portal_submit_text(request):
                 trust_proxy_headers=TRUST_PROXY_HEADERS,
                 trusted_proxy_cidrs=TRUSTED_PROXY_CIDRS,
             ),
-            submission_type=str(body.get("submission_type", "text")),
             submitter_user_id=str((user or {}).get("id", "")).strip() or None,
             rate_limit_count=SUBMISSION_RATE_LIMIT_COUNT,
             rate_limit_window_seconds=SUBMISSION_RATE_LIMIT_WINDOW_SECONDS,
@@ -4153,7 +4167,14 @@ async def _api_portal_submit_text(request):
         return _json_response({"error": str(exc)}, status=409)
     except ValueError as exc:
         return _json_response({"error": str(exc)}, status=400)
-    return _json_response(record, status=201)
+    return _json_response(
+        {
+            "id": record["id"],
+            "status": record["status"],
+            "item": record,
+        },
+        status=201,
+    )
 
 
 async def _api_portal_submit_document(request):
@@ -4197,7 +4218,14 @@ async def _api_portal_submit_document(request):
         return _json_response({"error": str(exc)}, status=400)
     except Exception as exc:  # noqa: BLE001
         return _json_response({"error": str(exc)}, status=400)
-    return _json_response(record, status=201)
+    return _json_response(
+        {
+            "id": record["id"],
+            "status": record["status"],
+            "item": record,
+        },
+        status=201,
+    )
 
 
 def _user_payload(user: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -4264,6 +4292,57 @@ def _system_status_payload(store: PlatformStore) -> dict[str, Any]:
         job_stale_after_seconds=JOB_STALE_AFTER_SECONDS,
         trust_proxy_headers=TRUST_PROXY_HEADERS,
         trusted_proxy_cidrs=[str(item) for item in TRUSTED_PROXY_CIDRS],
+    )
+
+
+def _admin_inbox_payload(store: PlatformStore) -> dict[str, Any]:
+    items = store.list_inbox_items(limit=500)
+    grouped = {
+        "open_feedback": [],
+        "resolved_feedback": [],
+        "staged_documents": [],
+        "ready_documents": [],
+        "ingesting_documents": [],
+        "history_documents": [],
+    }
+    batches_by_id: dict[str, dict[str, Any]] = {}
+    for item in items:
+        item_type = str(item.get("item_type") or "")
+        status = str(item.get("status") or "")
+        if item.get("ingest_batch_id"):
+            batch = store.get_ingest_batch(str(item["ingest_batch_id"]))
+            if batch is not None:
+                batches_by_id[str(batch["id"])] = batch
+        if item_type == "text_feedback":
+            bucket = "resolved_feedback" if status == "resolved" else "open_feedback"
+            grouped[bucket].append(item)
+            continue
+        if status == "staged":
+            grouped["staged_documents"].append(item)
+        elif status == "ready":
+            grouped["ready_documents"].append(item)
+        elif status == "ingesting":
+            grouped["ingesting_documents"].append(item)
+        elif status in {"ingested", "removed"}:
+            grouped["history_documents"].append(item)
+    return {
+        "items": grouped,
+        "batches": sorted(
+            batches_by_id.values(),
+            key=lambda item: item.get("created_at", ""),
+            reverse=True,
+        ),
+        "repo_lock": store.get_repo_lock(),
+    }
+
+
+def _repo_busy_response(store: PlatformStore):
+    return _json_response(
+        {
+            "error": "repository is busy",
+            "repo_lock": store.get_repo_lock(),
+        },
+        status=409,
     )
 
 
@@ -4368,6 +4447,242 @@ async def _api_admin_health_issues(request):
     return _json_response({"issues": build_health_issue_queue(KB_PATH)})
 
 
+async def _api_admin_inbox(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    return _json_response(_admin_inbox_payload(_platform_store()))
+
+
+async def _api_admin_inbox_text_resolve(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    try:
+        item = store.update_inbox_item(
+            request.path_params["item_id"],
+            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            status="resolved",
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    if item is None or item.get("item_type") != "text_feedback":
+        return _json_response({"error": "inbox item not found"}, status=404)
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="inbox.resolve_feedback",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={"status": "resolved"},
+    )
+    return _json_response({"item": item})
+
+
+async def _api_admin_inbox_text_reopen(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    try:
+        item = store.update_inbox_item(
+            request.path_params["item_id"],
+            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            status="open",
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    if item is None or item.get("item_type") != "text_feedback":
+        return _json_response({"error": "inbox item not found"}, status=404)
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="inbox.reopen_feedback",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={"status": "open"},
+    )
+    return _json_response({"item": item})
+
+
+async def _api_admin_inbox_document_mark_ready(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    try:
+        item = store.update_inbox_item(
+            request.path_params["item_id"],
+            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            status="ready",
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    if item is None or item.get("item_type") != "uploaded_document":
+        return _json_response({"error": "inbox item not found"}, status=404)
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="inbox.document_mark_ready",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={"status": "ready"},
+    )
+    return _json_response({"item": item})
+
+
+async def _api_admin_inbox_document_move_to_staged(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    try:
+        item = store.update_inbox_item(
+            request.path_params["item_id"],
+            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            status="staged",
+            ingest_batch_id=None,
+            job_id=None,
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    if item is None or item.get("item_type") != "uploaded_document":
+        return _json_response({"error": "inbox item not found"}, status=404)
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="inbox.document_move_to_staged",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={"status": "staged"},
+    )
+    return _json_response({"item": item})
+
+
+async def _api_admin_inbox_document_remove(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    try:
+        item = store.update_inbox_item(
+            request.path_params["item_id"],
+            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            status="removed",
+            notes=str(body.get("notes", "")).strip() or None,
+        )
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    if item is None or item.get("item_type") != "uploaded_document":
+        return _json_response({"error": "inbox item not found"}, status=404)
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="inbox.document_remove",
+        target_type="inbox_item",
+        target_id=item["id"],
+        details={"status": "removed"},
+    )
+    return _json_response({"item": item})
+
+
+async def _api_admin_inbox_document_download(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    store = _platform_store()
+    item = store.get_inbox_item(request.path_params["item_id"])
+    if item is None or item.get("item_type") != "uploaded_document":
+        return _json_response({"error": "inbox item not found"}, status=404)
+    path = Path(str(item.get("stored_file_path") or ""))
+    if not path.exists():
+        return _json_response({"error": "uploaded file not found"}, status=404)
+    from starlette.responses import FileResponse
+
+    filename = str(item.get("original_filename") or item.get("title") or path.name)
+    return FileResponse(
+        path,
+        media_type=str(item.get("mime_type") or "application/octet-stream"),
+        filename=filename,
+    )
+
+
+async def _api_admin_inbox_create_batch(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    items = body.get("items") if isinstance(body.get("items"), list) else []
+    item_versions: dict[str, int] = {}
+    for entry in items:
+        if not isinstance(entry, dict):
+            continue
+        item_id = str(entry.get("id", "")).strip()
+        if not item_id:
+            continue
+        item_versions[item_id] = int(entry.get("version", 0))
+    if not item_versions:
+        return _json_response({"error": "at least one ready document is required"}, status=400)
+    selected_items = [
+        item
+        for item in (store.get_inbox_item(item_id) for item_id in item_versions)
+        if item is not None
+    ]
+    title = (
+        selected_items[0]["title"]
+        if len(selected_items) == 1
+        else f"{len(selected_items)} documents"
+    )
+    try:
+        batch = store.create_ingest_batch(
+            item_versions=item_versions,
+            created_by_name=str(actor.get("name", "")),
+            created_by_id=str(actor.get("id", "")) or None,
+            title=title,
+        )
+    except FileNotFoundError as exc:
+        return _json_response({"error": str(exc)}, status=404)
+    except (RuntimeError, ValueError) as exc:
+        return _json_response({"error": str(exc)}, status=409)
+    locale = _request_locale(request)
+    redirect_url = _path_with_locale(
+        f"/admin/kb?ingest_batch={batch['id']}&autostart=1",
+        locale,
+    )
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="inbox.create_ingest_batch",
+        target_type="ingest_batch",
+        target_id=batch["id"],
+        details={"item_ids": list(item_versions)},
+    )
+    return _json_response({"batch": batch, "redirect_url": redirect_url}, status=201)
+
+
 async def _api_admin_submissions(request):
     guard = await _admin_guard(request)
     if guard:
@@ -4452,6 +4767,27 @@ async def _api_admin_ingest_document(request):
         return guard
     actor = _actor_from_request(request)
     body = await _request_json_or_empty(request)
+    ingest_batch_id = str(body.get("ingest_batch_id", "")).strip()
+    if ingest_batch_id:
+        try:
+            job = enqueue_ingest_job(
+                store=_platform_store(),
+                ingest_batch_id=ingest_batch_id,
+                actor_name=str(actor.get("name", "")),
+                actor_id=str(actor.get("id", "")) or None,
+                actor_role=str(actor.get("role", "")),
+                max_attempts=JOB_MAX_ATTEMPTS,
+            )
+        except FileNotFoundError as exc:
+            return _json_response({"error": str(exc)}, status=404)
+        except RuntimeError as exc:
+            return _json_response({"error": str(exc)}, status=409)
+        if RUN_JOBS_IN_PROCESS:
+            _agent_runner().submit(job["id"])
+        return _json_response(
+            {"batch": _platform_store().get_ingest_batch(ingest_batch_id), "job": job},
+            status=202,
+        )
     submitter_name = str(body.get("submitter_name", "")).strip() or str(
         actor.get("name", "")
     ).strip()
@@ -4659,6 +4995,153 @@ async def _api_admin_review_reject(request):
     except (RuntimeError, ValueError) as exc:
         return _json_response({"error": str(exc)}, status=400)
     return _json_response(payload)
+
+
+async def _api_admin_version_status(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    payload = git_status(settings=_settings())
+    payload["repo_lock"] = _platform_store().get_repo_lock()
+    return _json_response(payload)
+
+
+async def _api_admin_version_commit(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    reason = str(body.get("reason", "")).strip()
+    try:
+        store.claim_repo_lock(
+            owner_name=str(actor.get("name", "")),
+            owner_id=str(actor.get("id", "")) or None,
+            owner_role=str(actor.get("role", "")),
+            operation="manual_commit",
+            target_id="version-control",
+        )
+    except RuntimeError:
+        return _repo_busy_response(store)
+    try:
+        payload = commit_tracked_changes(
+            settings=_settings(),
+            actor_name=str(actor.get("name", "")),
+            actor_id=str(actor.get("id", "")) or None,
+            operation="manual_commit",
+            reason=reason,
+        )
+    except GitOperationError as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    finally:
+        store.release_repo_lock()
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="git.commit.manual",
+        target_type="git_commit",
+        target_id=str(payload["commit_sha"]),
+        details={"reason": reason},
+    )
+    return _json_response(payload, status=201)
+
+
+async def _api_admin_version_push(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    try:
+        store.claim_repo_lock(
+            owner_name=str(actor.get("name", "")),
+            owner_id=str(actor.get("id", "")) or None,
+            owner_role=str(actor.get("role", "")),
+            operation="push",
+            target_id="version-control",
+        )
+    except RuntimeError:
+        return _repo_busy_response(store)
+    try:
+        payload = push_current_branch(settings=_settings())
+    except GitOperationError as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    finally:
+        store.release_repo_lock()
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="git.push",
+        target_type="git_branch",
+        target_id=str(payload["branch"]),
+        details={"upstream": payload["upstream"], "remote_name": payload["remote_name"]},
+    )
+    return _json_response(payload, status=202)
+
+
+async def _api_admin_version_revert(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    body = await _request_json_or_empty(request)
+    commit_sha = str(body.get("commit_sha", "")).strip()
+    if not commit_sha:
+        return _json_response({"error": "commit_sha is required"}, status=400)
+    jobs = [
+        job
+        for job in store.list_jobs(limit=500)
+        if str(job.get("commit_sha", "")).strip() == commit_sha
+    ]
+    managed_job = next(
+        (
+            job
+            for job in jobs
+            if job.get("job_type") in {"ingest", "tidy"}
+        ),
+        None,
+    )
+    if managed_job is None:
+        return _json_response({"error": "only ingest/tidy commits can be reverted"}, status=400)
+    try:
+        store.claim_repo_lock(
+            owner_name=str(actor.get("name", "")),
+            owner_id=str(actor.get("id", "")) or None,
+            owner_role=str(actor.get("role", "")),
+            operation="revert",
+            target_id=commit_sha,
+        )
+    except RuntimeError:
+        return _repo_busy_response(store)
+    try:
+        payload = revert_commit(
+            settings=_settings(),
+            commit_sha=commit_sha,
+            actor_name=str(actor.get("name", "")),
+            actor_id=str(actor.get("id", "")) or None,
+        )
+    except GitOperationError as exc:
+        return _json_response({"error": str(exc)}, status=400)
+    finally:
+        store.release_repo_lock()
+    store.update_job(
+        managed_job["id"],
+        revert_commit_sha=payload["revert_commit_sha"],
+    )
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "")),
+        actor_id=str(actor.get("id", "")) or None,
+        actor_role=str(actor.get("role", "")),
+        action="git.revert",
+        target_type="git_commit",
+        target_id=commit_sha,
+        details={"revert_commit_sha": payload["revert_commit_sha"], "job_id": managed_job["id"]},
+    )
+    return _json_response(payload, status=202)
 
 
 async def _api_admin_system_status(request):
@@ -5369,6 +5852,8 @@ def create_starlette_app():
         Route("/admin/overview", _admin_overview_page),
         Route("/admin/kb", _admin_kb_page),
         Route("/admin/files", _admin_files_page),
+        Route("/admin/inbox", _admin_inbox_page),
+        Route("/admin/version-control", _admin_version_control_page),
         Route("/admin/reviews", _admin_reviews_page),
         Route("/admin/users", _admin_users_page),
         Route("/admin/system", _admin_system_page),
@@ -5387,6 +5872,14 @@ def create_starlette_app():
         Route("/api/admin/audit", _api_admin_audit_logs),
         Route("/api/admin/health/summary", _api_admin_health_summary),
         Route("/api/admin/health/issues", _api_admin_health_issues),
+        Route("/api/admin/inbox", _api_admin_inbox),
+        Route("/api/admin/inbox/text/{item_id:str}/resolve", _api_admin_inbox_text_resolve, methods=["POST"]),
+        Route("/api/admin/inbox/text/{item_id:str}/reopen", _api_admin_inbox_text_reopen, methods=["POST"]),
+        Route("/api/admin/inbox/document/{item_id:str}/mark-ready", _api_admin_inbox_document_mark_ready, methods=["POST"]),
+        Route("/api/admin/inbox/document/{item_id:str}/move-to-staged", _api_admin_inbox_document_move_to_staged, methods=["POST"]),
+        Route("/api/admin/inbox/document/{item_id:str}/remove", _api_admin_inbox_document_remove, methods=["POST"]),
+        Route("/api/admin/inbox/document/{item_id:str}/download", _api_admin_inbox_document_download, methods=["GET"]),
+        Route("/api/admin/inbox/ingest-batches", _api_admin_inbox_create_batch, methods=["POST"]),
         Route("/api/admin/submissions", _api_admin_submissions),
         Route("/api/admin/submissions/{submission_id:str}", _api_admin_submission_detail),
         Route("/api/admin/submissions/{submission_id:str}/triage", _api_admin_submission_triage, methods=["POST"]),
@@ -5404,6 +5897,10 @@ def create_starlette_app():
         Route("/api/admin/reviews/{review_id:str}", _api_admin_review_detail),
         Route("/api/admin/reviews/{review_id:str}/approve", _api_admin_review_approve, methods=["POST"]),
         Route("/api/admin/reviews/{review_id:str}/reject", _api_admin_review_reject, methods=["POST"]),
+        Route("/api/admin/version/status", _api_admin_version_status, methods=["GET"]),
+        Route("/api/admin/version/commit", _api_admin_version_commit, methods=["POST"]),
+        Route("/api/admin/version/push", _api_admin_version_push, methods=["POST"]),
+        Route("/api/admin/version/revert", _api_admin_version_revert, methods=["POST"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_detail, methods=["GET"]),
         Route("/api/admin/entries/{name:str}", _api_admin_entry_save, methods=["PUT"]),
         Route("/api/admin/explore", _api_admin_explore, methods=["POST"]),

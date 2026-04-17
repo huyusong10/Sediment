@@ -28,6 +28,7 @@ from sediment.auth import (
     find_user_by_id,
 )
 from sediment.diagnostics import coerce_log_record, record_matches_component, render_log_record
+from sediment.git_ops import write_managed_gitignore
 from sediment.cli_help import render_help as render_help_topic
 from sediment.cli_parser import build_cli_parser
 from sediment.control import (
@@ -798,11 +799,20 @@ def _write_instance_scaffold(
                 "segment_glob": "index*.md",
             },
         },
+        "git": {
+            "enabled": True,
+            "repo_root": "../..",
+            "tracked_paths": [kb_relative_path],
+            "remote_name": "origin",
+            "system_author_name": "Sediment System",
+            "system_author_email": "sediment-system@local",
+        },
     }
     config_target.write_text(
         yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
+    write_managed_gitignore(target_root)
 
     state_dir = target_root / ".sediment_state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -1481,18 +1491,11 @@ def submit_text_command(args) -> int:
     if args.json:
         print(json.dumps(record, ensure_ascii=False, indent=2))
     else:
-        print(f"Created submission: {record['id']}")
+        print(f"Created inbox item: {record['id']}")
         print(f"title: {record['title']}")
         print(f"status: {record['status']}")
-        analysis = record.get("analysis") or {}
-        if analysis:
-            print(f"analysis: {analysis.get('summary', '-')}")
-            print(f"suggested_type: {analysis.get('recommended_type', '-')}")
-            print(f"suggested_action: {analysis.get('committer_action', '-')}")
-        print_next_steps(
-            scoped_command("status"),
-            scoped_command("review list"),
-        )
+        print(f"type: {record.get('item_type', '-')}")
+        print_next_steps(scoped_command("status"))
     return 0
 
 
@@ -1562,13 +1565,11 @@ def submit_file_command(args) -> int:
     if args.json:
         print(json.dumps(record, ensure_ascii=False, indent=2))
     else:
-        print(f"Created submission: {record['id']}")
+        print(f"Created inbox item: {record['id']}")
         print(f"title: {record['title']}")
         print(f"status: {record['status']}")
-        print_next_steps(
-            scoped_command("status"),
-            scoped_command("review list"),
-        )
+        print(f"type: {record.get('item_type', '-')}")
+        print_next_steps(scoped_command("status"))
     return 0
 
 
@@ -1629,9 +1630,9 @@ def status_command(args) -> int:
     print(f"- mcp: {status['urls']['mcp_sse']}")
     if not daemon["running"]:
         print_next_steps(scoped_command("server start"))
-    elif queue["pending_reviews"] or queue["pending_submissions"]:
+    elif queue["pending_submissions"] or queue["queued_jobs"] or queue["running_jobs"]:
         print_next_steps(
-            scoped_command("review list"),
+            scoped_command("status queue"),
             scoped_command("logs show --component worker --lines 80"),
         )
     return 0
@@ -2829,7 +2830,17 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     elif getattr(args, "config", None):
         set_active_config_path(args.config)
-    return int(args.func(args))
+    original_log_level = os.environ.get("SEDIMENT_LOG_LEVEL")
+    if getattr(args, "json", False):
+        os.environ["SEDIMENT_LOG_LEVEL"] = "OFF"
+    try:
+        return int(args.func(args))
+    finally:
+        if getattr(args, "json", False):
+            if original_log_level is None:
+                os.environ.pop("SEDIMENT_LOG_LEVEL", None)
+            else:
+                os.environ["SEDIMENT_LOG_LEVEL"] = original_log_level
 
 
 if __name__ == "__main__":

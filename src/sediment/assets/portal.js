@@ -61,12 +61,10 @@
         ...base,
         submitName: trimPersistedText(nodeValue("submit-name"), 12000),
         submitTitle: trimPersistedText(nodeValue("submit-title"), 12000),
-        submitType: trimPersistedText(nodeValue("submit-type"), 256),
         submitContent: trimPersistedText(nodeValue("submit-content")),
         uploadName: trimPersistedText(nodeValue("upload-name"), 12000),
         submitTextStatus: trimPersistedText(nodeText("submit-text-status"), 4000),
         submitFileStatus: trimPersistedText(nodeText("submit-file-status"), 4000),
-        analysisHtml: trimPersistedText(document.getElementById("submit-text-analysis")?.innerHTML || ""),
       };
     }
 
@@ -91,18 +89,10 @@
     if (pageData.pageKind === "submit") {
       setNodeValue("submit-name", snapshot.submitName || "");
       setNodeValue("submit-title", snapshot.submitTitle || "");
-      const submitType = document.getElementById("submit-type");
-      if (submitType && snapshot.submitType) {
-        submitType.value = snapshot.submitType;
-      }
       setNodeValue("submit-content", snapshot.submitContent || "");
       setNodeValue("upload-name", snapshot.uploadName || "");
       setNodeText("submit-text-status", snapshot.submitTextStatus || nodeText("submit-text-status"));
       setNodeText("submit-file-status", snapshot.submitFileStatus || nodeText("submit-file-status"));
-      const analysisNode = document.getElementById("submit-text-analysis");
-      if (analysisNode && snapshot.analysisHtml) {
-        analysisNode.innerHTML = snapshot.analysisHtml;
-      }
       return true;
     }
 
@@ -384,45 +374,19 @@
     setPortalMessage(`${UI.entry_open}${entryTitle}`);
   }
 
-  function renderSubmissionAnalysis(analysis) {
-    const node = document.getElementById("submit-text-analysis");
-    if (!node) return;
-    if (!analysis) {
-      node.innerHTML = "";
-      queuePersistPortalPageState();
-      return;
-    }
-    const related = Array.isArray(analysis.related_entries) && analysis.related_entries.length
-      ? analysis.related_entries.map((item) => escapeHtml(item.name || "")).join(" · ")
-      : UI.analysis_related_empty;
-    node.innerHTML = `
-      <div class="card">
-        <strong>${escapeHtml(UI.analysis_title)}</strong>
-        <div class="subtle">${escapeHtml(UI.analysis_title_label)}: ${escapeHtml(analysis.suggested_title || "-")}</div>
-        <div class="subtle">${escapeHtml(UI.analysis_type_label)}: ${escapeHtml(analysis.recommended_type || "-")}</div>
-        <div class="subtle">${escapeHtml(UI.analysis_risk_label)}: ${escapeHtml(analysis.duplicate_risk || "-")}</div>
-        <div class="subtle">${escapeHtml(UI.analysis_action_label)}: ${escapeHtml(analysis.committer_action || "-")}</div>
-        <div class="subtle">${escapeHtml(UI.analysis_note_label)}: ${escapeHtml(analysis.summary || "")}</div>
-        <div class="subtle">${related}</div>
-      </div>
-    `;
-    queuePersistPortalPageState();
-  }
-
   async function submitText() {
     const submitter_name = (document.getElementById("submit-name")?.value || "").trim();
     const title = (document.getElementById("submit-title")?.value || "").trim();
-    const submission_type = (document.getElementById("submit-type")?.value || "concept").trim();
     const content = document.getElementById("submit-content")?.value || "";
     document.getElementById("submit-text-status").textContent = UI.submit_text_busy;
     const payload = await fetchJson("/api/portal/submissions/text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submitter_name, title, submission_type, content }),
+      body: JSON.stringify({ submitter_name, title, content }),
     });
-    document.getElementById("submit-text-status").textContent = `${UI.submit_text_success}${payload.id}`;
-    renderSubmissionAnalysis(payload.analysis || null);
-    setPortalMessage(`${UI.submitted_text_prefix}${payload.id}`);
+    const item = payload.item || payload;
+    document.getElementById("submit-text-status").textContent = `${UI.submit_text_success}${item.id || payload.id}`;
+    setPortalMessage(`${UI.submitted_text_prefix}${item.id || payload.id}`);
   }
 
   async function submitFiles() {
@@ -445,8 +409,9 @@
         mime_type: files.length === 1 ? (files[0].type || "application/octet-stream") : "application/zip",
       }),
     });
-    document.getElementById("submit-file-status").textContent = `${UI.submit_file_success}${payload.id}`;
-    setPortalMessage(`${UI.submitted_file_prefix}${payload.id}`);
+    const item = payload.item || payload;
+    document.getElementById("submit-file-status").textContent = `${UI.submit_file_success}${item.id || payload.id}`;
+    setPortalMessage(`${UI.submitted_file_prefix}${item.id || payload.id}`);
   }
 
   function openActiveSuggestion() {

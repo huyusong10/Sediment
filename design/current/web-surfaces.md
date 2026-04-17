@@ -172,11 +172,16 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
   - 当当前文档存在未保存修改时，点击 `重新载入` 必须先经过统一的放弃修改确认，再执行服务端重新载入
   - 切换到其他文档、其他入口项或离开页面前，如当前文档存在未保存修改，必须显式阻止并确认，不能静默丢稿
   - 当前继续使用原生树浏览与搜索建议方案；是否更换为更复杂的树组件不属于本模块契约，只要结构浏览、联动载入与搜索建议行为保持一致即可
-- `/admin/reviews`
-  - 左侧待审队列 + 右侧详情的主从工作流
-  - 详情区集中展示来源提交、摘要、diff 与评审备注
-  - approve / reject 动作只在详情区出现
-  - jobs 作为辅助状态面板保留在下方
+- `/admin/inbox`
+  - 作为 `提交收件箱` 展示文本意见、文档暂存区、ready to ingest、处理中和历史
+  - 文本意见只支持 resolve / reopen，不再自动进入 ingest
+  - 文档支持 download / remove / move to ready / move to staged
+  - 创建 ingest batch 后跳转到 `/admin/kb?ingest_batch=<id>&autostart=1`
+- `/admin/version-control`
+  - 展示 Git 状态、tracked paths 下的未提交改动、最近提交和 repo lock
+  - 文件管理页产生的修改必须在这里填写理由后手工 commit
+  - push 只支持当前已配置 upstream 的分支
+  - ingest / tidy 生成的 Sediment 管理提交在这里显示 revert 按钮
 - `/admin/users`
   - owner-only
   - 只允许创建 committer
@@ -195,11 +200,11 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
 
 - 在线编辑正式条目、placeholder 与 index 文档
 - 查看 health 结果并常驻刷新
-- 查看未进入正式知识库的提交
+- 查看未进入正式知识库的文本意见与上传原件
 - 支持从 index 结构树、搜索建议和 health issue queue 三个角度选择文档
-- 支持直接上传文档并触发 ingest
+- 支持从收件箱把 ready 文档跳转到知识库管理页并触发 ingest
 - 以 KB scope 发起 tidy 任务，而不是针对单条目目标
-- 审阅 Agent 生成的 patch
+- 展示 Git 状态、手工 commit、push 与 ingest / tidy 回退
 - 显示审计日志
 - 显示系统状态、Quartz 状态、队列模式和限流配置
 - owner-only 在线查看和编辑全部配置

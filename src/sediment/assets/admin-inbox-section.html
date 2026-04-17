@@ -1,0 +1,51 @@
+<section class="split inbox-workspace" data-testid="admin-inbox-layout">
+  <div class="stack">
+    <div class="panel" data-testid="admin-inbox-feedback-panel">
+      <div class="row spread">
+        <h2>__OPEN_FEEDBACK_TITLE__</h2>
+        <div class="panel-header-tip">__OPEN_FEEDBACK_NOTE__</div>
+      </div>
+      <div class="list" id="inbox-open-feedback-list" data-testid="admin-inbox-open-feedback-list"></div>
+    </div>
+
+    <div class="panel" data-testid="admin-inbox-staged-panel">
+      <div class="row spread">
+        <h2>__STAGED_TITLE__</h2>
+        <div class="panel-header-tip">__STAGED_NOTE__</div>
+      </div>
+      <div class="list" id="inbox-staged-documents-list" data-testid="admin-inbox-staged-documents-list"></div>
+    </div>
+
+    <div class="panel" data-testid="admin-inbox-ready-panel">
+      <div class="row spread">
+        <h2>__READY_TITLE__</h2>
+        <div class="panel-header-tip">__READY_NOTE__</div>
+      </div>
+      <div class="stack">
+        <div class="list" id="inbox-ready-documents-list" data-testid="admin-inbox-ready-documents-list"></div>
+        <div class="row actions">
+          <button class="primary" id="inbox-create-batch-button" data-testid="admin-inbox-create-batch-button">__READY_BUTTON__</button>
+        </div>
+        <div id="inbox-status" data-testid="admin-inbox-status" class="subtle" role="status" aria-live="polite">__READY_STATUS__</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="panel" data-testid="admin-inbox-ingesting-panel">
+      <div class="row spread">
+        <h2>__INGESTING_TITLE__</h2>
+        <div class="panel-header-tip">__INGESTING_NOTE__</div>
+      </div>
+      <div class="list" id="inbox-ingesting-documents-list" data-testid="admin-inbox-ingesting-documents-list"></div>
+    </div>
+
+    <div class="panel" data-testid="admin-inbox-history-panel">
+      <div class="row spread">
+        <h2>__HISTORY_TITLE__</h2>
+        <div class="panel-header-tip">__HISTORY_NOTE__</div>
+      </div>
+      <div class="list" id="inbox-history-list" data-testid="admin-inbox-history-list"></div>
+    </div>
+  </div>
+</section>

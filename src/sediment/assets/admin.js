@@ -27,6 +27,7 @@
     reviews: [],
     reviewDetails: {},
     selectedReviewId: null,
+    inbox: null,
     users: [],
     revealedTokens: {},
     documents: { counts: {}, documents_by_name: {}, top_indexes: [], unindexed_documents: [], health_issues: [] },
@@ -35,6 +36,7 @@
     selectedDocumentName: null,
     selectedDocumentDetail: null,
     ingestFiles: [],
+    versionStatus: null,
     activeFileEntryTab: "index",
     activeFileConsoleTab: "meta",
     fileLoadedContent: "",
@@ -387,6 +389,103 @@
     setAdminMessage(options.adminMessage || message);
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function jobStateLabel(job) {
+    return String(job?.status || "").trim() || "-";
+  }
+
+  function renderManagedJobResult(job) {
+    const node = runtimeResultNode();
+    if (!node) return;
+    const result = job?.result_payload || {};
+    const applyResult = result.apply_result || {};
+    const operations = Array.isArray(applyResult.operations)
+      ? applyResult.operations
+      : Array.isArray(result.operations)
+        ? result.operations
+        : [];
+    const commitSha = String(result.commit_sha || job?.commit_sha || "").trim();
+    const changedItems = operations
+      .map((item) => ({
+        name: String(item?.name || "").trim(),
+        path: String(item?.relative_path || "").trim(),
+        changeType: String(item?.change_type || "").trim(),
+      }))
+      .filter((item) => item.name || item.path);
+    const summary =
+      String(result.summary || "").trim() ||
+      String(job?.error_message || "").trim() ||
+      (UI.job_result_empty || "");
+    const isFailure = ["failed", "cancelled"].includes(String(job?.status || ""));
+    node.className = `runtime-result-view markdown${isFailure ? " danger" : ""}`;
+    node.innerHTML = `
+      <div class="card">
+        <div class="row spread">
+          <strong>${escapeHtml(summary)}</strong>
+          <span class="tag">${escapeHtml(jobStateLabel(job))}</span>
+        </div>
+        <div class="subtle">${escapeHtml(UI.job_type_label || "Job type")}: ${escapeHtml(String(job?.job_type || "-"))}</div>
+        <div class="subtle">${escapeHtml(UI.job_change_count_label || "Changed files")}: ${escapeHtml(String(operations.length || 0))}</div>
+        ${commitSha ? `<div class="subtle">${escapeHtml(UI.job_commit_label || "Commit")}: <span class="mono">${escapeHtml(commitSha)}</span></div>` : ""}
+        ${
+          changedItems.length
+            ? `
+              <div class="subtle">${escapeHtml(UI.job_changed_items_label || "Changed items")}:</div>
+              <ul class="job-change-list">
+                ${changedItems.map((item) => `
+                  <li>
+                    <span class="mono">${escapeHtml(item.path || item.name)}</span>
+                    ${item.name && item.path && item.name !== item.path ? `<span> · ${escapeHtml(item.name)}</span>` : ""}
+                    ${item.changeType ? `<span class="tag">${escapeHtml(item.changeType)}</span>` : ""}
+                  </li>
+                `).join("")}
+              </ul>
+            `
+            : ""
+        }
+        ${isFailure ? `<div class="subtle">${escapeHtml(String(job?.error_message || ""))}</div>` : ""}
+        ${
+          commitSha && ["ingest", "tidy"].includes(String(job?.job_type || ""))
+            ? `<div class="row actions"><button type="button" data-action="revert-job-commit" data-commit-sha="${escapeHtml(commitSha)}">${escapeHtml(UI.version_revert || "Revert")}</button></div>`
+            : ""
+        }
+      </div>
+    `;
+    queuePersistAdminPageState();
+  }
+
+  async function waitForManagedJob(jobId, section) {
+    const normalizedId = String(jobId || "").trim();
+    if (!normalizedId) {
+      throw new Error(UI.job_monitor_missing || "Job id is required.");
+    }
+    const deadline = Date.now() + 30000;
+    let lastStatus = "";
+    while (Date.now() < deadline) {
+      const job = await fetchAdmin(`/api/admin/jobs/${encodeURIComponent(normalizedId)}`);
+      const status = String(job.status || "").trim();
+      if (status && status !== lastStatus) {
+        lastStatus = status;
+        appendLiveLog(UI.live_status_label || "Status", `${normalizedId.slice(0, 8)} · ${status}`);
+        setWorkbenchStatus(section, `${UI.job_running_prefix || ""}${status}`);
+      }
+      if (["succeeded", "failed", "cancelled"].includes(status)) {
+        renderManagedJobResult(job);
+        setRuntimeResultStatus(
+          status === "succeeded"
+            ? `${UI.job_completed_prefix || ""}${String(job.result_payload?.commit_sha || job.commit_sha || "").slice(0, 8)}`
+            : (job.error_message || status)
+        );
+        return job;
+      }
+      await sleep(500);
+    }
+    throw new Error(UI.job_monitor_timeout || "Timed out while waiting for the job result.");
+  }
+
   function roleLabel(role) {
     if (role === "owner") return UI.role_owner || "owner";
     if (role === "committer") return UI.role_committer || "committer";
@@ -654,7 +753,7 @@
       [UI.stats_pending, overview.submission_counts?.pending || 0],
       [UI.stats_queue, overview.queued_jobs || 0],
       [UI.stats_running, overview.running_jobs || 0],
-      [UI.stats_reviews, overview.pending_reviews || 0],
+      [UI.stats_reviews, overview.open_feedback ?? (overview.pending_reviews || 0)],
       [UI.stats_blocking, overview.severity_counts?.blocking || 0],
       [UI.stats_stale, overview.stale_jobs || 0],
     ];
@@ -1260,6 +1359,190 @@
     if (rejectButton) rejectButton.disabled = !hasSelection;
   }
 
+  function inboxActionButton(action, itemId, version, label, extra = "") {
+    return `
+      <button
+        type="button"
+        data-action="${escapeHtml(action)}"
+        data-item-id="${escapeHtml(String(itemId || ""))}"
+        data-version="${escapeHtml(String(version || 0))}"
+        ${extra}
+      >${escapeHtml(label)}</button>
+    `;
+  }
+
+  function renderInboxSimpleList(nodeId, items, renderItem, emptyText) {
+    const node = document.getElementById(nodeId);
+    if (!node) return;
+    const list = Array.isArray(items) ? items : [];
+    node.innerHTML = list.length
+      ? list.map(renderItem).join("")
+      : `<div class="empty">${escapeHtml(emptyText || UI.inbox_empty || "")}</div>`;
+  }
+
+  function renderInbox(payload) {
+    state.inbox = payload || { items: {} };
+    const items = state.inbox.items || {};
+    renderInboxSimpleList(
+      "inbox-open-feedback-list",
+      items.open_feedback || [],
+      (item) => `
+        <div class="card">
+          <div class="row spread">
+            <strong>${escapeHtml(item.title || "")}</strong>
+            <span class="tag">${escapeHtml(formatDateTime(item.created_at || ""))}</span>
+          </div>
+          <div class="subtle">${escapeHtml(item.submitter_name || "")}</div>
+          <p>${escapeHtml(item.body_text || "")}</p>
+          <div class="row actions">
+            ${inboxActionButton("resolve-feedback", item.id, item.version, UI.inbox_resolve || "Resolve")}
+          </div>
+        </div>
+      `,
+      UI.inbox_feedback_empty
+    );
+    renderInboxSimpleList(
+      "inbox-staged-documents-list",
+      items.staged_documents || [],
+      (item) => `
+        <div class="card">
+          <div class="row spread">
+            <strong>${escapeHtml(item.title || item.original_filename || "")}</strong>
+            <span class="tag">${escapeHtml(item.mime_type || "")}</span>
+          </div>
+          <div class="subtle">${escapeHtml(item.original_filename || "")}</div>
+          <div class="row actions">
+            ${inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "Download")}
+            ${inboxActionButton("mark-ready", item.id, item.version, UI.inbox_mark_ready || "Move to ready")}
+            ${inboxActionButton("remove-document", item.id, item.version, UI.inbox_remove || "Remove")}
+          </div>
+        </div>
+      `,
+      UI.inbox_documents_empty
+    );
+    renderInboxSimpleList(
+      "inbox-ready-documents-list",
+      items.ready_documents || [],
+      (item) => `
+        <label class="card">
+          <div class="row spread">
+            <strong>${escapeHtml(item.title || item.original_filename || "")}</strong>
+            <input
+              type="checkbox"
+              data-action="select-ready-document"
+              data-item-id="${escapeHtml(String(item.id || ""))}"
+              data-version="${escapeHtml(String(item.version || 0))}"
+            />
+          </div>
+          <div class="subtle">${escapeHtml(item.original_filename || "")}</div>
+          <div class="row actions">
+            ${inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "Download")}
+            ${inboxActionButton("move-to-staged", item.id, item.version, UI.inbox_move_to_staged || "Back to staged")}
+          </div>
+        </label>
+      `,
+      UI.inbox_ready_empty
+    );
+    renderInboxSimpleList(
+      "inbox-ingesting-documents-list",
+      items.ingesting_documents || [],
+      (item) => `
+        <div class="card">
+          <div class="row spread">
+            <strong>${escapeHtml(item.title || item.original_filename || "")}</strong>
+            <span class="tag">${escapeHtml(item.ingest_batch_id || "")}</span>
+          </div>
+          <div class="subtle">${escapeHtml(item.job_id || "")}</div>
+        </div>
+      `,
+      UI.inbox_ingesting_empty
+    );
+    const historyItems = [...(items.resolved_feedback || []), ...(items.history_documents || [])];
+    renderInboxSimpleList(
+      "inbox-history-list",
+      historyItems,
+      (item) => `
+        <div class="card">
+          <div class="row spread">
+            <strong>${escapeHtml(item.title || item.original_filename || "")}</strong>
+            <span class="tag">${escapeHtml(item.status || "")}</span>
+          </div>
+          <div class="subtle">${escapeHtml(formatDateTime(item.updated_at || item.created_at || ""))}</div>
+          <div class="row actions">
+            ${item.item_type === "text_feedback"
+              ? inboxActionButton("reopen-feedback", item.id, item.version, UI.inbox_reopen || "Reopen")
+              : ""}
+            ${item.item_type === "uploaded_document"
+              ? inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "Download")
+              : ""}
+          </div>
+        </div>
+      `,
+      UI.inbox_history_empty
+    );
+  }
+
+  function renderVersionStatus(payload) {
+    state.versionStatus = payload || {};
+    const summaryNode = document.getElementById("version-status-summary");
+    if (summaryNode) {
+      summaryNode.innerHTML = `
+        <div class="card">
+          <strong>${escapeHtml(UI.version_repo_root || "Repo root")}</strong>
+          <div class="subtle">${escapeHtml(payload.repo_root || "")}</div>
+        </div>
+        <div class="card">
+          <strong>${escapeHtml(UI.version_branch || "Branch")}</strong>
+          <div class="subtle">${escapeHtml(payload.current_branch || "-")}</div>
+        </div>
+        <div class="card">
+          <strong>${escapeHtml(UI.version_upstream || "Upstream")}</strong>
+          <div class="subtle">${payload.has_upstream ? escapeHtml(UI.version_upstream_ready || "Configured") : escapeHtml(UI.version_upstream_missing || "Not configured")}</div>
+        </div>
+        <div class="card">
+          <strong>${escapeHtml(UI.version_repo_lock || "Repo lock")}</strong>
+          <div class="subtle">${payload.repo_lock ? escapeHtml(payload.repo_lock.owner_name || "") : escapeHtml(UI.version_repo_lock_free || "Idle")}</div>
+        </div>
+      `;
+    }
+    const changesNode = document.getElementById("version-tracked-changes-list");
+    if (changesNode) {
+      const changes = Array.isArray(payload.tracked_changes) ? payload.tracked_changes : [];
+      changesNode.innerHTML = changes.length
+        ? changes.map((item) => `
+            <div class="card">
+              <div class="row spread">
+                <strong>${escapeHtml(item.path || "")}</strong>
+                <span class="tag">${escapeHtml(`${item.index_status || " "}${item.worktree_status || " "}`.trim() || "M")}</span>
+              </div>
+            </div>
+          `).join("")
+        : `<div class="empty">${escapeHtml(UI.version_no_changes || "")}</div>`;
+    }
+    const commitsNode = document.getElementById("version-commits-list");
+    if (commitsNode) {
+      const commits = Array.isArray(payload.recent_commits) ? payload.recent_commits : [];
+      commitsNode.innerHTML = commits.length
+        ? commits.map((item) => `
+            <div class="card">
+              <div class="row spread">
+                <strong>${escapeHtml(item.subject || "")}</strong>
+                <span class="tag">${escapeHtml(String(item.sha || "").slice(0, 8))}</span>
+              </div>
+              <div class="subtle">${escapeHtml(item.author_name || "")} · ${escapeHtml(formatDateTime(item.authored_at || ""))}</div>
+              <div class="row actions">
+                ${item.revertible
+                  ? `<button type="button" data-action="revert-commit" data-commit-sha="${escapeHtml(item.sha || "")}">${escapeHtml(UI.version_revert || "Revert")}</button>`
+                  : ""}
+              </div>
+            </div>
+          `).join("")
+        : `<div class="empty">${escapeHtml(UI.version_commits_empty || "")}</div>`;
+    }
+    const pushButton = document.getElementById("version-push-button");
+    if (pushButton) pushButton.disabled = !payload.has_upstream || Boolean(payload.repo_lock);
+  }
+
   async function loadOverview() {
     const overview = await fetchAdmin("/api/admin/overview");
     renderStats(overview);
@@ -1427,6 +1710,14 @@
       return;
     }
     renderReviewDetail(null);
+  }
+
+  async function loadInbox() {
+    renderInbox(await fetchAdmin("/api/admin/inbox"));
+  }
+
+  async function loadVersionControl() {
+    renderVersionStatus(await fetchAdmin("/api/admin/version/status"));
   }
 
   async function loadJobs() {
@@ -1686,7 +1977,7 @@
       body: JSON.stringify({}),
     });
     completeWorkbenchAction("ingest", `${UI.ingest_done}${(job.id || "").slice(0, 8)}`);
-    await refreshCurrentPage();
+    await waitForManagedJob(job.id, "ingest");
   }
 
   async function runTidy(options = {}) {
@@ -1699,7 +1990,7 @@
       body: JSON.stringify(options),
     });
     completeWorkbenchAction("tidy", `${UI.tidy_done}${(job.id || "").slice(0, 8)}`);
-    await refreshCurrentPage();
+    await waitForManagedJob(job.id, "tidy");
   }
 
   async function selectReview(reviewId, options = {}) {
@@ -1741,6 +2032,126 @@
     });
     setAdminMessage(`${UI.review_rejected}${reviewId.slice(0, 8)}`);
     await refreshCurrentPage();
+  }
+
+  async function updateInboxItem(actionPath, version) {
+    await fetchAdmin(`/api/admin/inbox/${actionPath}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version }),
+    });
+    await loadInbox();
+  }
+
+  async function resolveFeedback(itemId, version) {
+    await updateInboxItem(`text/${encodeURIComponent(itemId)}/resolve`, version);
+    setSectionStatus("inbox-status", UI.inbox_resolved || "");
+  }
+
+  async function reopenFeedback(itemId, version) {
+    await updateInboxItem(`text/${encodeURIComponent(itemId)}/reopen`, version);
+    setSectionStatus("inbox-status", UI.inbox_reopened || "");
+  }
+
+  async function markReady(itemId, version) {
+    await updateInboxItem(`document/${encodeURIComponent(itemId)}/mark-ready`, version);
+    setSectionStatus("inbox-status", UI.inbox_marked_ready || "");
+  }
+
+  async function moveToStaged(itemId, version) {
+    await updateInboxItem(`document/${encodeURIComponent(itemId)}/move-to-staged`, version);
+    setSectionStatus("inbox-status", UI.inbox_moved_to_staged || "");
+  }
+
+  async function removeDocument(itemId, version) {
+    await updateInboxItem(`document/${encodeURIComponent(itemId)}/remove`, version);
+    setSectionStatus("inbox-status", UI.inbox_removed || "");
+  }
+
+  function downloadDocument(itemId) {
+    window.location.href = `/api/admin/inbox/document/${encodeURIComponent(itemId)}/download`;
+  }
+
+  async function createIngestBatch() {
+    const selections = Array.from(
+      document.querySelectorAll('#inbox-ready-documents-list input[data-action="select-ready-document"]:checked')
+    ).map((input) => ({
+      id: input.dataset.itemId || "",
+      version: Number(input.dataset.version || 0),
+    })).filter((item) => item.id);
+    if (!selections.length) {
+      throw new Error(UI.inbox_select_ready_required || "Select at least one ready document.");
+    }
+    const payload = await fetchAdmin("/api/admin/inbox/ingest-batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: selections }),
+    });
+    setSectionStatus("inbox-status", UI.inbox_batch_created || "");
+    if (payload.redirect_url) {
+      window.location.href = payload.redirect_url;
+      return;
+    }
+    await loadInbox();
+  }
+
+  async function commitTrackedChanges() {
+    const reason = (document.getElementById("version-commit-reason")?.value || "").trim();
+    const payload = await fetchAdmin("/api/admin/version/commit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    });
+    setSectionStatus("version-status-line", `${UI.version_commit_done || ""}${String(payload.commit_sha || "").slice(0, 8)}`);
+    await loadVersionControl();
+  }
+
+  async function pushTrackedBranch() {
+    const payload = await fetchAdmin("/api/admin/version/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    setSectionStatus("version-status-line", `${UI.version_push_done || ""}${payload.branch || ""}`);
+    await loadVersionControl();
+  }
+
+  async function revertManagedCommit(commitSha) {
+    const payload = await fetchAdmin("/api/admin/version/revert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ commit_sha: commitSha }),
+    });
+    setSectionStatus("version-status-line", `${UI.version_revert_done || ""}${String(payload.revert_commit_sha || "").slice(0, 8)}`);
+    await loadVersionControl();
+    setAdminMessage(`${UI.version_revert_done || ""}${String(payload.revert_commit_sha || "").slice(0, 8)}`);
+  }
+
+  async function autoStartBatchIngestFromQuery() {
+    if (UI.section !== "kb") return;
+    const params = new URLSearchParams(window.location.search);
+    const batchId = String(params.get("ingest_batch") || "").trim();
+    const autostart = String(params.get("autostart") || "").trim() === "1";
+    if (!batchId || !autostart) return;
+    const sessionKey = `sediment-autostart-batch:${batchId}`;
+    if (window.sessionStorage.getItem(sessionKey)) return;
+    window.sessionStorage.setItem(sessionKey, "1");
+    try {
+      const payload = await fetchAdmin("/api/admin/ingest/document", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ingest_batch_id: batchId }),
+      });
+      setWorkbenchStatus("ingest", `${UI.ingest_done || ""}${String(payload.job?.id || "").slice(0, 8)}`);
+      setAdminMessage(`${UI.inbox_batch_redirected || ""}${batchId.slice(0, 8)}`);
+      if (payload.job?.id) {
+        await waitForManagedJob(payload.job.id, "ingest");
+      }
+    } finally {
+      params.delete("autostart");
+      const query = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    }
   }
 
   async function retryJob(jobId) {
@@ -1984,7 +2395,9 @@
     syncFilePickerState?.("admin-ingest-file");
     syncFilePickerState?.("admin-ingest-folder");
     updateIngestSelection();
-    await refreshCurrentPage();
+    if (payload.job?.id) {
+      await waitForManagedJob(payload.job.id, "ingest");
+    }
   }
 
   async function runManualTidy() {
@@ -2064,14 +2477,21 @@
       return;
     }
     if (UI.section === "kb") {
-      await Promise.all([loadSubmissions()]);
       return;
     }
     if (UI.section === "files") {
       await Promise.all([loadFileManager()]);
       return;
     }
-    if (UI.section === "reviews") {
+    if (UI.section === "reviews" || UI.section === "inbox") {
+      await Promise.all([loadInbox()]);
+      return;
+    }
+    if (UI.section === "version_control") {
+      await Promise.all([loadVersionControl()]);
+      return;
+    }
+    if (UI.section === "reviews_legacy") {
       await Promise.all([loadReviews(), loadJobs()]);
       return;
     }
@@ -2090,28 +2510,57 @@
     node.addEventListener("click", (event) => handler(event).catch(createErrorHandler()));
   }
 
-  bindClick("submission-list", async (event) => {
-    const button = event.target.closest("button[data-action]");
-    if (!button) return;
-    if (button.dataset.action === "triage-submission") {
-      await withBusyButton(button, UI.busy_loading, () =>
-        triageSubmission(button.dataset.submissionId || "", button.dataset.status || "triaged")
-      );
-      return;
-    }
-    if (button.dataset.action === "run-ingest") {
-      try {
-        await withBusyButton(button, UI.busy_queue, () => runIngest(button.dataset.submissionId || ""));
-      } catch (error) {
-        showAdminError(error, workbenchErrorOptions("ingest"));
+  ["inbox-open-feedback-list", "inbox-staged-documents-list", "inbox-ready-documents-list", "inbox-history-list"].forEach((containerId) => {
+    bindClick(containerId, async (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const itemId = button.dataset.itemId || "";
+      const version = Number(button.dataset.version || 0);
+      if (button.dataset.action === "resolve-feedback") {
+        await withBusyButton(button, UI.busy_loading, () => resolveFeedback(itemId, version));
+        return;
       }
-    }
+      if (button.dataset.action === "reopen-feedback") {
+        await withBusyButton(button, UI.busy_loading, () => reopenFeedback(itemId, version));
+        return;
+      }
+      if (button.dataset.action === "mark-ready") {
+        await withBusyButton(button, UI.busy_loading, () => markReady(itemId, version));
+        return;
+      }
+      if (button.dataset.action === "move-to-staged") {
+        await withBusyButton(button, UI.busy_loading, () => moveToStaged(itemId, version));
+        return;
+      }
+      if (button.dataset.action === "remove-document") {
+        await withBusyButton(button, UI.busy_loading, () => removeDocument(itemId, version));
+        return;
+      }
+      if (button.dataset.action === "download-document") {
+        downloadDocument(itemId);
+      }
+    });
   });
 
   bindClick("review-list", async (event) => {
     const button = event.target.closest("button[data-action='select-review']");
     if (!button) return;
     await withBusyButton(button, UI.busy_loading, () => selectReview(button.dataset.reviewId || ""));
+  });
+
+  bindClick("version-commits-list", async (event) => {
+    const button = event.target.closest("button[data-action='revert-commit']");
+    if (!button) return;
+    await withBusyButton(button, UI.busy_loading, () => revertManagedCommit(button.dataset.commitSha || ""));
+  });
+
+  bindClick("admin-kb-result", async (event) => {
+    const button = event.target.closest("button[data-action='revert-job-commit']");
+    if (!button) return;
+    await withBusyButton(button, UI.busy_loading, async () => {
+      await revertManagedCommit(button.dataset.commitSha || "");
+      setRuntimeResultStatus(UI.version_revert_done || "");
+    });
   });
 
   bindClick("job-list", async (event) => {
@@ -2198,6 +2647,9 @@
   document.getElementById("create-user-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("create-user-button"), UI.busy_saving, createUser).catch(showAdminError)
   );
+  document.getElementById("inbox-create-batch-button")?.addEventListener("click", () =>
+    withBusyButton(document.getElementById("inbox-create-batch-button"), UI.busy_queue, createIngestBatch).catch(showAdminError)
+  );
   document.getElementById("approve-review-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("approve-review-button"), UI.busy_approve, async () => {
       if (!state.selectedReviewId) throw new Error(UI.review_select_prompt || "Select a review first.");
@@ -2222,6 +2674,12 @@
     withBusyButton(document.getElementById("settings-reload-button"), UI.busy_loading, reloadSettingsFromDisk).catch(
       createErrorHandler({ statusIds: ["settings-status"] })
     )
+  );
+  document.getElementById("version-commit-button")?.addEventListener("click", () =>
+    withBusyButton(document.getElementById("version-commit-button"), UI.busy_saving, commitTrackedChanges).catch(showAdminError)
+  );
+  document.getElementById("version-push-button")?.addEventListener("click", () =>
+    withBusyButton(document.getElementById("version-push-button"), UI.busy_loading, pushTrackedBranch).catch(showAdminError)
   );
   document.getElementById("settings-save-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("settings-save-button"), UI.busy_saving, saveSettingsConfig).catch(
@@ -2362,10 +2820,11 @@
 
   refreshCurrentPage()
     .then(async () => {
+      const restored = await restoreAdminPageState();
+      await autoStartBatchIngestFromQuery();
       updateIngestSelection();
       syncFileEditorState();
       updateEditorPreview(document.getElementById("editor-content")?.value || "");
-      const restored = await restoreAdminPageState();
       if (!restored) {
         setAdminMessage(isZh ? "管理台已就绪。" : "Admin ready.");
       } else {

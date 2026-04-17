@@ -13,13 +13,23 @@ from pathlib import Path
 from typing import Any
 
 from sediment.diagnostics import DiagnosticLogger, bind_log_context
+from sediment.git_ops import (
+    GitOperationError,
+    commit_tracked_changes,
+    ensure_tracked_paths_clean,
+    git_settings_payload,
+    restore_tracked_paths,
+)
 from sediment.kb import inventory
 from sediment.llm_cli import build_cli_command, collect_output
 from sediment.package_data import read_skill_text
 from sediment.platform_services import (
+    apply_operations,
     build_diff,
     content_hash,
     determine_target_path,
+    extract_upload_text,
+    prepare_document_submission,
     stage_workspace_copy,
     validate_target_content,
 )
@@ -146,18 +156,24 @@ class AgentRunner:
             )
 
     def _run_ingest(self, job: dict[str, Any]) -> None:
-        submission = self.store.get_submission(job["source_submission_id"])
-        if submission is None:
+        try:
+            source = self._resolve_ingest_source(job)
+        except (FileNotFoundError, RuntimeError) as exc:
             self.store.update_job(
                 job["id"],
                 status="failed",
                 finished_at=utc_now(),
-                error_message="submission not found",
+                error_message=str(exc),
             )
+            self._restore_job_source(job)
             return
         workspace = stage_workspace_copy(self.kb_path, self.workspaces_dir, job["id"])
         try:
-            with bind_log_context(job_id=job["id"], submission_id=submission["id"]):
+            with bind_log_context(
+                job_id=job["id"],
+                submission_id=job.get("source_submission_id"),
+                batch_id=job.get("source_batch_id"),
+            ):
                 self.store.update_job(
                     job["id"],
                     status="running",
@@ -171,7 +187,7 @@ class AgentRunner:
                     details={"workspace": workspace},
                 )
                 try:
-                    payload = self._run_ingest_agent(job, submission, workspace)
+                    payload = self._run_ingest_agent(job, source, workspace)
                 except Exception as exc:  # noqa: BLE001
                     latest = self.store.get_job(job["id"])
                     if latest and latest["status"] == "cancel_requested":
@@ -186,21 +202,9 @@ class AgentRunner:
                             error_message="job cancelled by admin",
                             workspace_path=None,
                         )
-                        self.store.update_submission(submission["id"], status="triaged")
+                        self._restore_job_source(job)
                         return
-                    LOGGER.error(
-                        "ingest.failed",
-                        "Ingest job failed.",
-                        error=exc,
-                    )
-                    self.store.update_job(
-                        job["id"],
-                        status="failed",
-                        finished_at=utc_now(),
-                        error_message=str(exc),
-                        workspace_path=None,
-                    )
-                    self.store.update_submission(submission["id"], status="triaged")
+                    self._fail_job(job, error_message=str(exc))
                     return
 
                 latest = self.store.get_job(job["id"])
@@ -217,28 +221,10 @@ class AgentRunner:
                         result_payload=payload,
                         workspace_path=None,
                     )
-                    self.store.update_submission(submission["id"], status="triaged")
+                    self._restore_job_source(job)
                     return
 
-                self.store.update_job(
-                    job["id"],
-                    status="awaiting_review",
-                    finished_at=utc_now(),
-                    result_payload=payload,
-                    workspace_path=None,
-                )
-                self.store.update_submission(submission["id"], status="draft_ready")
-                LOGGER.info(
-                    "ingest.awaiting_review",
-                    "Ingest job completed and is awaiting review.",
-                    details={"operation_count": len(payload.get("operations", []))},
-                )
-                if self.store.find_review_by_job(job["id"]) is None:
-                    self.store.create_review(
-                        job_id=job["id"],
-                        submission_id=submission["id"],
-                        review_type="ingest",
-                    )
+                self._apply_payload_and_commit(job, payload, operation="ingest")
         finally:
             self._cleanup_workspace(workspace)
 
@@ -275,18 +261,7 @@ class AgentRunner:
                             workspace_path=None,
                         )
                         return
-                    LOGGER.error(
-                        "tidy.failed",
-                        "Tidy job failed.",
-                        error=exc,
-                    )
-                    self.store.update_job(
-                        job["id"],
-                        status="failed",
-                        finished_at=utc_now(),
-                        error_message=str(exc),
-                        workspace_path=None,
-                    )
+                    self._fail_job(job, error_message=str(exc))
                     return
 
                 latest = self.store.get_job(job["id"])
@@ -305,31 +280,258 @@ class AgentRunner:
                     )
                     return
 
-                self.store.update_job(
-                    job["id"],
-                    status="awaiting_review",
-                    finished_at=utc_now(),
-                    result_payload=payload,
-                    workspace_path=None,
-                )
-                LOGGER.info(
-                    "tidy.awaiting_review",
-                    "Tidy job completed and is awaiting review.",
-                    details={"operation_count": len(payload.get("operations", []))},
-                )
-                if self.store.find_review_by_job(job["id"]) is None:
-                    self.store.create_review(
-                        job_id=job["id"],
-                        submission_id=job.get("source_submission_id"),
-                        review_type="tidy",
-                    )
+                self._apply_payload_and_commit(job, payload, operation="tidy")
         finally:
             self._cleanup_workspace(workspace)
+
+    def _resolve_ingest_source(self, job: dict[str, Any]) -> dict[str, Any]:
+        request_payload = job.get("request_payload") or {}
+        if job.get("source_submission_id"):
+            submission = self.store.get_submission(job["source_submission_id"])
+            if submission is None:
+                raise FileNotFoundError("submission not found")
+            return {
+                "title": submission["title"],
+                "submission_type": submission["submission_type"],
+                "submitter_name": submission["submitter_name"],
+                "mime_type": submission["mime_type"],
+                "extracted_text": submission["extracted_text"],
+                "source_item_ids": [],
+                "batch_id": "",
+            }
+        batch_id = str(job.get("source_batch_id") or request_payload.get("ingest_batch_id") or "").strip()
+        if not batch_id:
+            raise FileNotFoundError("ingest source not found")
+        batch = self.store.get_ingest_batch(batch_id)
+        if batch is None:
+            raise FileNotFoundError("ingest batch not found")
+        items = self.store.list_ingest_batch_items(batch_id)
+        if not items:
+            raise FileNotFoundError("ingest batch does not contain documents")
+        extracted_parts: list[str] = []
+        mime_types: set[str] = set()
+        for item in items:
+            stored_path = Path(str(item.get("stored_file_path") or "")).resolve()
+            mime_type = str(item.get("mime_type") or "").strip()
+            if not stored_path.exists():
+                raise FileNotFoundError(f"missing staged upload: {stored_path}")
+            if mime_type in {"application/zip", "application/x-zip-compressed"}:
+                prepared = prepare_document_submission(
+                    filename=str(item.get("original_filename") or stored_path.name),
+                    mime_type=mime_type,
+                    file_bytes=stored_path.read_bytes(),
+                    uploads=None,
+                    max_upload_bytes=25 * 1024 * 1024,
+                )
+                text = str(prepared.get("extracted_text") or "").strip()
+            else:
+                text = extract_upload_text(stored_path, mime_type).strip()
+            if text:
+                label = item.get("original_filename") or item.get("title") or stored_path.name
+                extracted_parts.append(f"## {label}\n\n{text}")
+            mime_types.add(mime_type)
+        if not extracted_parts:
+            raise RuntimeError("could not extract text from the ready-to-ingest documents")
+        return {
+            "title": batch["title"],
+            "submission_type": "document_batch",
+            "submitter_name": batch["created_by_name"],
+            "mime_type": next(iter(mime_types)) if len(mime_types) == 1 else "application/zip",
+            "extracted_text": "\n\n".join(extracted_parts).strip(),
+            "source_item_ids": [str(item["id"]) for item in items],
+            "batch_id": batch_id,
+        }
+
+    def _apply_payload_and_commit(
+        self,
+        job: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        operation: str,
+    ) -> None:
+        request_payload = job.get("request_payload") or {}
+        settings = load_settings()
+        git = git_settings_payload(settings)
+        actor_name = str(request_payload.get("actor_name") or "").strip() or git["system_author_name"]
+        actor_id = str(request_payload.get("actor_id") or "").strip() or None
+        actor_role = str(request_payload.get("actor_role") or "committer").strip() or "committer"
+        self._claim_repo_lock(
+            owner_name=actor_name,
+            owner_id=actor_id,
+            owner_role=actor_role,
+            operation=operation,
+            target_id=job["id"],
+        )
+        try:
+            ensure_tracked_paths_clean(
+                repo_root=git["repo_root"],
+                tracked_paths=git["tracked_paths"],
+            )
+            apply_result = apply_operations(
+                self.kb_path,
+                payload.get("operations", []),
+                actor_name=actor_name,
+                actor_id=actor_id,
+                actor_role=actor_role,
+                store=self.store,
+            )
+            commit_result = commit_tracked_changes(
+                settings=settings,
+                actor_name=actor_name,
+                actor_id=actor_id,
+                operation=operation,
+                reason=self._build_commit_reason(job, payload, operation=operation),
+                extra_trailers=self._build_commit_trailers(job, operation=operation),
+            )
+        except Exception as exc:
+            try:
+                restore_tracked_paths(
+                    repo_root=git["repo_root"],
+                    tracked_paths=git["tracked_paths"],
+                )
+            except GitOperationError:
+                pass
+            self._fail_job(job, error_message=str(exc), payload=payload)
+            return
+        finally:
+            self.store.release_repo_lock()
+
+        finished_at = utc_now()
+        result_payload = dict(payload)
+        result_payload["apply_result"] = apply_result
+        result_payload["commit_sha"] = commit_result["commit_sha"]
+        self.store.update_job(
+            job["id"],
+            status="succeeded",
+            finished_at=finished_at,
+            result_payload=result_payload,
+            workspace_path=None,
+            commit_sha=commit_result["commit_sha"],
+            committed_at=finished_at,
+            error_message=None,
+        )
+        if job.get("source_batch_id"):
+            self.store.finalize_ingest_batch(
+                batch_id=job["source_batch_id"],
+                job_id=job["id"],
+                commit_sha=commit_result["commit_sha"],
+            )
+        elif job.get("source_submission_id"):
+            self.store.update_submission(job["source_submission_id"], status="accepted")
+        self.store.add_audit_log(
+            actor_name=actor_name,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            action=f"git.commit.{operation}",
+            target_type="job",
+            target_id=job["id"],
+            details={
+                "commit_sha": commit_result["commit_sha"],
+                "source_batch_id": job.get("source_batch_id"),
+                "source_submission_id": job.get("source_submission_id"),
+            },
+        )
+
+    def _claim_repo_lock(
+        self,
+        *,
+        owner_name: str,
+        owner_id: str | None,
+        owner_role: str,
+        operation: str,
+        target_id: str,
+    ) -> dict[str, Any]:
+        deadline = time.time() + 60
+        while True:
+            try:
+                return self.store.claim_repo_lock(
+                    owner_name=owner_name,
+                    owner_id=owner_id,
+                    owner_role=owner_role,
+                    operation=operation,
+                    target_id=target_id,
+                )
+            except RuntimeError:
+                if time.time() >= deadline:
+                    raise RuntimeError("repository is busy")
+                time.sleep(0.25)
+
+    def _restore_job_source(self, job: dict[str, Any]) -> None:
+        if job.get("source_batch_id"):
+            self.store.restore_ingest_batch_to_ready(batch_id=job["source_batch_id"])
+            return
+        if job.get("source_submission_id"):
+            self.store.update_submission(job["source_submission_id"], status="triaged")
+
+    def _fail_job(
+        self,
+        job: dict[str, Any],
+        *,
+        error_message: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        LOGGER.error(
+            f"{job['job_type']}.failed",
+            f"{job['job_type'].capitalize()} job failed.",
+            error=RuntimeError(error_message),
+        )
+        self.store.update_job(
+            job["id"],
+            status="failed",
+            finished_at=utc_now(),
+            error_message=error_message,
+            result_payload=payload,
+            workspace_path=None,
+        )
+        self._restore_job_source(job)
+
+    def _build_commit_reason(
+        self,
+        job: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        operation: str,
+    ) -> str:
+        request_payload = job.get("request_payload") or {}
+        if operation == "ingest":
+            label = job.get("target_entry_name") or "submission"
+            summary = str(payload.get("summary") or "").strip()
+            lines = [f"ingest: {label}"]
+            if summary:
+                lines.extend(["", summary])
+            return "\n".join(lines)
+        scope = str(request_payload.get("scope") or "health_blocking").strip()
+        reason = str(request_payload.get("reason") or payload.get("summary") or "maintenance").strip()
+        summary = str(payload.get("summary") or "").strip()
+        lines = [f"tidy({scope}): {reason}"]
+        if summary:
+            lines.extend(["", summary])
+        return "\n".join(lines)
+
+    def _build_commit_trailers(
+        self,
+        job: dict[str, Any],
+        *,
+        operation: str,
+    ) -> dict[str, str]:
+        trailers = {"Sediment-Job-Id": str(job["id"])}
+        if job.get("source_batch_id"):
+            trailers["Sediment-Batch-Id"] = str(job["source_batch_id"])
+            items = self.store.list_ingest_batch_items(job["source_batch_id"])
+            if items:
+                trailers["Sediment-Source-Item-Ids"] = ",".join(str(item["id"]) for item in items)
+        if job.get("source_submission_id"):
+            trailers["Sediment-Submission-Id"] = str(job["source_submission_id"])
+        if operation == "tidy":
+            request_payload = job.get("request_payload") or {}
+            if request_payload.get("scope"):
+                trailers["Sediment-Tidy-Scope"] = str(request_payload["scope"])
+        return trailers
 
     def _run_ingest_agent(
         self,
         job: dict[str, Any],
-        submission: dict[str, Any],
+        source: dict[str, Any],
         workspace: Path,
     ) -> dict[str, Any]:
         workspace_kb_path = workspace / "knowledge-base"
@@ -345,11 +547,12 @@ class AgentRunner:
                 "## Submission",
                 json.dumps(
                     {
-                        "title": submission["title"],
-                        "submission_type": submission["submission_type"],
-                        "submitter_name": submission["submitter_name"],
-                        "mime_type": submission["mime_type"],
-                        "text": submission["extracted_text"],
+                        "title": source["title"],
+                        "submission_type": source["submission_type"],
+                        "submitter_name": source["submitter_name"],
+                        "mime_type": source["mime_type"],
+                        "text": source["extracted_text"],
+                        "source_item_ids": source.get("source_item_ids", []),
                         "existing_names": existing_names,
                     },
                     ensure_ascii=False,

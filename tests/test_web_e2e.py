@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import time
 from pathlib import Path
@@ -92,8 +93,8 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     submit_page_zh = client.get("/submit", headers={"accept-language": "zh-CN"})
     assert submit_page_zh.status_code == 200
-    assert "文本提交" in submit_page_zh.text
-    assert "Text Submission" not in submit_page_zh.text
+    assert "文本意见" in submit_page_zh.text
+    assert "Text submission" not in submit_page_zh.text
 
     search_page = client.get("/search?q=%E7%83%AD%E5%A4%87%E4%BB%BD", headers={"accept-language": "en-US"})
     assert search_page.status_code == 200
@@ -137,10 +138,11 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     )
     assert created.status_code == 201
     assert created.headers.get("x-request-id")
-    assert created.json()["analysis"]["recommended_type"] == "concept"
+    assert created.json()["status"] == "open"
+    assert created.json()["item"]["item_type"] == "text_feedback"
 
-    submissions = client.get("/api/admin/submissions").json()["submissions"]
-    assert any(item["title"] == "网页提案" for item in submissions)
+    inbox = client.get("/api/admin/inbox").json()
+    assert any(item["title"] == "网页提案" for item in inbox["items"]["open_feedback"])
 
     quartz_page = client.get("/portal/graph-view", headers={"accept-language": "en-US"})
     assert quartz_page.status_code == 200
@@ -230,7 +232,6 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     kb_page = client.get("/admin/kb", headers={"accept-language": "en-US"})
     assert kb_page.status_code == 200
-    assert 'data-testid="admin-submission-list"' in kb_page.text
     assert 'data-testid="admin-ingest-button"' in kb_page.text
     assert 'data-testid="admin-kb-ingest-panel"' in kb_page.text
     assert 'data-testid="admin-kb-tidy-panel"' in kb_page.text
@@ -244,6 +245,18 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert "Choose folder" in kb_page.text
     assert "No files selected" in kb_page.text
     assert "No folder selected" in kb_page.text
+
+    inbox_page = client.get("/admin/inbox", headers={"accept-language": "en-US"})
+    assert inbox_page.status_code == 200
+    assert 'data-testid="admin-inbox-layout"' in inbox_page.text
+    assert 'data-testid="admin-inbox-open-feedback-list"' in inbox_page.text
+    assert 'data-testid="admin-inbox-ready-documents-list"' in inbox_page.text
+
+    version_page = client.get("/admin/version-control", headers={"accept-language": "en-US"})
+    assert version_page.status_code == 200
+    assert 'data-testid="admin-version-control-layout"' in version_page.text
+    assert 'data-testid="admin-version-commit-reason"' in version_page.text
+    assert 'data-testid="admin-version-commits-list"' in version_page.text
 
     files_page = client.get("/admin/files", headers={"accept-language": "en-US"})
     assert files_page.status_code == 200
@@ -269,11 +282,9 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-file-meta-panel"' not in files_page.text
     assert "<title>File management | Test Knowledge Base</title>" in files_page.text
 
-    review_page = client.get("/admin/reviews", headers={"accept-language": "en-US"})
-    assert review_page.status_code == 200
-    assert 'data-testid="admin-review-list"' in review_page.text
-    assert 'data-testid="admin-review-detail-meta"' in review_page.text
-    assert 'data-testid="admin-review-comment"' in review_page.text
+    review_page = client.get("/admin/reviews", headers={"accept-language": "en-US"}, follow_redirects=False)
+    assert review_page.status_code == 307
+    assert review_page.headers["location"].endswith("/admin/inbox?lang=en")
 
     users_page = client.get("/admin/users", headers={"accept-language": "en-US"})
     assert users_page.status_code == 200
@@ -363,41 +374,40 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     owner_create = client.post("/api/admin/users", json={"name": "Spare Owner", "role": "owner"})
     assert owner_create.status_code == 400
 
-    submission = client.post(
-        "/api/portal/submissions/text",
+    uploaded = client.post(
+        "/api/portal/submissions/document",
         json={
-            "title": "管理台提案",
-            "content": "需要进入 ingest 和 review 的网页流转。",
+            "filename": "admin-bundle.md",
+            "mime_type": "text/markdown",
+            "content_base64": base64.b64encode("# Admin Bundle\n\n这是一份管理台导入文档。\n".encode("utf-8")).decode("ascii"),
             "submitter_name": "Alice",
-            "submission_type": "concept",
         },
-    ).json()
+    ).json()["item"]
+    ready = client.post(
+        f"/api/admin/inbox/document/{uploaded['id']}/mark-ready",
+        json={"version": uploaded["version"]},
+    )
+    assert ready.status_code == 200
+    ready_item = ready.json()["item"]
+    batch = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"], "version": ready_item["version"]}]},
+    ).json()["batch"]
 
-    enqueued = client.post(f"/api/admin/submissions/{submission['id']}/run-ingest")
+    enqueued = client.post("/api/admin/ingest/document", json={"ingest_batch_id": batch["id"]})
     assert enqueued.status_code == 202
-    job_id = enqueued.json()["id"]
+    job_id = enqueued.json()["job"]["id"]
 
     assert worker_module.process_queue_until_idle(max_jobs=1) == 1
 
     for _ in range(10):
         job = client.get(f"/api/admin/jobs/{job_id}").json()
-        if job["status"] == "awaiting_review":
+        if job["status"] == "succeeded":
             break
         time.sleep(0.05)
     else:
-        raise AssertionError("job did not reach awaiting_review")
-
-    reviews = client.get("/api/admin/reviews?decision=pending").json()["reviews"]
-    review_id = reviews[0]["id"]
-    review_detail = client.get(f"/api/admin/reviews/{review_id}")
-    assert review_detail.status_code == 200
-    assert review_detail.json()["review"]["id"] == review_id
-
-    approved = client.post(
-        f"/api/admin/reviews/{review_id}/approve",
-        json={"reviewer_name": "Committer"},
-    )
-    assert approved.status_code == 200
+        raise AssertionError("job did not succeed")
+    assert job["commit_sha"]
 
     entry = client.get("/api/admin/entries/%E8%96%84%E5%BC%B1%E6%9D%A1%E7%9B%AE").json()
     updated_content = entry["content"].replace(
@@ -412,6 +422,19 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
         },
     )
     assert saved.status_code == 200
+
+    version_status_before_commit = client.get("/api/admin/version/status").json()
+    assert any(item["path"].endswith("knowledge-base/entries/薄弱条目.md") or item["path"] == "knowledge-base/entries/薄弱条目.md" for item in version_status_before_commit["tracked_changes"])
+
+    committed = client.post(
+        "/api/admin/version/commit",
+        json={"reason": "edit: capture web E2E update\n\nSave the Scope section added from the file manager."},
+    )
+    assert committed.status_code == 201
+    assert committed.json()["commit_sha"]
+
+    version_status_after_commit = client.get("/api/admin/version/status").json()
+    assert version_status_after_commit["tracked_changes"] == []
 
     portal_entry = client.get("/api/portal/entries/%E8%96%84%E5%BC%B1%E6%9D%A1%E7%9B%AE").json()
     assert "适用于网页 E2E 编辑" in portal_entry["content"]

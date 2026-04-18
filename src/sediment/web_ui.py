@@ -4,24 +4,30 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from html import escape
-from urllib.parse import quote
 
-from sediment.package_data import read_asset_text, render_asset_template
+from sediment.package_data import render_asset_template
+from sediment.web_ui_shared import (
+    html_lang,
+    json_script_payload,
+    localized_path,
+    logo_mark_data_uri,
+    logo_mark_svg,
+    logo_svg,
+    normalize_locale,
+    render_shell_template,
+)
 
 
-@lru_cache(maxsize=1)
 def _logo_mark_svg() -> str:
-    return read_asset_text("logo-mark.svg").strip()
+    return logo_mark_svg()
 
 
-@lru_cache(maxsize=1)
 def _logo_svg() -> str:
-    return read_asset_text("logo.svg").strip()
+    return logo_svg()
 
 
-@lru_cache(maxsize=1)
 def _logo_mark_data_uri() -> str:
-    return f"data:image/svg+xml;utf8,{quote(_logo_mark_svg())}"
+    return logo_mark_data_uri()
 
 
 def _logo_inline(class_name: str = "brand-lockup") -> str:
@@ -29,16 +35,15 @@ def _logo_inline(class_name: str = "brand-lockup") -> str:
 
 
 def _normalize_locale(locale: str | None) -> str:
-    return "zh" if str(locale or "").strip().lower().startswith("zh") else "en"
+    return normalize_locale(locale)
 
 
 def _html_lang(locale: str) -> str:
-    return "zh-CN" if _normalize_locale(locale) == "zh" else "en"
+    return html_lang(locale)
 
 
 def _localized_path(path: str, locale: str) -> str:
-    separator = "&" if "?" in path else "?"
-    return f"{path}{separator}lang={_normalize_locale(locale)}"
+    return localized_path(path, locale)
 
 
 def _nav_link(
@@ -81,7 +86,7 @@ def _asset_url(name: str) -> str:
 
 
 def _json_script_payload(payload: object) -> str:
-    return json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
+    return json_script_payload(payload)
 
 
 def _document_title(*parts: str) -> str:
@@ -368,36 +373,24 @@ def shared_shell(
     toggle_aria_label = "切换语言" if active_locale == "zh" else "Switch language"
     theme_dark_label = "切换到暗色" if active_locale == "zh" else "Switch to dark mode"
     theme_light_label = "切换到明亮" if active_locale == "zh" else "Switch to light mode"
-    page_data_tag = ""
-    if page_data is not None:
-        page_data_tag = (
-            '<script id="sediment-page-data" type="application/json">'
-            f"{_json_script_payload(page_data)}"
-            "</script>"
-        )
     page_script_tag = (
         f'<script src="{_asset_url(page_script_name)}"></script>' if page_script_name else ""
     )
-    return _render_html_template(
-        "web-shell.html",
-        HTML_LANG=_html_lang(active_locale),
-        ACTIVE_LOCALE=active_locale,
-        TITLE=title,
-        LOGO_MARK_DATA_URI=_logo_mark_data_uri(),
-        BODY=body,
-        SHELL_DATA=_json_script_payload(
-            {
-                "toggleLabel": toggle_label,
-                "toggleAriaLabel": toggle_aria_label,
-                "themeDarkLabel": theme_dark_label,
-                "themeDarkIcon": "◐",
-                "themeLightLabel": theme_light_label,
-                "themeLightIcon": "☀",
-            }
-        ),
-        PAGE_DATA_TAG=page_data_tag,
-        PAGE_SCRIPT_TAG=page_script_tag,
-        SHELL_VARIANT=shell_variant,
+    return render_shell_template(
+        title,
+        body,
+        locale=active_locale,
+        page_data=page_data,
+        page_script_tag=page_script_tag,
+        shell_variant=shell_variant,
+        shell_data={
+            "toggleLabel": toggle_label,
+            "toggleAriaLabel": toggle_aria_label,
+            "themeDarkLabel": theme_dark_label,
+            "themeDarkIcon": "◐",
+            "themeLightLabel": theme_light_label,
+            "themeLightIcon": "☀",
+        },
     )
 
 
@@ -1188,6 +1181,7 @@ def admin_html(
                 "ingest_selected_prefix": "当前已选择" if is_zh else "Selected",
                 "ingest_selected_suffix": "个文件" if is_zh else "files",
                 "ingest_uploaded": "已创建导入任务：" if is_zh else "Created ingest: ",
+                "ingest_item_prefix": "条目" if is_zh else "item",
                 "ingest_submission_prefix": "提交" if is_zh else "submission",
                 "doc_group_formal": "正式条目" if is_zh else "Formal entries",
                 "doc_group_placeholder": "Placeholders" if not is_zh else "待补全条目",

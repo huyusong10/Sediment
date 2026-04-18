@@ -8,14 +8,18 @@ import threading
 import time
 import urllib.request
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 
+import pytest
 import uvicorn
 from starlette.testclient import TestClient
 
 from sediment import server, worker
 from sediment.git_ops import write_managed_gitignore
 from tests.config_helpers import write_test_config
+
+_TEST_FALLBACK_PORT = 18765
 
 
 def write_fixture_text(path: Path, content: str) -> None:
@@ -187,6 +191,8 @@ def live_server(
     locale: str = "en",
     public_base_url: str | None = None,
 ):
+    if not can_bind_local_port():
+        pytest.skip("Local TCP bind is unavailable in this environment.")
     project_root, kb_path = build_platform_project(tmp_path)
     port = free_port()
     state_dir = tmp_path / "state"
@@ -227,7 +233,7 @@ def live_server(
     monkeypatch.setattr(server_module, "JOB_MAX_ATTEMPTS", 2)
     monkeypatch.setattr(server_module, "SUBMISSION_RATE_LIMIT_COUNT", 3)
     app = server_module.create_starlette_app()
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", ws="none")
     live_app = uvicorn.Server(config)
     live_app.install_signal_handlers = lambda: None
     thread = threading.Thread(target=live_app.run, daemon=True)
@@ -258,9 +264,23 @@ def live_server(
         thread.join(timeout=5)
 
 
+@lru_cache(maxsize=1)
+def can_bind_local_port() -> bool:
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+    except PermissionError:
+        return False
+    return True
+
+
 def free_port() -> int:
     import socket
 
+    if not can_bind_local_port():
+        return _TEST_FALLBACK_PORT
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         return int(sock.getsockname()[1])

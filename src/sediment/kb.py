@@ -48,6 +48,7 @@ INDEX_DEFAULTS = {
     "root_file": "index.root.md",
     "segment_glob": "index*.md",
 }
+_FRONTMATTER_ERROR_KEY = "__sediment_frontmatter_error__"
 
 
 @dataclass(slots=True)
@@ -196,10 +197,20 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     match = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
     if not match:
         return {}, text
-    payload = yaml.safe_load(match.group(1)) or {}
-    if not isinstance(payload, dict):
-        payload = {}
+    try:
+        payload = yaml.safe_load(match.group(1))
+    except yaml.YAMLError:
+        payload = {_FRONTMATTER_ERROR_KEY: "frontmatter is not valid YAML"}
+    else:
+        if payload is None:
+            payload = {}
+        elif not isinstance(payload, dict):
+            payload = {_FRONTMATTER_ERROR_KEY: "frontmatter must be a YAML mapping"}
     return payload, text[match.end() :]
+
+
+def _frontmatter_error(frontmatter: dict[str, Any]) -> str:
+    return str(frontmatter.get(_FRONTMATTER_ERROR_KEY, "")).strip()
 
 
 def normalize_section_name(name: str) -> str:
@@ -412,6 +423,9 @@ def validate_entry(
         frontmatter, _ = split_frontmatter(Path(path).read_text(encoding="utf-8"))
     elif text is not None:
         frontmatter, _ = split_frontmatter(text)
+    frontmatter_error = _frontmatter_error(frontmatter)
+    if frontmatter_error:
+        hard_failures.append(frontmatter_error)
 
     raw_type = str(frontmatter.get("type", "")).strip()
     if raw_type != entry.entry_type:
@@ -934,6 +948,10 @@ def validate_index(path: str | Path) -> dict[str, Any]:
     item = parse_index(path)
     hard_failures = []
     warnings = []
+    frontmatter, _ = split_frontmatter(Path(path).read_text(encoding="utf-8"))
+    frontmatter_error = _frontmatter_error(frontmatter)
+    if frontmatter_error:
+        hard_failures.append(frontmatter_error)
 
     if item.kind != "index":
         hard_failures.append("index frontmatter.kind must be 'index'")
@@ -968,6 +986,8 @@ def validate_index(path: str | Path) -> dict[str, Any]:
 
 def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
+
+
 def _priority_rank(priority: str) -> int:
     return {"high": 0, "medium": 1, "low": 2}.get(priority, 3)
 

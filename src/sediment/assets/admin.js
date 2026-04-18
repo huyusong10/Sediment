@@ -2381,9 +2381,10 @@
         mime_type: files.length === 1 ? (files[0].type || "application/octet-stream") : "application/zip",
       }),
     });
+    const uploadedItem = payload.item || payload.submission || null;
     completeWorkbenchAction(
       "ingest",
-      `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)} · ${UI.ingest_submission_prefix || "submission"} ${(payload.submission?.id || "").slice(0, 8)}`,
+      `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)} · ${UI.ingest_item_prefix || UI.ingest_submission_prefix || "item"} ${(uploadedItem?.id || "").slice(0, 8)}`,
       {
         liveStatus: UI.ingest_uploaded,
         adminMessage: `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)}`,

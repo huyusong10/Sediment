@@ -7,7 +7,7 @@ import pytest
 
 from sediment import cli
 from tests.support.cli_harness import configure_cli_config
-from tests.support.platform_harness import build_platform_project
+from tests.support.platform_harness import build_platform_project, can_bind_local_port
 
 pytestmark = pytest.mark.e2e
 
@@ -22,6 +22,8 @@ def test_cli_disorder_stop_before_start_is_idempotent(tmp_path: Path, capsys) ->
 
 
 def test_cli_disorder_double_start_requires_force(tmp_path: Path, capsys) -> None:
+    if not can_bind_local_port():
+        pytest.skip("Local TCP bind is unavailable in this environment.")
     configure_cli_config(tmp_path)
 
     try:

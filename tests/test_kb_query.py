@@ -685,6 +685,32 @@ def test_validate_entry_rejects_title_only_entries(tmp_path: Path) -> None:
     assert "gap description" in " ".join(placeholder["hard_failures"])
 
 
+def test_validate_entry_reports_malformed_frontmatter_contract(tmp_path: Path) -> None:
+    kb_path = tmp_path / "knowledge-base"
+    _write(
+        kb_path / "entries" / "坏前言.md",
+        """
+        ---
+        - not-a-mapping
+        ---
+        # 坏前言
+
+        这是一条格式错误的条目。
+
+        ## Scope
+        适用于验证 malformed frontmatter 诊断。
+
+        ## Related
+        - [[热备份]] - 参考已有概念
+        """,
+    )
+
+    report = validate_entry(path=kb_path / "entries" / "坏前言.md")
+
+    assert report["valid"] is False
+    assert "frontmatter must be a YAML mapping" in report["hard_failures"]
+
+
 def test_validate_answer_rejects_placeholder_only_sources(tmp_path: Path) -> None:
     kb_path = _build_sample_kb(tmp_path)
     data = inventory(kb_path)
@@ -1003,6 +1029,55 @@ def test_audit_kb_reports_invalid_index_contracts(tmp_path: Path) -> None:
 
     assert report["invalid_index_count"] >= 1
     assert "index.bad" in report["invalid_indexes"]
+
+
+def test_audit_kb_surfaces_malformed_frontmatter_without_crashing(tmp_path: Path) -> None:
+    kb_path = _build_sample_kb(tmp_path)
+    _write(
+        kb_path / "entries" / "坏YAML.md",
+        """
+        ---
+        type: concept
+        status: [fact
+        aliases: []
+        sources:
+          - broken.md
+        ---
+        # 坏YAML
+
+        这条目用于验证 health 不会因为 frontmatter 解析失败而中断。
+
+        ## Scope
+        适用于 malformed frontmatter 诊断。
+
+        ## Related
+        - [[热备份]] - 已有条目
+        """,
+    )
+    _write(
+        kb_path / "indexes" / "index.malformed.md",
+        """
+        ---
+        - wrong
+        ---
+        # 坏索引
+
+        - [[热备份]]
+        """,
+    )
+
+    report = audit_kb(kb_path)
+    entry_validation = next(item for item in report["entry_validation"] if item["name"] == "坏YAML")
+    index_validation = next(item for item in report["index_validation"] if item["name"] == "index.malformed")
+
+    assert report["hard_fail_entry_count"] >= 1
+    assert "坏YAML" in report["hard_fail_entries"]
+    assert any("frontmatter is not valid YAML" in item for item in entry_validation["hard_failures"])
+    assert report["invalid_index_count"] >= 1
+    assert "index.malformed" in report["invalid_indexes"]
+    assert any(
+        "frontmatter must be a YAML mapping" in item for item in index_validation["hard_failures"]
+    )
 
 
 def test_plan_index_repairs_surfaces_index_governance_actions(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib
 import json
 from pathlib import Path
@@ -15,7 +16,7 @@ from sediment.instances import register_instance
 from sediment.platform_store import PlatformStore
 from sediment.settings import current_config_path
 from tests.support.cli_harness import configure_cli_config
-from tests.support.platform_harness import free_port
+from tests.support.platform_harness import can_bind_local_port, free_port
 
 pytestmark = pytest.mark.integration
 
@@ -139,6 +140,434 @@ def test_mcp_status_and_tidy_tools_share_runtime(monkeypatch, tmp_path: Path) ->
     assert tidy_payload["scope"] == "graph"
 
 
+def test_mcp_tidy_request_rejects_invalid_scope_without_creating_job(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_tidy_request",
+                {"scope": "graph-only", "reason": "repair graph", "actor_name": "tester"},
+            )
+        )
+    )
+
+    assert payload["error"] == "unsupported tidy scope: graph-only"
+    assert store.list_jobs() == []
+
+
+def test_mcp_submit_text_rejects_blank_submitter_name_without_creating_item(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_submit_text",
+                {
+                    "title": "匿名提案",
+                    "content": "这条 MCP 文本提交不应匿名入箱。",
+                    "submitter_name": "   ",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "submitter_name must not be empty"
+    assert store.list_inbox_items() == []
+
+
+def test_mcp_submit_document_rejects_blank_submitter_name_without_creating_item(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_submit_document",
+                {
+                    "filename": "incident.txt",
+                    "mime_type": "text/plain",
+                    "content_base64": base64.b64encode("incident\n".encode("utf-8")).decode(
+                        "ascii"
+                    ),
+                    "submitter_name": "   ",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "submitter_name must not be empty"
+    assert store.list_inbox_items() == []
+
+
+def test_mcp_submit_document_rejects_empty_payload_without_creating_item(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_submit_document",
+                {
+                    "filename": "incident.txt",
+                    "mime_type": "text/plain",
+                    "submitter_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "document payload must include content_base64 or files"
+    assert store.list_inbox_items() == []
+
+
+def test_mcp_submit_document_rejects_mixed_payload_without_creating_item(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_submit_document",
+                {
+                    "filename": "incident.txt",
+                    "mime_type": "text/plain",
+                    "content_base64": base64.b64encode("incident\n".encode("utf-8")).decode(
+                        "ascii"
+                    ),
+                    "files": [
+                        {
+                            "filename": "nested.txt",
+                            "content_base64": base64.b64encode("nested\n".encode("utf-8")).decode(
+                                "ascii"
+                            ),
+                        }
+                    ],
+                    "submitter_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "document payload must provide either content_base64 or files, not both"
+    assert store.list_inbox_items() == []
+
+
+def test_mcp_submit_document_rejects_partially_invalid_files_bundle_without_creating_item(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_submit_document",
+                {
+                    "files": [
+                        {
+                            "filename": "valid.txt",
+                            "content_base64": base64.b64encode("valid\n".encode("utf-8")).decode(
+                                "ascii"
+                            ),
+                        },
+                        {
+                            "filename": "broken.txt",
+                            "content_base64": "   ",
+                        },
+                    ],
+                    "submitter_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "files[2].content_base64 must not be empty"
+    assert store.list_inbox_items() == []
+
+
+def test_mcp_submit_document_rejects_file_without_filename_without_creating_item(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_submit_document",
+                {
+                    "files": [
+                        {
+                            "filename": "   ",
+                            "content_base64": base64.b64encode("broken\n".encode("utf-8")).decode(
+                                "ascii"
+                            ),
+                        }
+                    ],
+                    "submitter_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "files[1].filename must not be empty"
+    assert store.list_inbox_items() == []
+
+
+def test_mcp_tidy_request_rejects_blank_actor_name_without_creating_job(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_tidy_request",
+                {"scope": "graph", "reason": "repair graph", "actor_name": "   "},
+            )
+        )
+    )
+
+    assert payload["error"] == "actor_name must not be empty"
+    assert store.list_jobs() == []
+
+
+def test_mcp_tidy_request_defaults_reason_when_omitted(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_tidy_request",
+                {"scope": "graph", "actor_name": "tester"},
+            )
+        )
+    )
+
+    assert payload["job"]["job_type"] == "tidy"
+    assert payload["reason"] == "MCP KB tidy (graph)"
+    assert payload["scope"] == "graph"
+
+
+def test_mcp_tidy_request_rejects_blank_reason_without_creating_job(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_tidy_request",
+                {"scope": "graph", "reason": "   ", "actor_name": "tester"},
+            )
+        )
+    )
+
+    assert payload["error"] == "reason must not be empty"
+    assert store.list_jobs() == []
+
+
+def test_mcp_review_decide_rejects_invalid_decision_without_mutating_review(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+    job = store.create_job(
+        job_type="ingest",
+        target_entry_name="待审条目",
+        status="awaiting_review",
+        max_attempts=2,
+        request_payload={"operations": []},
+    )
+    review = store.create_review(
+        job_id=job["id"],
+        submission_id=None,
+        review_type="formal_entry_patch",
+    )
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_review_decide",
+                {
+                    "review_id": review["id"],
+                    "decision": "ship-it",
+                    "reviewer_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "unsupported review decision: ship-it"
+    assert store.get_review(review["id"])["decision"] == "pending"
+    assert store.get_job(job["id"])["status"] == "awaiting_review"
+
+
+def test_mcp_review_decide_rejects_blank_reviewer_name_without_mutating_review(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+    job = store.create_job(
+        job_type="ingest",
+        target_entry_name="待审条目",
+        status="awaiting_review",
+        max_attempts=2,
+        request_payload={"operations": []},
+    )
+    review = store.create_review(
+        job_id=job["id"],
+        submission_id=None,
+        review_type="formal_entry_patch",
+    )
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_review_decide",
+                {
+                    "review_id": review["id"],
+                    "decision": "approve",
+                    "reviewer_name": "   ",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "reviewer_name must not be empty"
+    assert store.get_review(review["id"])["decision"] == "pending"
+    assert store.get_job(job["id"])["status"] == "awaiting_review"
+
+
+def test_mcp_review_decide_rejects_missing_decision_without_mutating_review(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+    store = server_module._platform_store()
+    job = store.create_job(
+        job_type="ingest",
+        target_entry_name="待审条目",
+        status="awaiting_review",
+        max_attempts=2,
+        request_payload={"operations": []},
+    )
+    review = store.create_review(
+        job_id=job["id"],
+        submission_id=None,
+        review_type="formal_entry_patch",
+    )
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_review_decide",
+                {
+                    "review_id": review["id"],
+                    "reviewer_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "decision must not be empty"
+    assert store.get_review(review["id"])["decision"] == "pending"
+    assert store.get_job(job["id"])["status"] == "awaiting_review"
+
+
+def test_mcp_review_decide_returns_structured_error_for_missing_review(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path)
+    import sediment.server as server_module
+
+    server_module = importlib.reload(server_module)
+
+    payload = json.loads(
+        asyncio.run(
+            server_module._dispatch_tool(
+                "knowledge_review_decide",
+                {
+                    "review_id": "missing-review",
+                    "decision": "approve",
+                    "reviewer_name": "tester",
+                },
+            )
+        )
+    )
+
+    assert payload["error"] == "review not found"
+
+
 def test_server_module_refreshes_runtime_across_config_switches(tmp_path: Path) -> None:
     first_root = tmp_path / "first"
     first_kb = configure_cli_config(first_root, port=8011)
@@ -179,6 +608,8 @@ def test_server_module_refreshes_runtime_from_env_host_port(
 
 
 def test_server_daemon_lifecycle(monkeypatch, tmp_path: Path, capsys) -> None:
+    if not can_bind_local_port():
+        pytest.skip("Local TCP bind is unavailable in this environment.")
     configure_cli_config(tmp_path, port=free_port())
 
     try:
@@ -231,6 +662,39 @@ def test_doctor_command_reports_healthy_backend(tmp_path: Path, capsys) -> None:
     assert any(item["name"] == "paths.registry" for item in payload["checks"])
     assert any(item["name"] == "server.port" for item in payload["checks"])
     assert payload["notes"]
+
+
+def test_doctor_command_uses_passive_port_probe_when_bind_is_blocked(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_cli_config(tmp_path, port=8123)
+
+    class RestrictedSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def setsockopt(self, *_args):
+            return None
+
+        def bind(self, _target):
+            raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(cli.socket, "socket", lambda *_args, **_kwargs: RestrictedSocket())
+    monkeypatch.setattr(cli, "_port_has_local_listener", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(cli, "daemon_status", lambda: {"running": False})
+
+    payload = cli.build_doctor_payload()
+
+    port_check = next(item for item in payload["checks"] if item["name"] == "server.port")
+    assert payload["status"] == "ok"
+    assert port_check["ok"] is True
+    assert port_check["probe"] == "passive"
+    assert "bindability could not be confirmed" in port_check["detail"]
+    assert any("passive local probe" in note for note in payload["notes"])
 
 
 def test_doctor_command_reports_progress_for_humans(tmp_path: Path, capsys) -> None:
@@ -445,6 +909,50 @@ def test_init_command_reports_progress(monkeypatch, tmp_path: Path, capsys) -> N
     assert "- host: 0.0.0.0" in output
     assert "doctor: skipped during init" in output
     assert "run `sediment doctor`" in output
+
+
+def test_init_falls_back_to_default_port_when_probe_is_blocked(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    registry = tmp_path / "registry" / "instances.yaml"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+
+    class RestrictedSocket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def bind(self, _target):
+            raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(cli.socket, "socket", lambda *_args, **_kwargs: RestrictedSocket())
+    monkeypatch.setattr(cli, "_port_has_local_listener", lambda *_args, **_kwargs: False)
+
+    rc = cli.main(
+        [
+            "--registry",
+            str(registry),
+            "init",
+            "--instance-name",
+            "fallback-port",
+            "--knowledge-name",
+            "Fallback Port KB",
+            "--backend",
+            "codex",
+            "--json",
+        ]
+    )
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["port"] == 8000
+    assert any("Local port probing is not permitted" in note for note in payload["notes"])
 
 
 def test_init_scaffold_writes_owner_user_and_token(monkeypatch, tmp_path: Path, capsys) -> None:

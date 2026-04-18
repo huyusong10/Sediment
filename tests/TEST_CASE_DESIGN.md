@@ -34,38 +34,47 @@
 4. 平台诊断日志必须遵守统一 JSONL 结构；`logs show/follow` 要能消费新结构，同时兼容旧前缀日志。
 5. HTTP 动态页面与 API 响应必须返回 `X-Request-ID`，便于把用户侧失败与平台日志关联起来。
 6. 内置 skill 资产必须保持语言中立；`src/sediment/skills/` 中不能回流中文提示词或中文启发式词表，locale 相关词汇必须通过集中式本地化规则提供。
+7. `sediment doctor` 的 `server.port` 检查在受限环境下可以降级为被动本地探测并给出不确定提示；不能因为临时 bind 探针被系统禁止，就把实例整体判成失败。
+8. `audit_kb` / health 发现 malformed YAML frontmatter 时，必须把它转成结构化 hard failure 或 invalid index，而不是让整轮巡检直接崩溃。
+9. MCP 写工具在空 `submitter_name`、空 document 载荷、混合 document 载荷、部分坏掉的 document files 条目、无效 scope、空 actor/reviewer 身份、显式空 reason、缺失必填字段、无效 decision 或不存在 review 下，必须返回结构化 `error`，且不得创建 inbox item、job 或推进 review / job 状态；只有真正省略 reason 时才允许使用默认审计理由。
 
 ### 4.2 前台 Web
 
-6. 首页、搜索页、条目页、提交页都必须保留稳定的 page-level heading 语义；首页允许以 `sr-only` 形式避免重复可见标题。
-7. 搜索建议弹层不能推挤主搜索按钮、统计区和最近更新区。
-8. 前台一级导航与 utility 控件必须视觉分区；`Quartz` 继续作为只读入口存在。
-9. 接入教程必须锁定“MCP 或 Skill”的决策结构，并通过 compact tip 承载补充说明，而不是在首屏平铺长文案。
-10. 教程页必须同时说明 `knowledge_ask` 快答路径与 `knowledge_list` / `knowledge_read` 白盒推导路径。
-11. 默认语言契约为英文优先；显式中文参数或中文环境信号才切换到中文。
-12. Sediment 托管的 `/quartz/` 必须保留 Quartz 图谱运行能力，路由级安全头不能导致图谱脚本失效。
-13. Quartz 构建流程必须在需要时归一化上游图谱运行时的浏览器兼容性默认值，不能把已知会导致常见桌面浏览器空白图谱的默认值直接透传给最终站点。
-14. Quartz 关系图谱必须排除导航型索引页；根索引与分段索引可以继续参与站点导航，但不能作为图谱节点或关系中心污染知识关系视图。
-15. 当当前 Quartz 页面本身是导航型索引页时，局部关系图组件必须隐藏，不能留下空白图谱框作为退化占位。
-16. 新实例默认知识库脚手架必须只生成一个根索引首页；不能再默认创建 `Index Root -> index.core` 这种分段索引占位结构。
+10. 首页、搜索页、条目页、提交页都必须保留稳定的 page-level heading 语义；首页允许以 `sr-only` 形式避免重复可见标题。
+11. 搜索建议弹层不能推挤主搜索按钮、统计区和最近更新区。
+12. 前台一级导航与 utility 控件必须视觉分区；`Quartz` 继续作为只读入口存在。
+13. 接入教程必须锁定“MCP 或 Skill”的决策结构，并通过 compact tip 承载补充说明，而不是在首屏平铺长文案。
+14. 教程页必须同时说明 `knowledge_ask` 快答路径与 `knowledge_list` / `knowledge_read` 白盒推导路径。
+15. 默认语言契约为英文优先；显式中文参数或中文环境信号才切换到中文。
+16. Sediment 托管的 `/quartz/` 必须保留 Quartz 图谱运行能力，路由级安全头不能导致图谱脚本失效。
+17. Quartz 构建流程必须在需要时归一化上游图谱运行时的浏览器兼容性默认值，不能把已知会导致常见桌面浏览器空白图谱的默认值直接透传给最终站点。
+18. Quartz 关系图谱必须排除导航型索引页；根索引与分段索引可以继续参与站点导航，但不能作为图谱节点或关系中心污染知识关系视图。
+19. 当当前 Quartz 页面本身是导航型索引页时，局部关系图组件必须隐藏，不能留下空白图谱框作为退化占位。
+20. 新实例默认知识库脚手架必须只生成一个根索引首页；不能再默认创建 `Index Root -> index.core` 这种分段索引占位结构。
 
 ### 4.3 后台 Web
 
-17. `/admin/overview` 必须稳定呈现总览、治理焦点和最近活动，长列表采用可滚动容器，不无限拉长页面。
-18. `/admin/kb` 只负责 ingest、tidy、explore 三类动作，不承载文件编辑工作区。
-19. `/admin/kb` 桌面端必须维持“左上 ingest、右上 tidy、右下 explore、下方 Live”的工作台结构。
-20. `/admin/kb` 的说明性文案默认折叠进 tip，避免把长说明直接铺进卡片正文。
-21. `/admin/kb` 的 Live 区必须作为共享诊断通道存在；explore 运行时至少暴露请求、运行输出与终态，而不是只显示静态“加载中”。
-22. `/admin/kb` 各分区的状态条必须只反映各自动作；一个分区失败不能覆盖其他分区的状态，跨动作诊断统一进入 Live。
-23. 后台 explore 的成功结果必须来自 Agent 输出；当 Agent 输出无效或 CLI 失败时，公开入口必须返回显式失败，不得回退成固定代码生成的回答卡片。
-24. `/admin/files` 必须独立为一级功能，提供结构浏览、搜索建议、在线编辑与健康联动。
-25. `/admin/system` 必须保持 owner-only，并提供原始配置、解析后配置与重启入口。
-26. 中文后台页面必须直接使用当前 locale，不把通用英文词与中文拼接在同一标题、按钮或主区块里。
+21. `/admin/overview` 必须稳定呈现总览、治理焦点和最近活动，长列表采用可滚动容器，不无限拉长页面。
+22. `/admin/kb` 只负责 ingest、tidy、explore 三类动作，不承载文件编辑工作区。
+23. `/admin/kb` 桌面端必须维持“左上 ingest、右上 tidy、右下 explore、下方 Live”的工作台结构。
+24. `/admin/kb` 的说明性文案默认折叠进 tip，避免把长说明直接铺进卡片正文。
+25. `/admin/kb` 的 Live 区必须作为共享诊断通道存在；explore 运行时至少暴露请求、运行输出与终态，而不是只显示静态“加载中”。
+26. `/admin/kb` 各分区的状态条必须只反映各自动作；一个分区失败不能覆盖其他分区的状态，跨动作诊断统一进入 Live。
+27. 后台 explore 的成功结果必须来自 Agent 输出；当 Agent 输出无效或 CLI 失败时，公开入口必须返回显式失败，不得回退成固定代码生成的回答卡片。
+28. `/admin/files` 必须独立为一级功能，提供结构浏览、搜索建议、在线编辑与健康联动。
+29. `/admin/system` 必须保持 owner-only，并提供原始配置、解析后配置与重启入口。
+30. 中文后台页面必须直接使用当前 locale，不把通用英文词与中文拼接在同一标题、按钮或主区块里。
+31. 接受 JSON body 的 Web 写接口在 malformed 或 non-object 请求体下必须返回 `400`，且不得产生部分写入、误提交或状态推进。
+32. 门户文档上传与后台 direct upload ingest 的 document payload 必须在 `content_base64` 与 `files` 之间二选一；任一坏掉的 `files` 条目都必须让整次请求返回 `400`，且不得创建 inbox item / batch / job。
+33. `/api/admin/ingest/document` 的 direct upload 成功返回体必须以 `item` 表示新建的 `uploaded_document`；若保留 `submission` 字段，也只能作为兼容别名，且两者必须指向同一 inbox item。
+34. 收件箱状态变更接口必须显式要求 `version`；缺失、非整数或过小版本号返回 `400`，真实版本冲突才返回 `409`。
+35. `/api/admin/tidy` 与 `/api/admin/version/commit` 的 `reason` 必须是非空文本；无效 tidy scope 或空 reason 不能入队、也不能抢 repo lock。
+36. `/api/admin/reviews/{id}/approve` 只能接受批准类 decision；错误的 reject/cancel 语义必须返回 `400`，且 review 与 job 状态保持不变。
 
 ### 4.4 乱序与恢复
 
-27. 未登录、错误 token、logout 后继续操作等乱序路径必须稳定失败，并且后续可恢复到正常工作流。
-28. stop-before-start、double-start、空目标批量操作等 CLI 乱序场景必须稳定退出，不破坏实例状态。
+37. 未登录、错误 token、logout 后继续操作等乱序路径必须稳定失败，并且后续可恢复到正常工作流。
+38. stop-before-start、double-start、空目标批量操作等 CLI 乱序场景必须稳定退出，不破坏实例状态。
 
 ## 5. 何时新增或更新测试
 

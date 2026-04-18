@@ -142,7 +142,7 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
 
     | 区域 | 用户输入 | 成功反馈 | 失败反馈 |
     | --- | --- | --- | --- |
-    | Ingest | 文件、文件夹或压缩包 | 创建 submission 并入队 ingest；结果写入消息区与 Live | 在消息区与 Live 中暴露失败原因 |
+    | Ingest | 文件、文件夹或压缩包 | 创建 `uploaded_document` inbox item，并经 ready / batch 入队 ingest；结果写入消息区与 Live | 在消息区与 Live 中暴露失败原因 |
     | Tidy | 单个原因输入 | 以知识库治理 scope 创建 tidy 任务；结果写入消息区与 Live | 在消息区与 Live 中暴露失败原因 |
     | Explore | 问题 / 场景输入 | 成功结果必须来自 Agent 输出，并在结果区展示 | 失败必须显示显式失败态，不能把固定错误包装成回答卡片 |
     | Live | 无额外输入 | 持续追加 ingest / tidy / explore 的请求与运行轨迹 | 保留最后一条失败诊断，便于人工排障 |

@@ -60,6 +60,8 @@ from sediment.auth import (
 )
 from sediment.benchmark_materials import answer_from_materials
 from sediment.control import (
+    TIDY_SCOPE_ALIASES,
+    TIDY_SCOPES,
     admin_overview_payload,
     apply_review_decision,
     build_tidy_request,
@@ -83,7 +85,7 @@ from sediment.git_ops import (
 )
 from sediment.i18n import tr
 from sediment.instances import user_state_root
-from sediment.kb import resolve_kb_document_path
+from sediment.kb import resolve_kb_document_path, split_frontmatter
 from sediment.llm_cli import AgentCliInvocation, build_cli_command, collect_output
 from sediment.package_data import read_asset_text, read_skill_text
 from sediment.platform_services import (
@@ -853,13 +855,13 @@ async def _dispatch_tool(name: str, arguments: dict):
             scope=arguments.get("scope"),
             reason=arguments.get("reason"),
             issue_type=arguments.get("issue_type"),
-            actor_name=arguments.get("actor_name", "mcp"),
+            actor_name=arguments.get("actor_name"),
         )
     if name == "knowledge_review_decide":
         return await _knowledge_review_decide(
-            review_id=arguments.get("review_id", ""),
-            decision=arguments.get("decision", ""),
-            reviewer_name=arguments.get("reviewer_name", ""),
+            review_id=arguments.get("review_id"),
+            decision=arguments.get("decision"),
+            reviewer_name=arguments.get("reviewer_name"),
             comment=arguments.get("comment", ""),
         )
     return f'ERROR: Unknown tool "{name}".'
@@ -897,6 +899,13 @@ async def _knowledge_submit_text(
     submitter_name: str,
     submission_type: str = "text",
 ) -> str:
+    submitter_name, submitter_error = _required_tool_text_or_error(
+        submitter_name,
+        "submitter_name",
+    )
+    if submitter_error is not None:
+        return submitter_error
+    assert submitter_name is not None
     try:
         record = submit_text_request(
             store=_platform_store(),
@@ -925,15 +934,21 @@ async def _knowledge_submit_document(
     submitter_name: str,
     files: list[dict[str, Any]] | None = None,
 ) -> str:
-    try:
-        file_bytes = (
-            base64.b64decode(content_base64, validate=True)
-            if content_base64
-            else b""
-        )
-        decoded_files = _decode_uploaded_files(files or [])
-    except ValueError as exc:
-        return json.dumps({"error": f"invalid base64 payload: {exc}"}, ensure_ascii=False)
+    submitter_name, submitter_error = _required_tool_text_or_error(
+        submitter_name,
+        "submitter_name",
+    )
+    if submitter_error is not None:
+        return submitter_error
+    assert submitter_name is not None
+    file_bytes, decoded_files, payload_error = _document_payload_or_error(
+        content_base64=content_base64,
+        files=files,
+    )
+    if payload_error is not None:
+        return _tool_error_payload(payload_error)
+    assert file_bytes is not None
+    assert decoded_files is not None
     try:
         record = submit_document_request(
             store=_platform_store(),
@@ -1009,13 +1024,23 @@ async def _knowledge_tidy_request(
     scope: str | None = None,
     reason: str | None = None,
     issue_type: str | None = None,
-    actor_name: str = "mcp",
+    actor_name: str | None = None,
 ) -> str:
     target = str(target).strip()
     store = _platform_store()
     issue = None
-    tidy_scope = normalize_tidy_scope(scope)
-    tidy_reason = str(reason or "").strip()
+    tidy_scope, scope_error = _normalized_tidy_scope_or_error(scope)
+    if scope_error is not None:
+        return _tool_error_payload(scope_error)
+    assert tidy_scope is not None
+    actor_name, actor_error = _optional_tool_text_or_default_or_error(
+        actor_name,
+        field_name="actor_name",
+        default="mcp",
+    )
+    if actor_error is not None:
+        return actor_error
+    assert actor_name is not None
     if target:
         issue = resolve_tidy_issue(
             kb_path=KB_PATH,
@@ -1023,9 +1048,17 @@ async def _knowledge_tidy_request(
             issue_type=issue_type,
         )
         tidy_scope = scope_from_issue(issue)
-        tidy_reason = tidy_reason or str(issue.get("summary", "")).strip() or f"tidy {issue['type']}"
+        default_reason = str(issue.get("summary", "")).strip() or f"tidy {issue['type']}"
     else:
-        tidy_reason = tidy_reason or f"MCP KB tidy ({tidy_scope})"
+        default_reason = f"MCP KB tidy ({tidy_scope})"
+    tidy_reason, reason_error = _optional_tool_text_or_default_or_error(
+        reason,
+        field_name="reason",
+        default=default_reason,
+    )
+    if reason_error is not None:
+        return reason_error
+    assert tidy_reason is not None
     job = enqueue_tidy_job(
         store=store,
         kb_path=KB_PATH,
@@ -1045,19 +1078,37 @@ async def _knowledge_tidy_request(
 
 async def _knowledge_review_decide(
     *,
-    review_id: str,
-    decision: str,
-    reviewer_name: str,
+    review_id: str | None,
+    decision: str | None,
+    reviewer_name: str | None,
     comment: str = "",
 ) -> str:
-    result = apply_review_decision(
-        store=_platform_store(),
-        kb_path=KB_PATH,
-        review_id=review_id,
-        decision=decision,
-        reviewer_name=reviewer_name,
-        comment=comment,
+    review_id, review_id_error = _required_tool_text_or_error(review_id, "review_id")
+    if review_id_error is not None:
+        return review_id_error
+    decision, decision_error = _required_tool_text_or_error(decision, "decision")
+    if decision_error is not None:
+        return decision_error
+    reviewer_name, reviewer_error = _required_tool_text_or_error(
+        reviewer_name,
+        "reviewer_name",
     )
+    if reviewer_error is not None:
+        return reviewer_error
+    assert review_id is not None
+    assert decision is not None
+    assert reviewer_name is not None
+    try:
+        result = apply_review_decision(
+            store=_platform_store(),
+            kb_path=KB_PATH,
+            review_id=review_id,
+            decision=decision,
+            reviewer_name=reviewer_name,
+            comment=comment,
+        )
+    except (FileNotFoundError, RuntimeError, ValueError) as exc:
+        return _tool_error_payload(str(exc))
     return json.dumps(result, ensure_ascii=False)
 
 
@@ -3160,7 +3211,7 @@ def _load_explore_skill(project_root: Path) -> tuple[str, dict[str, Any], str]:
         except (FileNotFoundError, ModuleNotFoundError) as exc:
             raise RuntimeError("Explore skill not found in package resources.") from exc
 
-    frontmatter, body = _split_frontmatter(content)
+    frontmatter, body = split_frontmatter(content)
     runtime_contract = dict(DEFAULT_CONTRACT)
     extra_contract = frontmatter.get("runtime_contract") or {}
     if isinstance(extra_contract, dict):
@@ -3172,16 +3223,6 @@ def _load_explore_skill(project_root: Path) -> tuple[str, dict[str, Any], str]:
             }
         )
     return body.strip(), runtime_contract, skill_label
-
-
-def _split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    match = re.match(r"^---\n(.*?)\n---\n?", text, re.DOTALL)
-    if not match:
-        return {}, text
-    frontmatter = yaml.safe_load(match.group(1)) or {}
-    if not isinstance(frontmatter, dict):
-        frontmatter = {}
-    return frontmatter, text[match.end() :]
 
 
 def _build_explore_prompt(
@@ -3735,37 +3776,175 @@ def _redirect(url: str):
     return RedirectResponse(url)
 
 
+class RequestJsonError(RuntimeError):
+    """Raised when an HTTP request body is not a usable JSON object."""
+
+
 async def _request_json_or_empty(request) -> dict[str, Any]:
     try:
         body = await request.body()
-    except Exception:  # noqa: BLE001
-        return {}
+    except Exception as exc:  # noqa: BLE001
+        raise RequestJsonError("request body could not be read") from exc
     if not body:
         return {}
     try:
         payload = json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RequestJsonError("request body must be a valid UTF-8 JSON object") from exc
+    if not isinstance(payload, dict):
+        raise RequestJsonError("request body must be a JSON object")
+    return payload
 
 
-def _decode_uploaded_files(raw_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def _request_json_or_400(request):
+    try:
+        return await _request_json_or_empty(request), None
+    except RequestJsonError as exc:
+        return None, _json_response({"error": str(exc)}, status=400)
+
+
+def _required_body_int(
+    body: dict[str, Any],
+    field_name: str,
+    *,
+    minimum: int = 1,
+) -> tuple[int | None, Any]:
+    raw_value = body.get(field_name)
+    if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+        return None, _json_response({"error": f"{field_name} is required"}, status=400)
+    if isinstance(raw_value, bool):
+        return None, _json_response({"error": f"{field_name} must be an integer"}, status=400)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, _json_response({"error": f"{field_name} must be an integer"}, status=400)
+    if value < minimum:
+        return None, _json_response({"error": f"{field_name} must be >= {minimum}"}, status=400)
+    return value, None
+
+
+def _required_body_text(body: dict[str, Any], field_name: str) -> tuple[str | None, Any]:
+    raw_value = body.get(field_name)
+    if raw_value is None:
+        return None, _json_response({"error": f"{field_name} must not be empty"}, status=400)
+    value = str(raw_value).strip()
+    if not value:
+        return None, _json_response({"error": f"{field_name} must not be empty"}, status=400)
+    return value, None
+
+
+def _normalized_tidy_scope_or_error(raw_value: Any) -> tuple[str | None, str | None]:
+    if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+        return normalize_tidy_scope(None), None
+    raw_scope = str(raw_value).strip().lower()
+    normalized = TIDY_SCOPE_ALIASES.get(raw_scope, raw_scope)
+    if normalized not in TIDY_SCOPES:
+        return None, f"unsupported tidy scope: {raw_value}"
+    return normalized, None
+
+
+def _body_tidy_scope_or_400(body: dict[str, Any]) -> tuple[str | None, Any]:
+    normalized, error = _normalized_tidy_scope_or_error(body.get("scope"))
+    if error is not None:
+        return None, _json_response({"error": error}, status=400)
+    return normalized, None
+
+
+def _tool_error_payload(message: str) -> str:
+    return json.dumps({"error": message}, ensure_ascii=False)
+
+
+def _required_tool_text_or_error(
+    raw_value: Any,
+    field_name: str,
+) -> tuple[str | None, str | None]:
+    if raw_value is None:
+        return None, _tool_error_payload(f"{field_name} must not be empty")
+    value = str(raw_value).strip()
+    if not value:
+        return None, _tool_error_payload(f"{field_name} must not be empty")
+    return value, None
+
+
+def _optional_tool_text_or_default_or_error(
+    raw_value: Any,
+    *,
+    field_name: str,
+    default: str,
+) -> tuple[str | None, str | None]:
+    if raw_value is None:
+        return default, None
+    value = str(raw_value).strip()
+    if not value:
+        return None, _tool_error_payload(f"{field_name} must not be empty")
+    return value, None
+
+
+def _document_payload_or_error(
+    *,
+    content_base64: Any,
+    files: Any,
+) -> tuple[bytes | None, list[dict[str, Any]] | None, str | None]:
+    inline_payload = str(content_base64 or "").strip()
+    if files is not None and not isinstance(files, list):
+        return None, None, "files must be an array"
+    raw_files = files or []
+    if inline_payload and raw_files:
+        return (
+            None,
+            None,
+            "document payload must provide either content_base64 or files, not both",
+        )
+    try:
+        file_bytes = base64.b64decode(inline_payload, validate=True) if inline_payload else b""
+    except ValueError as exc:
+        return None, None, f"invalid base64 payload: {exc}"
+    try:
+        decoded_files = _validated_uploaded_files_or_error(raw_files)
+    except ValueError as exc:
+        return None, None, str(exc)
+    if not inline_payload and not decoded_files:
+        return None, None, "document payload must include content_base64 or files"
+    return file_bytes, decoded_files, None
+
+
+def _validated_uploaded_files_or_error(raw_files: list[dict[str, Any]]) -> list[dict[str, Any]]:
     decoded: list[dict[str, Any]] = []
-    for item in raw_files:
+    for index, item in enumerate(raw_files, start=1):
         if not isinstance(item, dict):
-            continue
+            raise ValueError(f"files[{index}] must be an object")
+        filename = str(item.get("filename", "")).strip()
+        if not filename:
+            raise ValueError(f"files[{index}].filename must not be empty")
         payload = str(item.get("content_base64", "")).strip()
         if not payload:
-            continue
+            raise ValueError(f"files[{index}].content_base64 must not be empty")
+        try:
+            file_bytes = base64.b64decode(payload, validate=True)
+        except ValueError as exc:
+            raise ValueError(f"invalid base64 payload for files[{index}]: {exc}") from exc
         decoded.append(
             {
-                "filename": str(item.get("filename", "")),
+                "filename": filename,
                 "relative_path": str(item.get("relative_path", "")),
                 "mime_type": str(item.get("mime_type", "")),
-                "file_bytes": base64.b64decode(payload, validate=True),
+                "file_bytes": file_bytes,
             }
         )
     return decoded
+
+
+def _approve_decision_or_400(body: dict[str, Any]) -> tuple[str | None, Any]:
+    raw_value = body.get("decision")
+    if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+        return "approve", None
+    decision = str(raw_value).strip()
+    if decision not in {"approve", "approve_formal", "approve_placeholder"}:
+        return None, _json_response(
+            {"error": f"unsupported approval decision: {raw_value}"},
+            status=400,
+        )
+    return decision, None
 
 
 def _forbidden_html(*, locale: str, message: str):
@@ -4137,7 +4316,9 @@ def _quartz_runtime_available() -> bool:
 
 
 async def _api_portal_submit_text(request):
-    body = await request.json()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     user = _current_optional_user(request)
     submitter_name = str(body.get("submitter_name", "")).strip() or str(
         (user or {}).get("name", "")
@@ -4178,18 +4359,22 @@ async def _api_portal_submit_text(request):
 
 
 async def _api_portal_submit_document(request):
-    body = await request.json()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     user = _current_optional_user(request)
     submitter_name = str(body.get("submitter_name", "")).strip() or str(
         (user or {}).get("name", "")
     ).strip()
+    file_bytes, decoded_files, payload_error = _document_payload_or_error(
+        content_base64=body.get("content_base64"),
+        files=body.get("files"),
+    )
+    if payload_error is not None:
+        return _json_response({"error": payload_error}, status=400)
+    assert file_bytes is not None
+    assert decoded_files is not None
     try:
-        file_bytes = (
-            base64.b64decode(str(body.get("content_base64", "")), validate=True)
-            if str(body.get("content_base64", "")).strip()
-            else b""
-        )
-        decoded_files = _decode_uploaded_files(body.get("files") or [])
         record = submit_document_request(
             store=_platform_store(),
             uploads_dir=_platform_paths()["uploads_dir"],
@@ -4360,7 +4545,9 @@ async def _api_admin_session_status(request):
 
 
 async def _api_admin_session_create(request):
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     token = str(body.get("token", ""))
     user = _user_from_token(token) if _admin_auth_required() else _synthetic_local_admin_user()
     if _admin_auth_required() and user is None:
@@ -4460,11 +4647,16 @@ async def _api_admin_inbox_text_resolve(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    version, error = _required_body_int(body, "version")
+    if error is not None:
+        return error
     try:
         item = store.update_inbox_item(
             request.path_params["item_id"],
-            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            expected_version=version,
             status="resolved",
             notes=str(body.get("notes", "")).strip() or None,
         )
@@ -4490,11 +4682,16 @@ async def _api_admin_inbox_text_reopen(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    version, error = _required_body_int(body, "version")
+    if error is not None:
+        return error
     try:
         item = store.update_inbox_item(
             request.path_params["item_id"],
-            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            expected_version=version,
             status="open",
             notes=str(body.get("notes", "")).strip() or None,
         )
@@ -4520,11 +4717,16 @@ async def _api_admin_inbox_document_mark_ready(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    version, error = _required_body_int(body, "version")
+    if error is not None:
+        return error
     try:
         item = store.update_inbox_item(
             request.path_params["item_id"],
-            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            expected_version=version,
             status="ready",
             notes=str(body.get("notes", "")).strip() or None,
         )
@@ -4550,11 +4752,16 @@ async def _api_admin_inbox_document_move_to_staged(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    version, error = _required_body_int(body, "version")
+    if error is not None:
+        return error
     try:
         item = store.update_inbox_item(
             request.path_params["item_id"],
-            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            expected_version=version,
             status="staged",
             ingest_batch_id=None,
             job_id=None,
@@ -4582,11 +4789,16 @@ async def _api_admin_inbox_document_remove(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    version, error = _required_body_int(body, "version")
+    if error is not None:
+        return error
     try:
         item = store.update_inbox_item(
             request.path_params["item_id"],
-            expected_version=int(body.get("version")) if body.get("version") is not None else None,
+            expected_version=version,
             status="removed",
             notes=str(body.get("notes", "")).strip() or None,
         )
@@ -4633,7 +4845,9 @@ async def _api_admin_inbox_create_batch(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     items = body.get("items") if isinstance(body.get("items"), list) else []
     item_versions: dict[str, int] = {}
     for entry in items:
@@ -4642,7 +4856,10 @@ async def _api_admin_inbox_create_batch(request):
         item_id = str(entry.get("id", "")).strip()
         if not item_id:
             continue
-        item_versions[item_id] = int(entry.get("version", 0))
+        version, error = _required_body_int(entry, "version")
+        if error is not None:
+            return error
+        item_versions[item_id] = version
     if not item_versions:
         return _json_response({"error": "at least one ready document is required"}, status=400)
     selected_items = [
@@ -4714,7 +4931,9 @@ async def _api_admin_submission_triage(request):
     actor = _actor_from_request(request)
     store = _platform_store()
     submission_id = request.path_params["submission_id"]
-    body = await request.json()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     status = str(body.get("status", "triaged")).strip()
     if status not in ALLOWED_TRIAGE_STATUSES:
         return _json_response(
@@ -4766,16 +4985,21 @@ async def _api_admin_ingest_document(request):
     if guard:
         return guard
     actor = _actor_from_request(request)
-    body = await _request_json_or_empty(request)
+    actor_name = str(actor.get("name", "")).strip()
+    actor_id = str(actor.get("id", "")).strip() or None
+    actor_role = str(actor.get("role", ""))
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     ingest_batch_id = str(body.get("ingest_batch_id", "")).strip()
     if ingest_batch_id:
         try:
             job = enqueue_ingest_job(
                 store=_platform_store(),
                 ingest_batch_id=ingest_batch_id,
-                actor_name=str(actor.get("name", "")),
-                actor_id=str(actor.get("id", "")) or None,
-                actor_role=str(actor.get("role", "")),
+                actor_name=actor_name,
+                actor_id=actor_id,
+                actor_role=actor_role,
                 max_attempts=JOB_MAX_ATTEMPTS,
             )
         except FileNotFoundError as exc:
@@ -4788,17 +5012,24 @@ async def _api_admin_ingest_document(request):
             {"batch": _platform_store().get_ingest_batch(ingest_batch_id), "job": job},
             status=202,
         )
-    submitter_name = str(body.get("submitter_name", "")).strip() or str(
-        actor.get("name", "")
-    ).strip()
+    submitter_name = str(body.get("submitter_name", "")).strip() or actor_name
+    store = _platform_store()
+    file_bytes, decoded_files, payload_error = _document_payload_or_error(
+        content_base64=body.get("content_base64"),
+        files=body.get("files"),
+    )
+    if payload_error is not None:
+        return _json_response({"error": payload_error}, status=400)
+    assert file_bytes is not None
+    assert decoded_files is not None
+    batch = None
     try:
-        decoded_files = _decode_uploaded_files(body.get("files") or [])
-        submission = submit_document_request(
-            store=_platform_store(),
+        item = submit_document_request(
+            store=store,
             uploads_dir=_platform_paths()["uploads_dir"],
             filename=str(body.get("filename", "")),
             mime_type=str(body.get("mime_type", "")),
-            file_bytes=b"",
+            file_bytes=file_bytes,
             uploads=decoded_files,
             submitter_name=submitter_name,
             submitter_ip=detect_submitter_ip(
@@ -4807,28 +5038,78 @@ async def _api_admin_ingest_document(request):
                 trust_proxy_headers=TRUST_PROXY_HEADERS,
                 trusted_proxy_cidrs=TRUSTED_PROXY_CIDRS,
             ),
-            submitter_user_id=str(actor.get("id", "")).strip() or None,
+            submitter_user_id=actor_id,
             notes="admin ingest upload",
             rate_limit_count=1_000_000,
             rate_limit_window_seconds=1,
             max_upload_bytes=MAX_UPLOAD_BYTES,
             dedupe_window_seconds=SUBMISSION_DEDUPE_WINDOW_SECONDS,
         )
+        ready_item = store.update_inbox_item(
+            item["id"],
+            expected_version=int(item["version"]),
+            status="ready",
+        )
+        if ready_item is None:
+            return _json_response({"error": "inbox item not found"}, status=404)
+        store.add_audit_log(
+            actor_name=actor_name,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            action="inbox.document_mark_ready",
+            target_type="inbox_item",
+            target_id=ready_item["id"],
+            details={"status": "ready", "source": "admin_ingest_upload"},
+        )
+        batch = store.create_ingest_batch(
+            item_versions={str(ready_item["id"]): int(ready_item["version"])},
+            created_by_name=actor_name,
+            created_by_id=actor_id,
+            title=str(ready_item.get("title") or "1 document"),
+        )
+        store.add_audit_log(
+            actor_name=actor_name,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            action="inbox.create_ingest_batch",
+            target_type="ingest_batch",
+            target_id=batch["id"],
+            details={"item_ids": [ready_item["id"]], "source": "admin_ingest_upload"},
+        )
         job = enqueue_ingest_job(
-            store=_platform_store(),
-            submission_id=submission["id"],
-            actor_name=str(actor.get("name", "")),
-            actor_id=str(actor.get("id", "")) or None,
-            actor_role=str(actor.get("role", "")),
+            store=store,
+            ingest_batch_id=batch["id"],
+            actor_name=actor_name,
+            actor_id=actor_id,
+            actor_role=actor_role,
             max_attempts=JOB_MAX_ATTEMPTS,
         )
+        item = store.get_inbox_item(str(item["id"])) or item
     except FileExistsError as exc:
         return _json_response({"error": str(exc)}, status=409)
+    except FileNotFoundError as exc:
+        if batch is not None:
+            store.restore_ingest_batch_to_ready(batch_id=batch["id"])
+        return _json_response({"error": str(exc)}, status=404)
+    except RuntimeError as exc:
+        if batch is not None:
+            store.restore_ingest_batch_to_ready(batch_id=batch["id"])
+        return _json_response({"error": str(exc)}, status=409)
     except (ValueError, binascii.Error) as exc:
+        if batch is not None:
+            store.restore_ingest_batch_to_ready(batch_id=batch["id"])
         return _json_response({"error": str(exc)}, status=400)
     if RUN_JOBS_IN_PROCESS:
         _agent_runner().submit(job["id"])
-    return _json_response({"submission": submission, "job": job}, status=202)
+    return _json_response(
+        {
+            "item": item,
+            "submission": item,
+            "batch": batch,
+            "job": job,
+        },
+        status=202,
+    )
 
 
 async def _api_admin_jobs(request):
@@ -4884,7 +5165,9 @@ async def _api_admin_job_cancel(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     reason = str(body.get("reason", "job cancelled by admin"))
     try:
         job = store.cancel_job(request.path_params["job_id"], reason=reason)
@@ -4912,13 +5195,21 @@ async def _api_admin_tidy(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    scope, error = _body_tidy_scope_or_400(body)
+    if error is not None:
+        return error
+    reason, error = _required_body_text(body, "reason")
+    if error is not None:
+        return error
     issue = body.get("issue") if isinstance(body.get("issue"), dict) else None
     job = enqueue_tidy_job(
         store=store,
         kb_path=KB_PATH,
-        scope=normalize_tidy_scope(body.get("scope")),
-        reason=str(body.get("reason", "")).strip(),
+        scope=scope,
+        reason=reason,
         issue=issue,
         actor_name=str(actor.get("name", "")),
         actor_id=str(actor.get("id", "")) or None,
@@ -4954,13 +5245,18 @@ async def _api_admin_review_approve(request):
     if guard:
         return guard
     actor = _actor_from_request(request)
-    body = await request.json()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    decision, error = _approve_decision_or_400(body)
+    if error is not None:
+        return error
     try:
         payload = apply_review_decision(
             store=_platform_store(),
             kb_path=KB_PATH,
             review_id=request.path_params["review_id"],
-            decision=str(body.get("decision", "approve")),
+            decision=decision,
             reviewer_name=str(actor.get("name", "")),
             reviewer_id=str(actor.get("id", "")) or None,
             reviewer_role=str(actor.get("role", "")),
@@ -4978,7 +5274,9 @@ async def _api_admin_review_reject(request):
     if guard:
         return guard
     actor = _actor_from_request(request)
-    body = await request.json()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     try:
         payload = apply_review_decision(
             store=_platform_store(),
@@ -5012,8 +5310,12 @@ async def _api_admin_version_commit(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
-    reason = str(body.get("reason", "")).strip()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    reason, error = _required_body_text(body, "reason")
+    if error is not None:
+        return error
     try:
         store.claim_repo_lock(
             owner_name=str(actor.get("name", "")),
@@ -5088,7 +5390,9 @@ async def _api_admin_version_revert(request):
         return guard
     actor = _actor_from_request(request)
     store = _platform_store()
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     commit_sha = str(body.get("commit_sha", "")).strip()
     if not commit_sha:
         return _json_response({"error": "commit_sha is required"}, status=400)
@@ -5164,7 +5468,9 @@ async def _api_admin_settings_save(request):
     if guard:
         return guard
     actor = _actor_from_request(request)
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     raw_text = str(body.get("raw_text", "")).strip()
     if not raw_text:
         return _json_response({"error": "raw_text must not be empty"}, status=400)
@@ -5252,7 +5558,9 @@ async def _api_admin_entry_save(request):
     if guard:
         return guard
     actor = _actor_from_request(request)
-    body = await request.json()
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     store = _platform_store()
     try:
         payload = save_entry(
@@ -5298,7 +5606,9 @@ async def _api_admin_explore(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     question = str(body.get("question", "")).strip()
     if not question:
         return _json_response({"error": "question must not be empty"}, status=400)
@@ -5314,7 +5624,9 @@ async def _api_admin_explore_live(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     question = str(body.get("question", "")).strip()
     if not question:
         return _json_response({"error": "question must not be empty"}, status=400)
@@ -5404,7 +5716,9 @@ async def _api_admin_users_create(request):
     if guard:
         return guard
     actor = _actor_from_request(request)
-    body = await _request_json_or_empty(request)
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
     name = str(body.get("name", "")).strip()
     role = str(body.get("role", "committer")).strip() or "committer"
     if not name:

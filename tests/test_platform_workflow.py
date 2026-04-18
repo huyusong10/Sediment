@@ -108,6 +108,26 @@ def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> N
     assert limited.status_code == 429
 
 
+def test_portal_text_submission_rejects_malformed_json_body(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    response = client.post(
+        "/api/portal/submissions/text",
+        content="{",
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "request body must be a valid UTF-8 JSON object"
+    inbox = client.get("/api/admin/inbox").json()["items"]
+    assert all(not items for items in inbox.values())
+
+
 def test_ingest_batch_auto_commits_and_updates_inbox_history(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     state_dir = tmp_path / "state"
@@ -185,6 +205,134 @@ def test_portal_document_archive_submission(tmp_path: Path, monkeypatch) -> None
     assert payload["item"]["mime_type"] == "application/zip"
     assert payload["item"]["title"] == "bundle"
     assert Path(payload["item"]["stored_file_path"]).exists()
+
+
+def test_portal_document_submission_rejects_mixed_payload_without_creating_item(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    response = client.post(
+        "/api/portal/submissions/document",
+        json={
+            "filename": "bundle.txt",
+            "mime_type": "text/plain",
+            "content_base64": base64.b64encode("inline\n".encode("utf-8")).decode("ascii"),
+            "files": [
+                {
+                    "filename": "nested.txt",
+                    "content_base64": base64.b64encode("nested\n".encode("utf-8")).decode(
+                        "ascii"
+                    ),
+                }
+            ],
+            "submitter_name": "Alice",
+        },
+    )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["error"]
+        == "document payload must provide either content_base64 or files, not both"
+    )
+    inbox = client.get("/api/admin/inbox").json()["items"]
+    assert all(not items for items in inbox.values())
+
+
+def test_admin_direct_ingest_upload_enqueues_job_from_uploaded_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, _server_module, worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+    )
+
+    response = client.post(
+        "/api/admin/ingest/document",
+        json={
+            "filename": "admin-upload-bundle.zip",
+            "mime_type": "application/zip",
+            "files": [
+                {
+                    "filename": "admin-upload.md",
+                    "content_base64": base64.b64encode(
+                        "# Admin Upload\n\n这是一份后台直接导入文档。\n".encode("utf-8")
+                    ).decode("ascii"),
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["item"]["item_type"] == "uploaded_document"
+    assert payload["item"]["status"] == "ingesting"
+    assert payload["submission"]["id"] == payload["item"]["id"]
+    assert payload["batch"]["id"] == payload["job"]["source_batch_id"]
+
+    processed = worker_module.process_queue_until_idle(max_jobs=1)
+    assert processed == 1
+
+    job_id = payload["job"]["id"]
+    for _ in range(10):
+        job = client.get(f"/api/admin/jobs/{job_id}").json()
+        if job["status"] == "succeeded":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"admin direct upload job did not succeed: {job}")
+
+    inbox = client.get("/api/admin/inbox").json()["items"]["history_documents"]
+    history_item = next(item for item in inbox if item["id"] == payload["item"]["id"])
+    assert history_item["status"] == "ingested"
+    assert history_item["job_id"] == job_id
+
+
+def test_admin_direct_ingest_upload_rejects_partially_invalid_bundle_without_side_effects(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+    )
+
+    response = client.post(
+        "/api/admin/ingest/document",
+        json={
+            "files": [
+                {
+                    "filename": "valid.md",
+                    "content_base64": base64.b64encode("# Valid\n\nok\n".encode("utf-8")).decode(
+                        "ascii"
+                    ),
+                },
+                {
+                    "filename": "broken.md",
+                    "content_base64": "   ",
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "files[2].content_base64 must not be empty"
+    assert client.get("/api/admin/jobs").json()["jobs"] == []
+    inbox = client.get("/api/admin/inbox").json()["items"]
+    assert all(not items for items in inbox.values())
 
 
 def test_ingest_batch_auto_commits_with_symlinked_kb_path(tmp_path: Path, monkeypatch) -> None:
@@ -483,6 +631,99 @@ def test_job_cancel_retry_and_stale_recovery(tmp_path: Path, monkeypatch) -> Non
     assert recovered_job["status"] == "queued"
 
 
+def test_admin_tidy_rejects_empty_reason_and_unknown_scope_without_enqueuing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    empty_reason = client.post(
+        "/api/admin/tidy",
+        json={"scope": "graph", "reason": "   "},
+    )
+    assert empty_reason.status_code == 400
+    assert empty_reason.json()["error"] == "reason must not be empty"
+
+    invalid_scope = client.post(
+        "/api/admin/tidy",
+        json={"scope": "graph-only", "reason": "Repair graph issues."},
+    )
+    assert invalid_scope.status_code == 400
+    assert invalid_scope.json()["error"] == "unsupported tidy scope: graph-only"
+    assert client.get("/api/admin/jobs").json()["jobs"] == []
+
+
+def test_admin_version_commit_rejects_empty_reason_before_claiming_repo_lock(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    store = server_module._platform_store()
+
+    def fail_claim_repo_lock(**_kwargs):
+        raise AssertionError("repo lock should not be claimed for an empty reason")
+
+    monkeypatch.setattr(store, "claim_repo_lock", fail_claim_repo_lock)
+
+    response = client.post(
+        "/api/admin/version/commit",
+        json={"reason": "   "},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "reason must not be empty"
+
+
+def test_admin_review_approve_rejects_non_approval_decision_without_mutating_review(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+    )
+
+    store = PlatformStore(state_dir / "platform.db")
+    store.init()
+    job = store.create_job(
+        job_type="ingest",
+        target_entry_name="待审条目",
+        status="awaiting_review",
+        max_attempts=2,
+        request_payload={"operations": []},
+    )
+    review = store.create_review(
+        job_id=job["id"],
+        submission_id=None,
+        review_type="formal_entry_patch",
+    )
+
+    response = client.post(
+        f"/api/admin/reviews/{review['id']}/approve",
+        json={"decision": "reject", "comment": "This should not pass through approve."},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "unsupported approval decision: reject"
+
+    current_review = store.get_review(review["id"])
+    current_job = store.get_job(job["id"])
+    assert current_review is not None and current_review["decision"] == "pending"
+    assert current_job is not None and current_job["status"] == "awaiting_review"
+
+
 def test_apply_operations_handles_symlinked_kb_root(tmp_path: Path) -> None:
     real_root = tmp_path / "real-kb"
     real_root.mkdir()
@@ -670,6 +911,143 @@ def test_inbox_document_state_conflict_returns_409(tmp_path: Path, monkeypatch) 
     assert second.status_code == 409
 
 
+def test_inbox_document_mark_ready_rejects_malformed_json_without_mutating_state(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    staged_item = _upload_document_to_inbox(client)
+    invalid = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        content="{",
+        headers={"content-type": "application/json"},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["error"] == "request body must be a valid UTF-8 JSON object"
+
+    ready = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
+    )
+    assert ready.status_code == 200
+    assert ready.json()["item"]["status"] == "ready"
+
+
+def test_inbox_document_mark_ready_requires_valid_version(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    staged_item = _upload_document_to_inbox(client)
+
+    missing = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={},
+    )
+    assert missing.status_code == 400
+    assert missing.json()["error"] == "version is required"
+
+    invalid = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": "abc"},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["error"] == "version must be an integer"
+
+    too_small = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": 0},
+    )
+    assert too_small.status_code == 400
+    assert too_small.json()["error"] == "version must be >= 1"
+
+    ready = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
+    )
+    assert ready.status_code == 200
+
+
+def test_feedback_resolve_requires_version_and_preserves_open_state(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    feedback = client.post(
+        "/api/portal/submissions/text",
+        json={
+            "title": "需要人工处理",
+            "content": "请先验证并发保护。",
+            "submitter_name": "Alice",
+        },
+    ).json()["item"]
+
+    response = client.post(
+        f"/api/admin/inbox/text/{feedback['id']}/resolve",
+        json={"version": "abc"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "version must be an integer"
+
+    inbox = client.get("/api/admin/inbox").json()["items"]
+    assert any(item["id"] == feedback["id"] for item in inbox["open_feedback"])
+    assert all(item["id"] != feedback["id"] for item in inbox["resolved_feedback"])
+
+
+def test_ingest_batch_creation_requires_item_versions(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    staged_item = _upload_document_to_inbox(client)
+    ready = client.post(
+        f"/api/admin/inbox/document/{staged_item['id']}/mark-ready",
+        json={"version": staged_item["version"]},
+    )
+    assert ready.status_code == 200
+    ready_item = ready.json()["item"]
+
+    missing = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"]}]},
+    )
+    assert missing.status_code == 400
+    assert missing.json()["error"] == "version is required"
+
+    invalid = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"], "version": "abc"}]},
+    )
+    assert invalid.status_code == 400
+    assert invalid.json()["error"] == "version must be an integer"
+
+    created = client.post(
+        "/api/admin/inbox/ingest-batches",
+        json={"items": [{"id": ready_item["id"], "version": ready_item["version"]}]},
+    )
+    assert created.status_code == 201
+
+
 def test_duplicate_ingest_batch_creation_returns_conflict(tmp_path: Path, monkeypatch) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
     client, _server_module, _worker_module = configure_server(
@@ -717,6 +1095,26 @@ def test_admin_save_missing_entry_returns_404(tmp_path: Path, monkeypatch) -> No
         },
     )
     assert response.status_code == 404
+
+
+def test_admin_save_entry_rejects_non_object_json_body(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    entry = client.get("/api/admin/entries/%E7%83%AD%E5%A4%87%E4%BB%BD").json()
+    response = client.put(
+        "/api/admin/entries/%E7%83%AD%E5%A4%87%E4%BB%BD",
+        content="[]",
+        headers={"content-type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "request body must be a JSON object"
+    assert client.get("/api/admin/entries/%E7%83%AD%E5%A4%87%E4%BB%BD").json()["content"] == entry["content"]
 
 
 def test_apply_operations_rolls_back_on_failure(tmp_path: Path, monkeypatch) -> None:

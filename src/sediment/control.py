@@ -18,17 +18,17 @@ from sediment.platform_store import PlatformStore
 LOGGER = DiagnosticLogger("control")
 
 TIDY_SCOPES = {"full", "graph", "indexes", "health_blocking"}
+TIDY_SCOPE_ALIASES = {
+    "health-blocking": "health_blocking",
+    "health": "health_blocking",
+    "blocking": "health_blocking",
+    "index": "indexes",
+}
 
 
 def normalize_tidy_scope(value: str | None) -> str:
     scope = str(value or "health_blocking").strip().lower()
-    aliases = {
-        "health-blocking": "health_blocking",
-        "health": "health_blocking",
-        "blocking": "health_blocking",
-        "index": "indexes",
-    }
-    normalized = aliases.get(scope, scope)
+    normalized = TIDY_SCOPE_ALIASES.get(scope, scope)
     return normalized if normalized in TIDY_SCOPES else "health_blocking"
 
 

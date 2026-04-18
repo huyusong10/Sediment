@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import importlib
 import ipaddress
 import json
@@ -90,6 +91,7 @@ from sediment.runtime import (
 )
 from sediment.settings import (
     CONFIG_RELATIVE_PATH,
+    DEFAULT_CONFIG,
     current_config_path,
     discover_local_config_path,
     load_settings,
@@ -99,6 +101,7 @@ from sediment.settings import (
 )
 
 _LOCAL_HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_DEFAULT_SERVER_PORT = int(DEFAULT_CONFIG["server"]["port"])
 
 
 def _urlopen_local(url: str, *, timeout: float):
@@ -580,10 +583,76 @@ def _slugify_instance_name(value: str) -> str:
     return slug or "sediment-instance"
 
 
-def _pick_free_port() -> int:
+def _port_probe_restricted(exc: OSError) -> bool:
+    return isinstance(exc, PermissionError) or getattr(exc, "errno", None) in {
+        errno.EACCES,
+        errno.EPERM,
+        getattr(errno, "ENOTCAPABLE", errno.EPERM),
+    }
+
+
+def _socket_probe_target(bind_host: str, bind_port: int) -> tuple[int, tuple[Any, ...]]:
+    host_value = str(bind_host).strip().strip("[]") or "127.0.0.1"
+    if ":" in host_value and "." not in host_value:
+        return socket.AF_INET6, (host_value, bind_port, 0, 0)
+    return socket.AF_INET, (host_value, bind_port)
+
+
+def _local_probe_hosts(bind_host: str) -> list[str]:
+    host_value = str(bind_host).strip()
+    normalized_host = host_value.strip("[]")
+    candidates: list[str] = []
+    if host_value in {"0.0.0.0", "::", "[::]"}:
+        candidates.extend(["127.0.0.1", "::1"])
+    else:
+        if normalized_host:
+            candidates.append(normalized_host)
+        candidates.extend(["127.0.0.1", "::1"])
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for candidate in candidates:
+        key = candidate.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(candidate)
+    return ordered
+
+
+def _port_has_local_listener(bind_host: str, bind_port: int) -> bool | None:
+    observed_refusal = False
+    for candidate in _local_probe_hosts(bind_host):
+        try:
+            family, target = _socket_probe_target(candidate, bind_port)
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                probe.settimeout(0.2)
+                result = probe.connect_ex(target)
+        except OSError:
+            continue
+        if result == 0:
+            return True
+        observed_refusal = True
+    return False if observed_refusal else None
+
+
+def _pick_free_port() -> tuple[int, str | None]:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+        try:
+            sock.bind(("127.0.0.1", 0))
+        except OSError as exc:
+            if not _port_probe_restricted(exc):
+                raise
+            fallback_port = _DEFAULT_SERVER_PORT
+            while fallback_port < _DEFAULT_SERVER_PORT + 20:
+                if _port_has_local_listener("127.0.0.1", fallback_port) is not True:
+                    break
+                fallback_port += 1
+            return (
+                fallback_port,
+                "Local port probing is not permitted in this environment; "
+                f"using fallback port {fallback_port} without a temporary bind reservation.",
+            )
+        return int(sock.getsockname()[1]), None
 
 
 def _should_run_init_wizard(args) -> bool:
@@ -1809,16 +1878,7 @@ def build_doctor_payload(
         )
     else:
         try:
-            family = (
-                socket.AF_INET6
-                if ":" in bind_host and "." not in bind_host
-                else socket.AF_INET
-            )
-            bind_target: tuple[Any, ...]
-            if family == socket.AF_INET6:
-                bind_target = (bind_host, bind_port, 0, 0)
-            else:
-                bind_target = (bind_host, bind_port)
+            family, bind_target = _socket_probe_target(bind_host, bind_port)
             with socket.socket(family, socket.SOCK_STREAM) as probe:
                 probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 probe.bind(bind_target)
@@ -1831,14 +1891,50 @@ def build_doctor_payload(
                 port=bind_port,
             )
         except OSError as exc:
-            record(
-                "server.port",
-                False,
-                f"Port {bind_port} is not available on host {bind_host}: {exc}",
-                severity="error",
-                host=bind_host,
-                port=bind_port,
-            )
+            if _port_probe_restricted(exc):
+                listener_detected = _port_has_local_listener(bind_host, bind_port)
+                if listener_detected is True:
+                    record(
+                        "server.port",
+                        False,
+                        "Active bind probing is not permitted in this environment, "
+                        f"and port {bind_port} already responds to a local connection probe.",
+                        severity="error",
+                        host=bind_host,
+                        port=bind_port,
+                        probe="passive",
+                    )
+                else:
+                    detail = (
+                        "Active bind probing is not permitted in this environment. "
+                        f"No current listener was detected for port {bind_port}, "
+                        "but bindability could not be confirmed."
+                        if listener_detected is False
+                        else "Active bind probing is not permitted in this environment, "
+                        f"so Sediment could not confirm whether port {bind_port} is bindable."
+                    )
+                    record(
+                        "server.port",
+                        True,
+                        detail,
+                        severity="warning",
+                        host=bind_host,
+                        port=bind_port,
+                        probe="passive",
+                    )
+                    notes.append(
+                        "Server port check used a passive local probe because the "
+                        "environment does not permit opening a temporary listener socket."
+                    )
+            else:
+                record(
+                    "server.port",
+                    False,
+                    f"Port {bind_port} is not available on host {bind_host}: {exc}",
+                    severity="error",
+                    host=bind_host,
+                    port=bind_port,
+                )
 
     backend = settings["agent"]["backend"]
     progress(f"Resolving agent backend executable for {backend}.")
@@ -2069,7 +2165,13 @@ def init_command(args) -> int:
             enabled=enabled,
         )
     host_value = args.host or "127.0.0.1"
-    port_value = args.port or _pick_free_port()
+    port_note: str | None = None
+    if args.port:
+        port_value = args.port
+    else:
+        port_value, port_note = _pick_free_port()
+        if port_note:
+            cli_progress(port_note, enabled=enabled)
     kb_relative_path = "knowledge-base"
     if _looks_like_kb_root(target_root):
         kb_relative_path = "."
@@ -2156,6 +2258,7 @@ def init_command(args) -> int:
         "registry_path": str(instance_registry_path()),
         "owner_user_id": "owner",
         "owner_token": scaffold["auth"]["admin_token"],
+        "notes": [port_note] if port_note else [],
     }
 
     if args.json:
@@ -2174,6 +2277,8 @@ def init_command(args) -> int:
     print(f"- registry: {instance_registry_path()}")
     print("- owner_user_id: owner")
     print(f"- owner_token: {scaffold['auth']['admin_token']}")
+    if port_note:
+        print(f"- note: {port_note}")
     print("- doctor: skipped during init")
     print(
         "Tip: if the agent backend, permissions, or port look suspicious, run "

@@ -146,6 +146,9 @@ flowchart LR
 
 当前实现中，Agent Runner 通过统一 CLI 适配层调度不同 backend，并由
 `sediment doctor` 在上线前检查配置、可执行文件、帮助命令和最小探针调用。
+当运行环境不允许 CLI 临时打开本地监听 socket 时，`sediment doctor`
+对 `server.port` 的检查应降级为被动本地探测并明确标注“不确定”，而不是把
+探测器自身的权限限制误判成实例配置失败。
 
 ### 3.7 Search / Graph Projection
 
@@ -281,6 +284,8 @@ Agent Runner 不应直接在主工作区上修改文件。
 额外约束：
 
 - `sediment init` 生成初始 owner user/token 并写入配置
+- 当运行环境不允许 CLI 申请临时随机端口时，`sediment init` 仍应完成脚手架生成，
+  回退到默认端口并向用户明确说明该端口尚未经过主动 bind 验证
 - `sediment server start|run` 不再生成启动期临时 admin token
 - `sediment kb tidy` 采用 KB-level `scope/reason` 语义，而不是单条目 target 语义
 

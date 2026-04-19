@@ -1,0 +1,17 @@
+{
+  "name": "sediment-graph-assets",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "3d-force-graph": "^1.79.0",
+    "three": "^0.176.0",
+    "three-spritetext": "^1.9.7"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.3"
+  }
+}

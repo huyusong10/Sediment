@@ -96,6 +96,7 @@ MCP 治理工具写入契约：
 - `GET /api/portal/search/suggest?q=...`
 - `GET /api/portal/entries/{name}`
 - `GET /api/portal/graph`
+- `GET /api/portal/graph?focus=...`
 - `POST /api/portal/submissions/text`
 - `POST /api/portal/submissions/document`
 
@@ -125,6 +126,10 @@ MCP 治理工具写入契约：
 - `GET /api/admin/audit`
 - `GET /api/admin/health/summary`
 - `GET /api/admin/health/issues`
+- `GET /api/admin/graph`
+- `GET /api/admin/insights`
+- `GET /api/admin/insights/{id}`
+- `POST /api/admin/insights/{id}/review`
 - `GET /api/admin/inbox`
 - `POST /api/admin/inbox/text/{id}/resolve`
 - `POST /api/admin/inbox/text/{id}/reopen`
@@ -149,6 +154,18 @@ MCP 治理工具写入契约：
 - `PUT /api/admin/entries/{name}`
 - `GET /api/admin/quartz/status`
 - `POST /api/admin/quartz/build`
+
+补充契约：
+
+- `/api/portal/graph` 与 `/api/admin/graph` 共用统一 payload，至少包含 `graph_version`、`graph_kind`、`kb_language`、`stats`、`nodes`、`edges`
+- graph payload 必须以事件驱动局部投影为默认语义，并额外提供 `scene_mode`、`focus_seed`、`story_caption`、`ambient_seed`、`playback_events`
+- `nodes` / `edges` 顶层 shape 保持稳定，便于图前端独立演进
+- node 至少补充 `visual_role`、`energy`、`stability`、`entry_target`、`event_type`、`burst_level`、`formation_stage`、`recentness`
+- edge 至少补充 `activation`、`formation_role` 与 `pulse_level`
+- `POST /api/admin/insights/{id}/review` 只接受 `observe / promote / merge / reject`
+- insight review 不直接改文件；服务端只创建受管 `insight_review` job，由 Agent Runner 在隔离工作区执行并提交
+- `insight_review` 的 Git 提交必须只覆盖该次 payload 命中的路径，不能顺手提交整个 `knowledge-base/`
+- `knowledge-base/insights/` 中允许同时存在多个待审 proposal 脏文件；review 当前 proposal 时，只忽略 `insights/` 层的既有脏状态，canonical / indexes / placeholders 的脏状态仍然必须阻塞提交
 
 后台写入契约：
 
@@ -237,7 +254,7 @@ ingest 和 tidy 都是后台任务，而不是同步 HTTP 写入。
 建议 `jobs` 字段：
 
 - `id`
-- `job_type`：`ingest`、`tidy`
+- `job_type`：`ingest`、`tidy`、`insight_review`
 - `source_submission_id`：兼容字段
 - `source_batch_id`
 - `target_entry_name`
@@ -266,6 +283,13 @@ ingest 和 tidy 都是后台任务，而不是同步 HTTP 写入。
 - ingest / tidy 的 Agent 推理在隔离工作区运行
 - 真正写主工作区、校验、commit、revert 时必须持有 repo lock
 - 任务成功后必须把 `commit_sha` 回写到 `job`，必要时同步回写 batch 与 inbox item
+
+Insight review 补充约束：
+
+- `observe` / `reject` 只改 `insights/` 层
+- `merge` 需要显式 `target_name`
+- `promote` 需要新的 canonical 标题，并生成正式条目提交
+- 任何 canonical 写入都必须走 job + Git commit，不能前端直写
 
 ## 7. Git 与版本管理契约
 

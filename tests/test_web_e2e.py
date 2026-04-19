@@ -29,7 +29,6 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert 'data-testid="portal-submit-text-button"' not in page.text
     assert 'href="/tutorial?lang=en"' in page.text
     assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in page.text
-    assert '/portal/graph-view' not in page.text
     assert 'href="/admin' not in page.text
     assert 'data-testid="portal-message"' in page.text
     assert 'data-testid="portal-page-title"' in page.text
@@ -43,11 +42,18 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert 'class="button utility-action"' not in page.text
     assert 'class="stats stats-inline"' in page.text
     assert 'class="subtle search-status-line"' in page.text
-    assert page.text.index('data-testid="portal-stats"') < page.text.index('data-testid="portal-recent-updates"')
+    assert 'data-testid="portal-home-graph-layout"' in page.text
+    assert 'data-testid="portal-home-graph"' in page.text
+    assert 'data-testid="portal-universe-strip"' in page.text
+    assert 'data-testid="portal-recent-updates"' not in page.text
     assert page.text.count('href="/submit?lang=en"') == 1
+    assert 'href="/portal/graph-view?lang=en"' in page.text
+    assert "Open universe" in page.text
     assert 'class="search-suggestions-popover"' in page.text
     assert 'src="/ui-assets/web-shell.js"' in page.text
     assert 'src="/ui-assets/portal.js"' in page.text
+    assert 'src="/ui-assets/graph.bundle.js"' in page.text
+    assert 'href="/ui-assets/graph.bundle.css"' in page.text
     assert "const UI =" not in page.text
     assert "Browsing stays public and anonymous." not in page.text
     assert "<title>Knowledge base overview | Test Knowledge Base</title>" in page.text
@@ -116,6 +122,14 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert "PORTAL_PAGE_SESSION_KEY" in portal_asset.text
     assert "loadHome" in portal_asset.text
 
+    graph_js = client.get("/ui-assets/graph.bundle.js")
+    assert graph_js.status_code == 200
+    assert "SedimentGraph" in graph_js.text
+
+    graph_css = client.get("/ui-assets/graph.bundle.css")
+    assert graph_css.status_code == 200
+    assert ".portal-graph-frame" in graph_css.text
+
     home_response = client.get("/api/portal/home")
     assert home_response.headers.get("x-request-id")
     home = home_response.json()
@@ -146,8 +160,14 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     quartz_page = client.get("/portal/graph-view", headers={"accept-language": "en-US"})
     assert quartz_page.status_code == 200
-    assert "Open Quartz" in quartz_page.text
-    assert 'href="/admin/system?lang=en"' in quartz_page.text
+    assert 'data-testid="portal-insights-graph"' in quartz_page.text
+    assert 'data-testid="portal-graph-focus"' in quartz_page.text
+    assert 'data-testid="portal-graph-hint"' in quartz_page.text
+    assert 'data-testid="portal-graph-layout"' not in quartz_page.text
+    assert 'src="/ui-assets/graph.bundle.js"' in quartz_page.text
+    assert 'href="/ui-assets/graph.bundle.css"' in quartz_page.text
+    assert "Knowledge universe" in quartz_page.text
+    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in quartz_page.text
 
 
 def test_portal_default_language_prefers_english_without_zh_signal(tmp_path: Path, monkeypatch) -> None:
@@ -192,8 +212,10 @@ def test_portal_graph_page_uses_new_window_launcher_when_quartz_site_exists(
 
     page = client.get("/portal/graph-view", headers={"accept-language": "en-US"})
     assert page.status_code == 200
-    assert "Quartz Ready" in page.text
-    assert "/quartz/" in str(page.url)
+    assert "Knowledge universe" in page.text
+    assert "Quartz Ready" not in page.text
+    assert str(page.url).endswith("/portal/graph-view")
+    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in page.text
     assert "<iframe" not in page.text
 
 
@@ -236,9 +258,16 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-kb-ingest-panel"' in kb_page.text
     assert 'data-testid="admin-kb-tidy-panel"' in kb_page.text
     assert 'data-testid="admin-kb-explore-panel"' in kb_page.text
+    assert 'data-testid="admin-kb-pane-tabs"' in kb_page.text
+    assert 'data-testid="admin-kb-insights-pane"' in kb_page.text
+    assert 'data-testid="admin-kb-graph-pane"' in kb_page.text
+    assert 'data-testid="admin-insights-list"' in kb_page.text
+    assert 'data-testid="admin-insights-graph"' in kb_page.text
     assert 'data-testid="admin-runtime-console"' in kb_page.text
     assert 'data-testid="admin-kb-result"' in kb_page.text
     assert 'data-testid="admin-kb-live-log"' in kb_page.text
+    assert 'src="/ui-assets/graph.bundle.js"' in kb_page.text
+    assert 'href="/ui-assets/graph.bundle.css"' in kb_page.text
     assert 'data-testid="admin-doc-browser"' not in kb_page.text
     assert 'data-testid="admin-editor-content"' not in kb_page.text
     assert "Choose files" in kb_page.text
@@ -306,6 +335,10 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert "Ingest 导入" not in kb_page_zh.text
     assert "Tidy 整理" not in kb_page_zh.text
     assert "Explore 探索" not in kb_page_zh.text
+    assert ">操作<" in kb_page_zh.text
+    assert ">Insights<" in kb_page_zh.text
+    assert ">图谱<" in kb_page_zh.text
+    assert ">Live<" in kb_page_zh.text
     assert ">导入<" in kb_page_zh.text
     assert ">整理<" in kb_page_zh.text
     assert ">探索<" in kb_page_zh.text

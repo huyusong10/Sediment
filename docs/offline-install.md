@@ -129,19 +129,32 @@ uv --config-file /path/to/uv.toml tool install --from . sediment --force --reins
 
 ---
 
-## 3.5) Quartz (optional) in internal networks
+## 3.5) Graph / Quartz frontend build chain (optional) in internal networks
 
-Sediment CLI itself does **not** require Node/npm. Only the optional `/portal/graph-view` Quartz page needs npm packages.
+Sediment runtime itself does **not** require Node/npm. End users can keep using `pip install sediment`.
 
-If Quartz is needed, switch npm to the internal registry first:
+Node/npm is only needed when you want to modify or rebuild browser graph assets, including:
+
+- `/portal/graph-view` Insights Graph
+- optional Quartz runtime assets
+
+If you need to rebuild those frontend assets, switch npm to the internal registry first:
 
 ```bash
 npm config set registry https://<your-internal-npm>/
+cd /path/to/Sediment/frontend/graph
+npm ci
+python ../../scripts/build_graph_assets.py
+```
+
+If you do not modify graph assets, this step can be skipped without affecting core CLI workflows or wheel installation.
+
+If Quartz is needed separately, install it in the shared Sediment state runtime as before:
+
+```bash
 cd "<SEDIMENT_STATE_DIR>/quartz-runtime/quartz"
 npm i
 ```
-
-If graph view is not required, Quartz can be skipped without affecting core CLI workflows.
 
 `<SEDIMENT_STATE_DIR>` means the Sediment user state directory (where the shared Quartz runtime is stored).
 

@@ -183,23 +183,6 @@
       .join("");
   }
 
-  function renderRecentUpdates(payload) {
-    const node = document.getElementById("recent-updates");
-    if (!node) return;
-    const items = payload.recent_updates || [];
-    node.innerHTML = items.length
-      ? items.map((item) => `
-          <a class="card" href="${entryUrl(item.name)}">
-            <div class="row spread">
-              <strong>${escapeHtml(item.name || "")}</strong>
-              <span class="tag">${escapeHtml(item.entry_type || "")}</span>
-            </div>
-            <div class="subtle">${escapeHtml(item.status || "")} · ${escapeHtml(formatDateTime(item.updated_at))}</div>
-          </a>
-        `).join("")
-      : `<div class="empty">${escapeHtml(UI.updates_empty)}</div>`;
-  }
-
   function renderSuggestionList(items, query) {
     const node = suggestionNode();
     if (!node) return;
@@ -326,7 +309,6 @@
   async function loadHome() {
     const payload = await fetchJson("/api/portal/home");
     renderPortalStats(payload);
-    renderRecentUpdates(payload);
     setPortalMessage(UI.home_ready || (isZh ? "知识库已就绪。" : "Knowledge base ready."));
   }
 

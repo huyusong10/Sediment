@@ -84,6 +84,7 @@ from sediment.git_ops import (
     revert_commit,
 )
 from sediment.i18n import tr
+from sediment.insights import fingerprint_actor
 from sediment.instances import user_state_root
 from sediment.kb import resolve_kb_document_path, split_frontmatter
 from sediment.llm_cli import AgentCliInvocation, build_cli_command, collect_output
@@ -93,11 +94,14 @@ from sediment.platform_services import (
     detect_submitter_ip,
     get_entry_detail,
     get_health_payload,
+    get_insight_detail,
     get_portal_home,
     graph_payload,
     kb_document_browser_payload,
     kb_file_management_payload,
+    list_insight_proposals,
     list_reviews_with_jobs,
+    record_explore_signal,
     save_entry,
     search_kb,
     search_kb_file_suggestions,
@@ -214,6 +218,8 @@ UI_ASSET_MEDIA_TYPES = {
     "portal.js": "text/javascript; charset=utf-8",
     "admin-login.js": "text/javascript; charset=utf-8",
     "admin.js": "text/javascript; charset=utf-8",
+    "graph.bundle.js": "text/javascript; charset=utf-8",
+    "graph.bundle.css": "text/css; charset=utf-8",
 }
 
 
@@ -886,7 +892,12 @@ async def _knowledge_read(filename: str) -> str:
 
 async def _knowledge_ask(question: str) -> str:
     try:
-        result = answer_question_agent_only(question, KB_PATH, _PROJECT_ROOT)
+        result = _capture_explore_result(
+            question=question,
+            result=answer_question_agent_only(question, KB_PATH, _PROJECT_ROOT),
+            entrypoint="mcp",
+            strategy="fast-answer",
+        )
     except RuntimeError as exc:
         result = _error_payload(str(exc))
     return json.dumps(result, ensure_ascii=False)
@@ -1358,6 +1369,66 @@ def _material_fallback_enabled() -> bool:
         "yes",
         "on",
     }
+
+
+def _guess_explore_mode(payload: dict[str, Any]) -> str:
+    mode = str((payload or {}).get("mode", "")).strip().lower()
+    if mode in {"direct", "synthesized", "gap"}:
+        return mode
+    sources = [item for item in (payload or {}).get("sources") or [] if str(item).strip()]
+    exploration_mode = str(((payload or {}).get("exploration_summary") or {}).get("mode", "")).strip().lower()
+    if exploration_mode in {"no-match", "no-evidence"} or not sources:
+        return "gap"
+    if len(sources) == 1 and exploration_mode not in {"agent-runtime", "llm-synthesis"}:
+        return "direct"
+    return "synthesized"
+
+
+def _request_actor_fingerprint(request) -> str:
+    user = _current_optional_user(request)
+    submitter_ip = detect_submitter_ip(
+        dict(request.headers),
+        request.client.host if request.client else None,
+        trust_proxy_headers=TRUST_PROXY_HEADERS,
+        trusted_proxy_cidrs=TRUSTED_PROXY_CIDRS,
+    )
+    token = user["id"] if isinstance(user, dict) and user.get("id") else ""
+    return fingerprint_actor(token, submitter_ip, request.headers.get("user-agent", ""))
+
+
+def _capture_explore_result(
+    *,
+    question: str,
+    result: dict[str, Any],
+    entrypoint: str,
+    strategy: str,
+    actor_fingerprint_value: str = "",
+    response_language: str | None = None,
+) -> dict[str, Any]:
+    try:
+        capture = record_explore_signal(
+            kb_path=KB_PATH,
+            store=_platform_store(),
+            question=question,
+            entrypoint=entrypoint,
+            strategy=strategy,
+            result={**result, "mode": _guess_explore_mode(result)},
+            actor_fingerprint_value=actor_fingerprint_value,
+            response_language=response_language,
+        )
+    except Exception as exc:  # noqa: BLE001
+        SERVER_LOGGER.warning(
+            "explore.capture_failed",
+            "Failed to persist explore signal capture.",
+            error=exc,
+            details={"entrypoint": entrypoint},
+        )
+        return result
+    merged = dict(result)
+    merged.update(capture["envelope"])
+    if capture.get("proposal"):
+        merged["insight_proposal"] = capture["proposal"]
+    return merged
 
 
 def _build_local_explore_answer(
@@ -4105,8 +4176,6 @@ async def _ui_asset(request):
 
 async def _portal_graph_page(request):
     locale = _request_locale(request)
-    if _quartz_site_available():
-        return _redirect(_path_with_locale("/quartz/", locale))
     return _html_response(
         portal_graph_html(
             knowledge_name=KNOWLEDGE_NAME,
@@ -4304,7 +4373,17 @@ async def _api_portal_entry(request):
 
 
 async def _api_portal_graph(request):
-    return _json_response(graph_payload(KB_PATH))
+    focus = str(request.query_params.get("focus", "")).strip() or None
+    scene = str(request.query_params.get("scene", "")).strip() or None
+    return _json_response(
+        graph_payload(
+            KB_PATH,
+            store=_platform_store(),
+            graph_kind="portal",
+            focus=focus,
+            scene=scene,
+        )
+    )
 
 
 def _quartz_site_available() -> bool:
@@ -4531,6 +4610,55 @@ def _repo_busy_response(store: PlatformStore):
     )
 
 
+def _enqueue_insight_review_job(
+    request,
+    *,
+    insight_id: str,
+    action: str,
+    target_name: str | None = None,
+    note: str = "",
+    entry_type: str | None = None,
+    new_title: str | None = None,
+) -> dict[str, Any]:
+    actor = _actor_from_request(request)
+    store = _platform_store()
+    job = store.create_job(
+        job_type="insight_review",
+        target_entry_name=target_name or new_title or insight_id,
+        status="queued",
+        max_attempts=1,
+        request_payload={
+            "insight_id": insight_id,
+            "action": action,
+            "target_name": target_name,
+            "note": note,
+            "entry_type": entry_type,
+            "new_title": new_title,
+            "actor_id": str(actor.get("id", "")).strip() or None,
+            "actor_name": str(actor.get("name", "committer")).strip() or "committer",
+            "actor_role": str(actor.get("role", "committer")).strip() or "committer",
+        },
+    )
+    store.add_audit_log(
+        actor_name=str(actor.get("name", "committer")).strip() or "committer",
+        actor_id=str(actor.get("id", "")).strip() or None,
+        actor_role=str(actor.get("role", "committer")).strip() or "committer",
+        action="job.enqueue_insight_review",
+        target_type="job",
+        target_id=job["id"],
+        details={
+            "insight_id": insight_id,
+            "action": action,
+            "target_name": target_name,
+            "entry_type": entry_type,
+            "new_title": new_title,
+        },
+    )
+    if RUN_JOBS_IN_PROCESS:
+        _agent_runner().submit(job["id"])
+    return job
+
+
 async def _api_admin_session_status(request):
     user = _require_user(request) if _is_admin_authorized(request) else None
     return _json_response(
@@ -4624,14 +4752,108 @@ async def _api_admin_health_summary(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
-    return _json_response(get_health_payload(KB_PATH))
+    return _json_response(get_health_payload(KB_PATH, store=_platform_store()))
 
 
 async def _api_admin_health_issues(request):
     guard = await _admin_guard(request)
     if guard:
         return guard
-    return _json_response({"issues": build_health_issue_queue(KB_PATH)})
+    return _json_response({"issues": build_health_issue_queue(KB_PATH, store=_platform_store())})
+
+
+async def _api_admin_graph(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    focus = str(request.query_params.get("focus", "")).strip() or None
+    scene = str(request.query_params.get("scene", "")).strip() or None
+    return _json_response(
+        graph_payload(
+            KB_PATH,
+            store=_platform_store(),
+            graph_kind="admin",
+            focus=focus,
+            scene=scene,
+        )
+    )
+
+
+async def _api_admin_insights(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    store = _platform_store()
+    proposals = list_insight_proposals(KB_PATH)
+    clusters = store.list_signal_clusters(limit=200) if hasattr(store, "list_signal_clusters") else []
+    counts: dict[str, int] = {}
+    for proposal in proposals:
+        state = str(proposal.get("review_state") or "proposed")
+        counts[state] = counts.get(state, 0) + 1
+    return _json_response(
+        {
+            "items": proposals,
+            "summary": {
+                "counts": counts,
+                "pending": counts.get("proposed", 0) + counts.get("observing", 0),
+                "cluster_count": len(clusters),
+            },
+        }
+    )
+
+
+async def _api_admin_insight_detail(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    try:
+        return _json_response(
+            get_insight_detail(
+                KB_PATH,
+                request.path_params["insight_id"],
+                store=_platform_store(),
+            )
+        )
+    except FileNotFoundError:
+        return _json_response({"error": "insight not found"}, status=404)
+
+
+async def _api_admin_insight_review(request):
+    guard = await _admin_guard(request)
+    if guard:
+        return guard
+    body, error = await _request_json_or_400(request)
+    if error is not None:
+        return error
+    insight_id = str(request.path_params.get("insight_id", "")).strip()
+    action = str(body.get("action", "")).strip().lower()
+    if action not in {"observe", "promote", "merge", "reject"}:
+        return _json_response({"error": "unsupported insight review action"}, status=400)
+    target_name = str(body.get("target_name", "")).strip() or None
+    new_title = str(body.get("new_title", "")).strip() or None
+    entry_type = str(body.get("entry_type", "")).strip() or None
+    note = str(body.get("note", "")).strip()
+    try:
+        get_insight_detail(KB_PATH, insight_id, store=_platform_store())
+    except FileNotFoundError:
+        return _json_response({"error": "insight not found"}, status=404)
+    if action == "merge" and not target_name:
+        return _json_response({"error": "target_name is required for merge"}, status=400)
+    if action == "promote" and not (new_title or target_name):
+        return _json_response({"error": "new_title is required for promote"}, status=400)
+    try:
+        job = _enqueue_insight_review_job(
+            request,
+            insight_id=insight_id,
+            action=action,
+            target_name=target_name,
+            note=note,
+            entry_type=entry_type,
+            new_title=new_title or target_name,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _json_response({"error": str(exc)}, status=400)
+    return _json_response({"job": job}, status=202)
 
 
 async def _api_admin_inbox(request):
@@ -5614,7 +5836,14 @@ async def _api_admin_explore(request):
         return _json_response({"error": "question must not be empty"}, status=400)
     try:
         return _json_response(
-            answer_question_agent_only(question, KB_PATH, _PROJECT_ROOT)
+            _capture_explore_result(
+                question=question,
+                result=answer_question_agent_only(question, KB_PATH, _PROJECT_ROOT),
+                entrypoint="admin",
+                strategy="insight-harvest",
+                actor_fingerprint_value=_request_actor_fingerprint(request),
+                response_language=_request_locale(request),
+            )
         )
     except RuntimeError as exc:
         return _json_response({"error": str(exc)}, status=502)
@@ -5641,11 +5870,19 @@ async def _api_admin_explore_live(request):
 
         def worker() -> None:
             try:
-                result = answer_question_agent_only(
+                raw_result = answer_question_agent_only(
                     question,
                     KB_PATH,
                     _PROJECT_ROOT,
                     emit=emit,
+                )
+                result = _capture_explore_result(
+                    question=question,
+                    result=raw_result,
+                    entrypoint="admin",
+                    strategy="insight-harvest",
+                    actor_fingerprint_value=_request_actor_fingerprint(request),
+                    response_language=_request_locale(request),
                 )
                 emit({"type": "result", "payload": result, "message": "Explore completed."})
                 emit({"type": "done", "ok": True, "message": "Explore stream closed."})
@@ -6205,6 +6442,14 @@ def create_starlette_app():
         Route("/api/admin/jobs/{job_id:str}/cancel", _api_admin_job_cancel, methods=["POST"]),
         Route("/api/admin/tidy", _api_admin_tidy, methods=["POST"]),
         Route("/api/admin/kb/documents", _api_admin_kb_documents, methods=["GET"]),
+        Route("/api/admin/graph", _api_admin_graph, methods=["GET"]),
+        Route("/api/admin/insights", _api_admin_insights, methods=["GET"]),
+        Route("/api/admin/insights/{insight_id:str}", _api_admin_insight_detail, methods=["GET"]),
+        Route(
+            "/api/admin/insights/{insight_id:str}/review",
+            _api_admin_insight_review,
+            methods=["POST"],
+        ),
         Route("/api/admin/files", _api_admin_files, methods=["GET"]),
         Route("/api/admin/files/suggest", _api_admin_files_suggest, methods=["GET"]),
         Route("/api/admin/reviews", _api_admin_reviews),

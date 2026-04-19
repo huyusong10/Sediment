@@ -27,6 +27,7 @@
 - Workflow Store：保存提交、审核、任务、审计和锁信息
 - Agent Runner：在知识库本地执行 ingest / tidy / explore 的托管 Agent
 - Search / Graph Projection：为全文搜索、图谱浏览和后台筛选提供查询投影
+- Signals / Insights Projection：为 latent knowledge formation、cluster 统计和 insight proposal 审阅提供运行时投影
 - Web Apps：前台知识库界面和后台管理界面
 - Quartz Hosted Site：由 Sediment 服务层托管的静态 Quartz 站点
 
@@ -38,6 +39,7 @@ flowchart LR
     API --> REG["Instance Registry"]
     API --> DB["Workflow Store"]
     API --> IDX["Search / Graph Projection"]
+    API --> SIG["Signals / Insights Projection"]
     API --> KB["Knowledge Base Workspace"]
     API --> RUN["Agent Runner"]
     RUN --> CFG
@@ -165,6 +167,32 @@ flowchart LR
 - 索引链接
 - `status`、`type`、入链数量、健康状态
 
+补充判断：
+
+- Search / Graph Projection 继续只把 canonical knowledge 当作公共共识层
+- `signals` 与 `insights` 是平台层投影，不直接进入 `knowledge_ask` 默认可见范围
+- `/api/portal/graph` 与 `/api/admin/graph` 共用统一 graph payload schema，只在 graph kind 与字段裁剪上区分
+- Graph 以“事件驱动投影”而不是“全量库存镜像”作为默认输出方式，节点和边只代表近期或仍有能量的知识形成局部
+- portal graph payload 额外承担沉浸式渲染语义，至少需要稳定提供 `burst_level / formation_stage / recentness / pulse_level / ambient_seed / playback_events`
+
+### 3.8 Signals / Insights Projection
+
+职责：
+
+- 持久化 ask signal、query cluster 和 evidence cluster
+- 在阈值达到后物化 `knowledge-base/insights/` 中的 `InsightProposal`
+- 为后台提供 `emerging clusters`、`cluster coverage`、`canonical stress points`
+- 为图谱层持久化 `graph_events`，统一记录 ingest / ask / proposal / promote / merge 对知识形成面的影响
+- 为门户图提供 formation playback 投影，让 ingest 的“抛入”、explore / tidy 的“连成路径”、promote / merge 的“稳定化”都能被可视化
+
+约束：
+
+- proposal 可以直接落盘，但默认不进入 canonical knowledge state
+- canonical 写入仍然只能通过受管 review / tidy promote 路径发生
+- 多语言 query 在此层保留原始语言，但 cluster 的主语言由 KB `default_language` 决定
+- `insight_review` 提交只允许携带当前 proposal 与其目标 canonical/index 路径；其它 `knowledge-base/insights/` 脏 proposal 可以并存，但不能被顺带提交
+- 非 `insights/` 层的 tracked dirty state 仍然必须阻塞 review / promote / merge，避免把人工未提交的 canonical 变更卷入系统提交
+
 ### 3.8 Web Apps
 
 职责：
@@ -175,8 +203,8 @@ flowchart LR
 
 当前 IA：
 
-- Public Knowledge Base UI：`/`、`/search`、`/tutorial`、`/entries/{name}`、`/submit`、`/quartz/`
-- Admin Console：`/admin/overview`、`/admin/kb`（知识库管理）、`/admin/files`（文件管理）、`/admin/inbox`（提交收件箱）、`/admin/version-control`（版本管理）、`/admin/users`、`/admin/system`（设置）
+- Public Knowledge Base UI：`/`、`/search`、`/tutorial`、`/entries/{name}`、`/submit`、`/portal/graph-view`、`/quartz/`
+- Admin Console：`/admin/overview`、`/admin/kb`（知识运营中枢，内含 operations / insights / graph / live）、`/admin/files`（文件管理）、`/admin/inbox`（提交收件箱）、`/admin/version-control`（版本管理）、`/admin/users`、`/admin/system`（设置）
 - 兼容路径：`/portal`、`/portal/graph-view`、`/admin`
 
 ### 3.9 Diagnostic Logging
@@ -221,6 +249,23 @@ flowchart LR
 - 在线编辑继续使用受控 textarea + 后端校验路径
 - 文件管理中的文档结构浏览优先使用 index 驱动的原生分组树与健康队列联动；当前不引入依赖 jQuery 的树形插件
 - 设置页提供 raw YAML + resolved config 双视图与 owner-only 一键重启；涉及监听地址的修改可在线保存，但仍需要重启服务生效
+- Insights Graph 使用受控前端构建链：图形运行时可依赖专业浏览器图形库，但最终必须预编译到 `src/sediment/assets/` 并随 wheel 一起分发
+
+### 4.4 Frontend Asset Build & Packaging
+
+约束：
+
+- 运行时安装保持 `pip install sediment`
+- Node/npm 仅作为 graph 前端的构建期依赖，不得成为用户运行 Sediment 的前提
+- `/ui-assets/*` 继续由 Python 服务统一托管
+
+当前策略：
+
+- graph 前端源码位于独立工作区 `frontend/graph/`
+- 构建产物固定输出到 `src/sediment/assets/graph.bundle.js` 与 `graph.bundle.css`
+- wheel 只携带编译产物，不携带 `node_modules`
+- sdist 可包含前端源码与构建脚本，便于发布者重建 bundle
+- 当前图前端使用受控 3D 图形栈实现门户和后台共用引擎；运行时效果可以依赖浏览器图形库，但对外分发仍保持 `pip install sediment`
 
 ### 4.3 Quartz 取舍
 

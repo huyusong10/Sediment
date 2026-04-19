@@ -12,6 +12,8 @@
   - 明确 `concept / lesson / placeholder` 条目模型，并把 provenance 从图谱中剥离
 - [tacit_knowledge_system_v4_5.md](tacit_knowledge_system_v4_5.md)
   - 引入 `index.root.md`、分段索引和动态重构的检索组织方式
+- [tacit_knowledge_system_v5_insights_draft.md](tacit_knowledge_system_v5_insights_draft.md)
+  - 引入 `Insights / Signals / Strategy` 分层，讨论 `explore` 反馈、知识形成中的候选层、HITL 与长期 Git 闭环
 
 ## 如何使用这些历史文档
 

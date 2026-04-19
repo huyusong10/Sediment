@@ -19,6 +19,7 @@ from sediment.platform_services import (
     apply_operations,
     build_health_issue_queue,
     detect_submitter_ip,
+    graph_payload,
     inventory,
     parse_trusted_proxy_cidrs,
     resolve_kb_document_path,
@@ -69,6 +70,38 @@ def _create_ready_ingest_batch(client: TestClient) -> tuple[dict[str, object], d
     )
     assert batch_response.status_code == 201
     return staged_item, ready_item, batch_response.json()["batch"]
+
+
+def _materialize_insight_via_admin_explore(client: TestClient) -> dict[str, object]:
+    login = client.post("/api/admin/session", json={"token": "top-secret"})
+    assert login.status_code == 200
+
+    created = client.post(
+        "/api/admin/users",
+        json={"name": "Insights Committer"},
+    )
+    assert created.status_code == 201
+    committer_token = created.json()["token"]
+
+    headers_owner = {"authorization": "Bearer top-secret", "accept-language": "zh-CN"}
+    headers_committer = {
+        "authorization": f"Bearer {committer_token}",
+        "accept-language": "zh-CN",
+    }
+    query = "热备份的完整流程是什么？"
+
+    for headers in (headers_owner, headers_committer, headers_owner):
+        response = client.post("/api/admin/explore", json={"question": query}, headers=headers)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["query"] == query
+        assert payload["kb_language"] == "en"
+        assert payload["response_language"] == "zh"
+        assert payload["signal_cluster_id"]
+
+    proposals = client.get("/api/admin/insights").json()
+    assert proposals["summary"]["pending"] >= 1
+    return proposals["items"][0]
 
 
 def test_portal_text_submission_and_rate_limit(tmp_path: Path, monkeypatch) -> None:
@@ -513,8 +546,161 @@ def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, mon
 
     graph_page = client.get("/portal/graph-view")
     assert graph_page.status_code == 200
-    assert "Built Quartz" in graph_page.text
-    assert "/quartz/" in str(graph_page.url)
+    assert "Knowledge universe" in graph_page.text
+    assert "Built Quartz" not in graph_page.text
+    assert 'data-testid="portal-insights-graph"' in graph_page.text
+    assert 'data-testid="portal-graph-focus"' in graph_page.text
+    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in graph_page.text
+
+
+def test_graph_payload_exposes_insights_shape_and_cluster_stats(tmp_path: Path) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    store = PlatformStore(tmp_path / "platform.db")
+    store.init()
+
+    payload = graph_payload(kb_path, store=store, graph_kind="portal")
+
+    assert payload["graph_version"] == "insights-v2"
+    assert payload["graph_kind"] == "portal"
+    assert payload["scene_mode"] == "portal-story"
+    assert payload["kb_language"] == "en"
+    assert {"nodes", "edges", "stats", "ambient_seed", "playback_events"} <= set(payload)
+    assert payload["stats"]["formal_entry_count"] >= 3
+    assert payload["stats"]["query_cluster_count"] == 0
+    assert payload["stats"]["event_count"] >= 0
+    assert any(node["node_type"] == "canonical_entry" for node in payload["nodes"])
+    assert any(node["node_type"] == "cluster_anchor" for node in payload["nodes"])
+    assert all("visual_role" in node for node in payload["nodes"])
+    assert all("energy" in node for node in payload["nodes"])
+    assert all("stability" in node for node in payload["nodes"])
+    assert all("burst_level" in node for node in payload["nodes"])
+    assert all("formation_stage" in node for node in payload["nodes"])
+    assert all("recentness" in node for node in payload["nodes"])
+    assert any(edge["edge_type"] in {"belongs_to_cluster", "weak_affinity"} for edge in payload["edges"])
+    assert all("activation" in edge for edge in payload["edges"])
+    assert all("formation_role" in edge for edge in payload["edges"])
+    assert all("pulse_level" in edge for edge in payload["edges"])
+
+
+def test_admin_explore_materializes_insight_after_repeated_cross_actor_queries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+        admin_token="top-secret",
+    )
+
+    proposal = _materialize_insight_via_admin_explore(client)
+    assert proposal["review_state"] == "proposed"
+    assert proposal["supporting_entries"]
+    detail = client.get(f"/api/admin/insights/{proposal['id']}").json()
+    assert detail["proposal"]["id"] == proposal["id"]
+    assert detail["recommended_action"] in {"merge", "promote", "keep_observing"}
+
+    admin_graph = client.get("/api/admin/graph").json()
+    portal_graph = client.get("/api/portal/graph").json()
+    assert admin_graph["stats"]["query_cluster_count"] >= 1
+    assert admin_graph["stats"]["insight_count"] >= 1
+    assert admin_graph["stats"]["event_count"] >= 1
+    assert portal_graph["scene_mode"] == "portal-story"
+    assert portal_graph["stats"]["event_count"] >= 1
+    assert portal_graph["playback_events"]
+    assert any(node["node_type"] == "insight_proposal" for node in admin_graph["nodes"])
+    assert any(node["event_type"] == "proposal_materialized" for node in admin_graph["nodes"])
+    assert any(edge["edge_type"] == "ask_reinforcement" for edge in admin_graph["edges"])
+
+
+def test_insight_review_job_updates_proposal_and_version_history(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, _server_module, worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+        admin_token="top-secret",
+    )
+
+    proposal = _materialize_insight_via_admin_explore(client)
+    review = client.post(
+        f"/api/admin/insights/{proposal['id']}/review",
+        json={"action": "observe", "note": "继续观察这个 latent workflow。"},
+    )
+    assert review.status_code == 202
+    job_id = review.json()["job"]["id"]
+
+    processed = worker_module.process_queue_until_idle(max_jobs=1)
+    assert processed == 1
+
+    job = client.get(f"/api/admin/jobs/{job_id}").json()
+    assert job["status"] == "succeeded"
+    assert job["job_type"] == "insight_review"
+    assert job["commit_sha"]
+
+    detail = client.get(f"/api/admin/insights/{proposal['id']}").json()
+    assert detail["proposal"]["review_state"] == "observing"
+
+    version_status = client.get("/api/admin/version/status").json()
+    assert version_status["recent_commits"][0]["sha"] == job["commit_sha"]
+    assert version_status["recent_commits"][0]["revertible"] is True
+
+
+def test_insight_review_commits_only_selected_paths_when_other_proposals_are_dirty(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, _server_module, worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+        admin_token="top-secret",
+    )
+
+    proposal = _materialize_insight_via_admin_explore(client)
+    detail = client.get(f"/api/admin/insights/{proposal['id']}").json()
+    proposal_path = Path(detail["proposal"]["path"])
+    extra_path = kb_path / "insights" / "manual-shadow-proposal.md"
+    extra_content = proposal_path.read_text(encoding="utf-8").replace(
+        f"id: {proposal['id']}",
+        "id: insight-shadow-proposal",
+        1,
+    )
+    extra_content = extra_content.replace(
+        f"title: {proposal['title']}",
+        "title: Shadow Proposal",
+        1,
+    )
+    extra_content = extra_content.replace(
+        f"# {proposal['title']}",
+        "# Shadow Proposal",
+        1,
+    )
+    extra_path.write_text(extra_content, encoding="utf-8")
+
+    review = client.post(
+        f"/api/admin/insights/{proposal['id']}/review",
+        json={"action": "observe", "note": "只提交当前 proposal。"},
+    )
+    assert review.status_code == 202
+    job_id = review.json()["job"]["id"]
+
+    processed = worker_module.process_queue_until_idle(max_jobs=1)
+    assert processed == 1
+
+    job = client.get(f"/api/admin/jobs/{job_id}").json()
+    assert job["status"] == "succeeded"
+
+    version_status = client.get("/api/admin/version/status").json()
+    dirty_paths = {item["path"] for item in version_status["tracked_changes"]}
+    assert "knowledge-base/insights/manual-shadow-proposal.md" in dirty_paths
+    assert not any(item["path"] == proposal_path.relative_to(project_root).as_posix() for item in version_status["tracked_changes"])
 
 
 def test_admin_session_cookie_guards_admin_routes(tmp_path: Path, monkeypatch) -> None:

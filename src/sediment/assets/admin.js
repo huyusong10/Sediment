@@ -27,6 +27,12 @@
     reviews: [],
     reviewDetails: {},
     selectedReviewId: null,
+    kbPane: "operations",
+    insights: [],
+    selectedInsightId: null,
+    selectedInsightDetail: null,
+    adminGraphPayload: null,
+    adminGraphController: null,
     inbox: null,
     users: [],
     revealedTokens: {},
@@ -85,6 +91,8 @@
       const resultNode = runtimeResultNode();
       return {
         ...base,
+        kbPane: state.kbPane,
+        selectedInsightId: String(state.selectedInsightId || ""),
         tidyReason: trimPersistedText(nodeValue("tidy-reason"), 12000),
         exploreQuestion: trimPersistedText(nodeValue("admin-explore-input"), 12000),
         ingestStatus: trimPersistedText(nodeText("admin-ingest-status"), 4000),
@@ -132,6 +140,9 @@
     setNodeText("admin-message", snapshot.adminMessage || "");
 
     if (UI.section === "kb") {
+      state.kbPane = normalizeKbPane(snapshot.kbPane || state.kbPane);
+      setActiveKbPane(state.kbPane, { persist: false });
+      state.selectedInsightId = String(snapshot.selectedInsightId || "").trim() || null;
       setNodeValue("tidy-reason", snapshot.tidyReason || "");
       setNodeValue("admin-explore-input", snapshot.exploreQuestion || "");
       setNodeText("admin-ingest-status", snapshot.ingestStatus || nodeText("admin-ingest-status"));
@@ -214,6 +225,33 @@
 
   function setExploreStatus(message) {
     setWorkbenchStatus("explore", message);
+  }
+
+  function normalizeKbPane(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return ["operations", "insights", "graph", "live"].includes(normalized)
+      ? normalized
+      : "operations";
+  }
+
+  function setActiveKbPane(pane, { persist = true } = {}) {
+    state.kbPane = normalizeKbPane(pane);
+    document.querySelectorAll("[data-kb-pane]").forEach((node) => {
+      node.hidden = node.dataset.kbPane !== state.kbPane;
+    });
+    document.querySelectorAll('[data-action="switch-kb-pane"]').forEach((button) => {
+      const active = button.dataset.pane === state.kbPane;
+      button.classList.toggle("primary", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    if (state.kbPane === "graph") {
+      window.requestAnimationFrame(() => {
+        if (typeof state.adminGraphController?.resize === "function") {
+          state.adminGraphController.resize();
+        }
+      });
+    }
+    if (persist) queuePersistAdminPageState();
   }
 
   function runtimeResultNode() {
@@ -781,6 +819,232 @@
         `;
       })
       .join("");
+
+    const healthNode = document.getElementById("admin-health-summary-note");
+    if (healthNode && overview.health_summary?.cluster_coverage != null) {
+      const coverage = Math.round(Number(overview.health_summary.cluster_coverage || 0) * 100);
+      healthNode.textContent = isZh
+        ? `聚类覆盖 ${coverage}%`
+        : `Cluster coverage ${coverage}%`;
+    }
+  }
+
+  function renderInsightsList(payload) {
+    const node = document.getElementById("admin-insights-list");
+    const summaryNode = document.getElementById("admin-insights-summary");
+    if (summaryNode) {
+      const counts = payload.summary?.counts || {};
+      const pending = payload.summary?.pending || 0;
+      summaryNode.textContent = isZh
+        ? `待审 ${pending} · proposal ${counts.proposed || 0} · observing ${counts.observing || 0}`
+        : `Pending ${pending} · proposed ${counts.proposed || 0} · observing ${counts.observing || 0}`;
+    }
+    if (!node) return;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    state.insights = items;
+    node.innerHTML = items.length
+      ? items
+          .map((item) => `
+            <button type="button" class="card insight-list-item" data-action="select-insight" data-insight-id="${escapeHtml(item.id || "")}">
+              <div class="row spread">
+                <strong>${escapeHtml(item.title || item.id || "")}</strong>
+                <span class="tag">${escapeHtml(item.review_state || "proposed")}</span>
+              </div>
+              <div class="subtle">${escapeHtml(item.kind || "concept")} · ${escapeHtml((item.supporting_entries || []).length)} sources</div>
+            </button>
+          `)
+          .join("")
+      : `<div class="empty">${escapeHtml(UI.insight_empty || (isZh ? "暂时还没有 insight proposal。" : "No insight proposals yet."))}</div>`;
+  }
+
+  function renderInsightDetail(payload) {
+    const node = document.getElementById("admin-insight-detail");
+    if (!node) return;
+    if (!payload?.proposal) {
+      node.innerHTML = `<div class="empty">${escapeHtml(UI.insight_detail_empty || (isZh ? "选择一条 proposal 以查看细节。" : "Select a proposal to inspect its details."))}</div>`;
+      return;
+    }
+    const proposal = payload.proposal;
+    const triggerQueries = Array.isArray(proposal.trigger_queries) ? proposal.trigger_queries : [];
+    const entries = Array.isArray(proposal.supporting_entries) ? proposal.supporting_entries : [];
+    node.innerHTML = `
+      <div class="card">
+        <div class="row spread">
+          <strong>${escapeHtml(proposal.title || proposal.id || "")}</strong>
+          <span class="tag">${escapeHtml(proposal.review_state || "proposed")}</span>
+        </div>
+        <div class="subtle">${escapeHtml(proposal.kind || "concept")} · ${escapeHtml(payload.recommended_action || "-")}</div>
+        <div class="markdown">${renderMarkdown(`## Hypothesis\n${proposal.hypothesis || "-"}\n\n## Proposed Answer\n${proposal.proposed_answer || "-"}\n\n## Supporting Entries\n${entries.map((item) => `- ${item}`).join("\n") || "-"}\n\n## Trigger Queries\n${triggerQueries.map((item) => `- ${item}`).join("\n") || "-"}`)}</div>
+      </div>
+    `;
+    setNodeValue("admin-insight-target", entries[0] || "");
+    setNodeValue("admin-insight-title", proposal.title || "");
+  }
+
+  async function selectInsight(insightId) {
+    const normalized = String(insightId || "").trim();
+    if (!normalized) {
+      state.selectedInsightId = null;
+      state.selectedInsightDetail = null;
+      renderInsightDetail(null);
+      return;
+    }
+    state.selectedInsightId = normalized;
+    state.selectedInsightDetail = await fetchAdmin(`/api/admin/insights/${encodeURIComponent(normalized)}`);
+    renderInsightDetail(state.selectedInsightDetail);
+    queuePersistAdminPageState();
+  }
+
+  async function loadInsights() {
+    const payload = await fetchAdmin("/api/admin/insights");
+    renderInsightsList(payload);
+    if (state.selectedInsightId) {
+      try {
+        await selectInsight(state.selectedInsightId);
+        return;
+      } catch (_error) {
+        state.selectedInsightId = null;
+      }
+    }
+    if (payload.items?.length) {
+      await selectInsight(payload.items[0].id);
+    } else {
+      renderInsightDetail(null);
+    }
+  }
+
+  function renderAdminGraphDetail(node) {
+    const detailNode = document.getElementById("admin-graph-detail");
+    if (!detailNode) return;
+    if (!node) {
+      detailNode.innerHTML = `<div class="empty">${escapeHtml(UI.graph_detail_empty || (isZh ? "点击图中的节点，查看证据和建议动作。" : "Select a graph node to inspect evidence and suggested actions."))}</div>`;
+      return;
+    }
+    const details = node.details || {};
+    const relatedItems = Array.isArray(details.related_links)
+      ? details.related_links
+      : Array.isArray(details.supporting_entries)
+        ? details.supporting_entries
+        : Array.isArray(details.source_entries)
+          ? details.source_entries
+          : [];
+    const triggerQueries = Array.isArray(details.trigger_queries) ? details.trigger_queries : [];
+    const eventLabel = (() => {
+      const labels = {
+        ask_reinforced: isZh ? "近期提问正在强化这条路径。" : "Recent questions are reinforcing this route.",
+        proposal_materialized: isZh ? "这条隐性知识刚被物化为 proposal。" : "This latent knowledge was just materialized as a proposal.",
+        insight_promoted: isZh ? "这条知识最近被提升为 canonical entry。" : "This knowledge was recently promoted into a canonical entry.",
+        insight_merged: isZh ? "这条知识最近被并入既有 canonical entry。" : "This knowledge was recently merged into an existing canonical entry.",
+        ingest_created: isZh ? "这条知识最近被 ingest 引入图中。" : "This knowledge was recently introduced by ingest.",
+        ingest_updated: isZh ? "这条知识最近被 ingest 刷新。" : "This knowledge was recently refreshed by ingest.",
+      };
+      return labels[String(node.event_type || "")] || (isZh ? "当前没有明显的形成事件。" : "There is no dominant formation event right now.");
+    })();
+    const metrics = [
+      [isZh ? "能量" : "Energy", Number(node.energy || 0).toFixed(2)],
+      [isZh ? "稳定度" : "Stability", Number(node.stability || 0).toFixed(2)],
+      [isZh ? "角色" : "Role", node.visual_role || node.node_type || "-"],
+      [isZh ? "状态" : "State", node.status || node.state || "-"],
+    ];
+    detailNode.innerHTML = `
+      <div class="card">
+        <div class="row spread">
+          <strong>${escapeHtml(node.label || node.id || "")}</strong>
+          <span class="tag">${escapeHtml(node.node_type || node.kind || "")}</span>
+        </div>
+        <div class="subtle">${escapeHtml(eventLabel)}</div>
+        <div class="graph-metric-grid">
+          ${metrics
+            .map(
+              ([label, value]) => `
+                <div class="graph-metric">
+                  <strong>${escapeHtml(value)}</strong>
+                  <span>${escapeHtml(label)}</span>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+        <div class="markdown">${renderMarkdown(node.summary || details.proposed_answer || details.hypothesis || "")}</div>
+        ${
+          details.hypothesis
+            ? `<div><strong>${escapeHtml(isZh ? "假设" : "Hypothesis")}</strong><div class="subtle">${escapeHtml(details.hypothesis)}</div></div>`
+            : ""
+        }
+        ${
+          relatedItems.length
+            ? `<div><strong>${escapeHtml(isZh ? "支撑连接" : "Supporting links")}</strong><ul class="graph-list">${relatedItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+            : ""
+        }
+        ${
+          triggerQueries.length
+            ? `<div><strong>${escapeHtml(isZh ? "触发问题" : "Trigger queries")}</strong><ul class="graph-list">${triggerQueries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+            : ""
+        }
+        ${
+          node.entry_target
+            ? `<div class="graph-chip-row"><a class="button" href="/entries/${encodeURIComponent(node.entry_target)}?lang=${encodeURIComponent(locale)}" target="_blank" rel="noopener noreferrer">${escapeHtml(isZh ? "打开条目" : "Open entry")}</a></div>`
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  async function loadAdminGraph() {
+    const graphNode = document.getElementById("admin-insights-graph");
+    const statsNode = document.getElementById("admin-graph-stats");
+    if (!graphNode) return;
+    const payload = await fetchAdmin("/api/admin/graph");
+    state.adminGraphPayload = payload;
+    if (statsNode) {
+      const stats = payload.stats || {};
+      const coverage = Math.round(Number(stats.cluster_coverage || 0) * 100);
+      statsNode.textContent = isZh
+        ? `${stats.node_count || 0} 节点 · ${stats.edge_count || 0} 连线 · 覆盖 ${coverage}%`
+        : `${stats.node_count || 0} nodes · ${stats.edge_count || 0} edges · ${coverage}% coverage`;
+    }
+    if (window.SedimentGraph?.mountAdminGraph) {
+      state.adminGraphController = window.SedimentGraph.mountAdminGraph(graphNode, payload, {
+        onSelect(node) {
+          renderAdminGraphDetail(node);
+          if (node?.node_type === "insight_proposal" && node.id?.startsWith("insight::")) {
+            selectInsight(node.id.slice("insight::".length)).catch(createErrorHandler());
+          }
+        },
+      });
+      if (state.kbPane === "graph") {
+        window.requestAnimationFrame(() => {
+          if (typeof state.adminGraphController?.resize === "function") {
+            state.adminGraphController.resize();
+          }
+        });
+      }
+    } else {
+      graphNode.textContent = isZh ? "图渲染器尚未就绪。" : "Graph renderer is not ready.";
+    }
+    renderAdminGraphDetail(null);
+  }
+
+  async function reviewInsight(action) {
+    if (!state.selectedInsightId) {
+      throw new Error(UI.insight_select_prompt || (isZh ? "请先选择一条 proposal。" : "Select an insight proposal first."));
+    }
+    const payload = await fetchAdmin(`/api/admin/insights/${encodeURIComponent(state.selectedInsightId)}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        target_name: nodeValue("admin-insight-target"),
+        new_title: nodeValue("admin-insight-title"),
+        note: nodeValue("admin-insight-note"),
+      }),
+    });
+    setSectionStatus("admin-insight-status", isZh ? "已创建受管 job。" : "Managed job created.");
+    setAdminMessage(`${action} · ${(payload.job?.id || "").slice(0, 8)}`);
+    if (payload.job?.id) {
+      await waitForManagedJob(payload.job.id, "tidy");
+    }
+    await Promise.all([loadInsights(), loadAdminGraph(), loadOverview(), loadIssues(), loadAuditLogs()]);
   }
 
   function renderIssueList(issues) {
@@ -814,6 +1078,44 @@
           `;
         }).join("")
       : `<div class="empty">${escapeHtml(UI.issue_empty)}</div>`;
+  }
+
+  function renderEmergingClusters(items) {
+    const node = document.getElementById("emerging-clusters-list");
+    if (!node) return;
+    const list = Array.isArray(items) ? items : [];
+    node.innerHTML = list.length
+      ? list
+          .map((item) => `
+            <div class="card">
+              <div class="row spread">
+                <strong>${escapeHtml(item.display_query || item.normalized_subject || "")}</strong>
+                <span class="tag">${escapeHtml(item.status || "")}</span>
+              </div>
+              <div class="subtle">${escapeHtml(item.intent || "definition")} · demand ${escapeHtml(item.demand_score || 0)} · maturity ${escapeHtml(item.maturity_score || 0)}</div>
+            </div>
+          `)
+          .join("")
+      : `<div class="empty">${escapeHtml(isZh ? "暂时没有明显成形中的知识簇。" : "No obvious emerging knowledge clusters right now.")}</div>`;
+  }
+
+  function renderStressPoints(items) {
+    const node = document.getElementById("stress-points-list");
+    if (!node) return;
+    const list = Array.isArray(items) ? items : [];
+    node.innerHTML = list.length
+      ? list
+          .map((item) => `
+            <div class="card">
+              <div class="row spread">
+                <strong>${escapeHtml(item.entry || "")}</strong>
+                <span class="tag">${escapeHtml(item.signal_count || 0)}</span>
+              </div>
+              <div class="subtle">${escapeHtml((item.query_examples || []).join(" · ") || "")}</div>
+            </div>
+          `)
+          .join("")
+      : `<div class="empty">${escapeHtml(isZh ? "暂时没有明显的 canonical 压力点。" : "No clear canonical stress points right now.")}</div>`;
   }
 
   function renderAuditLogs(logs) {
@@ -1546,6 +1848,8 @@
   async function loadOverview() {
     const overview = await fetchAdmin("/api/admin/overview");
     renderStats(overview);
+    renderEmergingClusters(overview.emerging_clusters || []);
+    renderStressPoints(overview.canonical_stress_points || []);
   }
 
   async function loadIssues() {
@@ -2478,6 +2782,7 @@
       return;
     }
     if (UI.section === "kb") {
+      await Promise.all([loadInsights(), loadAdminGraph()]);
       return;
     }
     if (UI.section === "files") {
@@ -2576,6 +2881,12 @@
     }
   });
 
+  bindClick("admin-insights-list", async (event) => {
+    const button = event.target.closest('[data-action="select-insight"]');
+    if (!button) return;
+    await withBusyButton(button, UI.busy_loading, () => selectInsight(button.dataset.insightId || ""));
+  });
+
   bindClick("user-list", async (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
@@ -2616,6 +2927,18 @@
   });
 
   document.getElementById("admin-logout-button")?.addEventListener("click", () => logout().catch(showAdminError));
+  document.querySelector('[data-testid="admin-kb-pane-tabs"]')?.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-action="switch-kb-pane"]');
+    if (!button) return;
+    setActiveKbPane(button.dataset.pane || "operations");
+  });
+  document.querySelector('[data-testid="admin-insight-actions"]')?.addEventListener("click", (event) => {
+    const button = event.target.closest('[data-action="review-insight"]');
+    if (!button) return;
+    withBusyButton(button, UI.busy_queue, () => reviewInsight(button.dataset.reviewAction || "")).catch(
+      createErrorHandler({ statusIds: ["admin-insight-status"] })
+    );
+  });
   document.getElementById("admin-explore-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("admin-explore-button"), UI.busy_loading, runExplore).catch((error) => {
       renderExploreFailure(error && error.message ? error.message : String(error || ""));
@@ -2818,6 +3141,10 @@
       createErrorHandler({ statusIds: ["editor-status"] })
     );
   });
+
+  if (UI.section === "kb") {
+    setActiveKbPane(state.kbPane, { persist: false });
+  }
 
   refreshCurrentPage()
     .then(async () => {

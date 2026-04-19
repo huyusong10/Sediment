@@ -278,7 +278,7 @@ def admin_overview_payload(
     kb_path: str | Path,
     stale_after_seconds: int,
 ) -> dict[str, Any]:
-    health = get_health_payload(kb_path)
+    health = get_health_payload(kb_path, store=store)
     jobs = store.list_jobs(limit=200)
     inbox_counts = store.inbox_status_counts() if hasattr(store, "inbox_status_counts") else {}
     pending_inbox = (
@@ -300,6 +300,8 @@ def admin_overview_payload(
         "ready_documents": inbox_counts.get("ready", 0),
         "severity_counts": health["severity_counts"],
         "health_summary": health["summary"],
+        "emerging_clusters": health.get("emerging_clusters", []),
+        "canonical_stress_points": health.get("canonical_stress_points", []),
         "cancel_requested_jobs": sum(
             1 for item in jobs if item["status"] == "cancel_requested"
         ),
@@ -391,7 +393,7 @@ def system_status_payload(
             "staged_documents": inbox_counts.get("staged", 0),
             "ready_documents": inbox_counts.get("ready", 0),
         },
-        "health": get_health_payload(kb_path)["summary"],
+        "health": get_health_payload(kb_path, store=store)["summary"],
         "paths": {
             "kb_path": str(Path(kb_path).resolve()),
             "db_path": str(paths["db_path"]),

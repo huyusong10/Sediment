@@ -103,12 +103,13 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
 
             search_button = page.get_by_test_id("portal-search-button")
-            before_box = search_button.bounding_box()
+            search_input = page.get_by_test_id("portal-search-input")
             page.get_by_test_id("portal-search-input").fill("热备")
             expect(page.get_by_test_id("portal-search-suggestions")).to_contain_text("热备份")
-            after_box = search_button.bounding_box()
-            assert before_box is not None and after_box is not None
-            assert abs(before_box["y"] - after_box["y"]) < 2
+            button_box = search_button.bounding_box()
+            input_box = search_input.bounding_box()
+            assert button_box is not None and input_box is not None
+            assert abs(button_box["y"] - input_box["y"]) < 4
 
             stat_cards = page.locator("#portal-stats .stat")
             expect(stat_cards).to_have_count(5)
@@ -116,10 +117,34 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             second_stat_box = stat_cards.nth(1).bounding_box()
             assert first_stat_box is not None and second_stat_box is not None
             assert abs(first_stat_box["y"] - second_stat_box["y"]) < 4
-            stats_box = page.get_by_test_id("portal-stats").bounding_box()
-            updates_box = page.get_by_test_id("portal-recent-updates").bounding_box()
-            assert stats_box is not None and updates_box is not None
-            assert stats_box["y"] < updates_box["y"]
+            expect(page.get_by_test_id("portal-home-graph-layout")).to_be_visible()
+            page.wait_for_function(
+                "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
+            )
+            assert page.locator("#portal-insights-graph canvas").count() >= 1
+            assert page.get_by_test_id("portal-recent-updates").count() == 0
+            graph_box = page.get_by_test_id("portal-home-graph").bounding_box()
+            search_box = page.get_by_test_id("portal-search-input").bounding_box()
+            assert graph_box is not None and search_box is not None
+            assert graph_box["y"] < search_box["y"]
+            node_ids = page.evaluate(
+                """() => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  return typeof api?.nodeIds === 'function' ? api.nodeIds() : [];
+                }"""
+            )
+            selectable = [item for item in node_ids if not str(item).startswith("anchor::")]
+            assert selectable
+            page.evaluate(
+                """(nodeId) => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  if (typeof api?.selectNodeById === 'function') api.selectNodeById(nodeId);
+                }""",
+                selectable[0],
+            )
+            expect(page.get_by_test_id("portal-graph-focus")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-focus")).not_to_contain_text("打开条目")
+            page.get_by_test_id("portal-graph-focus").get_by_role("button").click()
 
             page.get_by_test_id("portal-search-input").fill("热备份")
             page.get_by_test_id("portal-search-button").click()
@@ -668,17 +693,40 @@ def test_admin_browser_e2e_kb_runtime_state_survives_primary_nav_switch(
             )
 
 
-def test_portal_quartz_page_shows_optional_state(tmp_path: Path, monkeypatch) -> None:
+def test_portal_graph_page_renders_dynamic_insights_surface(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
-            page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
-            expect(page.get_by_test_id("portal-page-title")).to_have_text("Quartz")
-            expect(page).to_have_title(re.compile("Quartz"))
-            expect(page.locator("body")).to_contain_text("Quartz")
-            expect(page.locator("body")).to_contain_text("打开 Quartz")
+            page.goto(f"{live['base_url']}/portal/graph-view?lang=zh", wait_until="domcontentloaded")
+            expect(page).to_have_title(re.compile("知识宇宙"))
+            expect(page.get_by_test_id("portal-graph-immersive-page")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-hint")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-focus")).to_be_hidden()
+            expect(page.locator(".hero")).to_have_count(0)
+            page.wait_for_function(
+                "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
+            )
+            assert page.locator("#portal-insights-graph canvas").count() >= 1
+            node_ids = page.evaluate(
+                """() => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  return typeof api?.nodeIds === 'function' ? api.nodeIds() : [];
+                }"""
+            )
+            selectable = [item for item in node_ids if not str(item).startswith("anchor::")]
+            assert selectable
+            page.evaluate(
+                """(nodeId) => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  if (typeof api?.selectNodeById === 'function') api.selectNodeById(nodeId);
+                }""",
+                selectable[0],
+            )
+            expect(page.get_by_test_id("portal-graph-focus")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-focus")).to_contain_text("最近事件")
+            expect(page.get_by_test_id("portal-graph-focus")).not_to_contain_text("打开条目")
 
 
-def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypatch) -> None:
+def test_portal_graph_page_keeps_quartz_as_new_tab_link(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         quartz_index = live["server_module"].QUARTZ_SITE_DIR / "index.html"
         quartz_index.parent.mkdir(parents=True, exist_ok=True)
@@ -691,12 +739,12 @@ def test_portal_quartz_page_opens_full_site_in_new_tab(tmp_path: Path, monkeypat
         )
 
         with _browser_page() as page:
-            page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
+            page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
             with page.expect_popup() as popup_info:
-                page.get_by_role("link", name="Quartz").click()
+                page.get_by_test_id("portal-graph-quartz-link").locator('a[target="_blank"]').click()
             popup = popup_info.value
             popup.wait_for_load_state("domcontentloaded")
-            expect(page).not_to_have_url(re.compile(".*/quartz/.*"))
+            expect(page).to_have_url(re.compile(".*/portal/graph-view.*"))
             expect(popup).to_have_url(re.compile(".*/quartz/.*"))
             expect(popup.locator("body")).to_contain_text("Quartz Ready")
 

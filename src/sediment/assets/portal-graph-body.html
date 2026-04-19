@@ -1,19 +1,47 @@
-<div class="page">
-  <section class="hero">
-    <div class="hero-top">
-      <div class="brand">
-        __LOGO_INLINE__
-        <div class="brand-copy">
-          <strong>__KNOWLEDGE_NAME__</strong>
-        </div>
-      </div>
-      <div class="nav" data-shell-nav>
-        __NAV_PORTAL__
-        __NAV_GRAPH__
-        __NAV_ADMIN__
+<div class="page page-graph page-graph-immersive" data-testid="portal-graph-immersive-page">
+  <h1 class="page-title sr-only" data-testid="portal-page-title">__PAGE_TITLE__</h1>
+
+  <div class="graph-immersive-shell">
+    <div class="graph-immersive-chrome graph-immersive-chrome-left">
+      __HOME_FLOAT_LINK__
+    </div>
+    <div class="graph-immersive-chrome graph-immersive-chrome-right">
+      <div data-shell-header-actions>
+        <div data-shell-utility></div>
       </div>
     </div>
-    <h1 class="page-title">__KNOWLEDGE_NAME__</h1>
-  </section>
-  __GRAPH_CONTENT__
+    <div
+      class="graph-immersive-secondary-action"
+      data-testid="portal-graph-quartz-link"
+    >
+      __OPEN_QUARTZ_LINK__
+    </div>
+    <div class="graph-immersive-hint" data-testid="portal-graph-hint">__GRAPH_HINT__</div>
+    <div
+      class="graph-frame portal-graph-frame graph-frame-immersive graph-frame-universe"
+      id="portal-insights-graph"
+      data-testid="portal-insights-graph"
+    ></div>
+    <div class="graph-immersive-caption subtle" id="portal-graph-caption">__GRAPH_CAPTION__</div>
+  </div>
+
+  <div class="graph-focus-sheet graph-focus-sheet-immersive" id="portal-graph-focus" data-testid="portal-graph-focus" hidden>
+    <div class="graph-focus-sheet-backdrop" data-action="close-graph-focus"></div>
+    <aside
+      class="graph-focus-sheet-card"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="portal-graph-focus-title"
+    >
+      <div class="row spread graph-focus-sheet-header">
+        <div>
+          <div class="subtle graph-focus-sheet-kicker">__MODAL_TITLE__</div>
+          <h2 id="portal-graph-focus-title" class="graph-focus-sheet-title">__MODAL_TITLE__</h2>
+          <div class="subtle graph-focus-sheet-subtitle" id="portal-graph-focus-subtitle"></div>
+        </div>
+        <button type="button" class="button" data-action="close-graph-focus">__MODAL_CLOSE__</button>
+      </div>
+      <div class="graph-focus-sheet-body" id="portal-graph-focus-body"></div>
+    </aside>
+  </div>
 </div>

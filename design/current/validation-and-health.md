@@ -53,6 +53,11 @@ health 应持续输出以下高价值问题：
 - promotable placeholders：被多次引用、值得提升的缺口
 - canonical gaps：正式条目仍然依赖 placeholder 作为关键概念
 - provenance contamination：来源型链接污染了知识图谱
+- root index skeleton：root index 长期停留在空骨架状态
+- missing segment index：正式条目规模增长后仍没有分段入口
+- low cluster coverage：formal KB 存在，但稳定 cluster surface 过薄
+- latent cluster ready：某个 latent cluster 已满足物化为 `InsightProposal` 的阈值
+- index cluster drift：当前 index 网络与高频 query cluster 已明显脱节
 
 这些检查项的目的，是为 tidy 生成明确工作队列。
 
@@ -81,6 +86,12 @@ health 应持续输出以下高价值问题：
 - `summary`：人类可快速理解的问题摘要
 - `suggested_action`：推荐动作，例如 `run_tidy`、`edit_entry`、`promote_placeholder`
 - `evidence`：必要的上下文、链接目标、缺失字段或引用列表
+
+补充字段：
+
+- `cluster_coverage`：当前 formal KB 被稳定 cluster / index 入口覆盖的比例
+- `emerging_clusters`：高价值 latent knowledge signals 的摘要
+- `canonical_stress_points`：被长尾 query 反复围攻的 canonical entry
 
 管理后台至少要把这些 issue 分成两层：
 

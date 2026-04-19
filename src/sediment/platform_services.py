@@ -6,6 +6,7 @@ import hashlib
 import io
 import ipaddress
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -14,21 +15,44 @@ import uuid
 import zipfile
 from collections import defaultdict
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from sediment.diagnostics import DiagnosticLogger
+from sediment.insights import (
+    build_cluster_key,
+    cluster_state,
+    compute_demand_score,
+    compute_maturity_score,
+    detect_intent,
+    detect_query_language,
+    infer_insight_kind,
+    infer_recommended_action,
+    insight_frontmatter,
+    insight_title_from_cluster,
+    is_ready_for_materialization,
+    normalize_query_for_kb,
+    normalize_subject,
+    parse_insight,
+    render_insight_markdown,
+    slugify_filename,
+    validate_insight_content,
+)
 from sediment.kb import (
     audit_kb,
     extract_wikilinks,
     index_config,
     inventory,
     resolve_kb_document_path,
+    split_sections,
     split_frontmatter,
     validate_entry,
     validate_index,
 )
-from sediment.platform_store import PlatformStore
+from sediment.platform_store import PlatformStore, utc_now
 
 LOGGER = DiagnosticLogger("platform_services")
 
@@ -43,6 +67,27 @@ ALLOWED_MIME_TYPES = {
 }
 ZIP_MIME_TYPES = {"application/zip", "application/x-zip-compressed"}
 SUPPORTED_UPLOAD_SUFFIXES = {".txt", ".md", ".docx", ".pptx"}
+GRAPH_EVENT_BASE_ENERGY = {
+    "ingest_created": 1.0,
+    "ingest_updated": 0.72,
+    "ask_reinforced": 0.78,
+    "proposal_materialized": 0.92,
+    "insight_promoted": 1.05,
+    "insight_merged": 0.88,
+}
+GRAPH_SCENE_BUDGETS = {
+    "home": {"events": 14, "nodes": 40, "edges": 80, "scene_mode": "portal-story"},
+    "full": {"events": 24, "nodes": 70, "edges": 120, "scene_mode": "portal-immersive"},
+    "admin": {"events": 28, "nodes": 90, "edges": 140, "scene_mode": "admin-governance"},
+}
+GRAPH_EVENT_PRIORITY = {
+    "insight_promoted": 6,
+    "insight_merged": 5,
+    "proposal_materialized": 4,
+    "ingest_created": 3,
+    "ingest_updated": 2,
+    "ask_reinforced": 1,
+}
 SUBMISSION_ANALYSIS_SCHEMA = json.dumps(
     {
         "type": "object",
@@ -1098,6 +1143,733 @@ def get_portal_home(kb_path: str | Path, *, store: PlatformStore) -> dict[str, A
     }
 
 
+def _graph_ref(subject_kind: str, subject_id: str) -> str:
+    normalized_kind = str(subject_kind or "").strip()
+    normalized_id = str(subject_id or "").strip()
+    if not normalized_id:
+        return ""
+    if normalized_kind == "canonical_entry":
+        return f"entry::{normalized_id}"
+    if normalized_kind == "insight_proposal":
+        return f"insight::{normalized_id}"
+    if normalized_kind == "query_cluster":
+        return f"cluster::{normalized_id}"
+    if normalized_kind == "index_segment":
+        return f"index::{normalized_id}"
+    if normalized_kind == "cluster_anchor":
+        return f"anchor::{normalized_id}"
+    return normalized_id
+
+
+def _split_graph_ref(value: str) -> tuple[str, str]:
+    normalized = str(value or "").strip()
+    if "::" not in normalized:
+        return "", normalized
+    prefix, raw_id = normalized.split("::", 1)
+    return prefix, raw_id
+
+
+def _event_timestamp(value: str | None) -> datetime:
+    if not value:
+        return datetime.now(timezone.utc)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _graph_event_score(event: dict[str, Any]) -> float:
+    event_type = str(event.get("event_type") or "").strip()
+    details = event.get("details") or {}
+    base_energy = float(details.get("energy") or GRAPH_EVENT_BASE_ENERGY.get(event_type, 0.45))
+    age_seconds = max(
+        (datetime.now(timezone.utc) - _event_timestamp(str(event.get("created_at") or ""))).total_seconds(),
+        0.0,
+    )
+    half_life_days = float(details.get("half_life_days") or 18.0)
+    half_life_seconds = max(half_life_days, 1.0) * 24 * 60 * 60
+    decay = math.exp(-age_seconds / half_life_seconds)
+    reinforcement = 1.0 + float(details.get("reinforcement") or 0.0)
+    return round(base_energy * decay * reinforcement, 4)
+
+
+def _event_priority(event_type: str) -> int:
+    return GRAPH_EVENT_PRIORITY.get(str(event_type or "").strip(), 0)
+
+
+def record_graph_event(
+    store: PlatformStore | None,
+    *,
+    event_type: str,
+    subject_id: str,
+    subject_kind: str,
+    subject_label: str,
+    entry_target: str | None = None,
+    related_ids: list[str] | None = None,
+    details: dict[str, Any] | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any] | None:
+    if store is None or not hasattr(store, "record_graph_event"):
+        return None
+    return store.record_graph_event(
+        event_type=event_type,
+        subject_id=subject_id,
+        subject_kind=subject_kind,
+        subject_label=subject_label,
+        entry_target=entry_target,
+        related_ids=related_ids or [],
+        details=details or {},
+        created_at=created_at,
+    )
+
+
+def emit_explore_graph_events(
+    *,
+    store: PlatformStore | None,
+    cluster: dict[str, Any] | None,
+    proposal: dict[str, Any] | None,
+) -> None:
+    if store is None or cluster is None:
+        return
+    source_entries = [
+        _graph_ref("canonical_entry", item)
+        for item in cluster.get("source_entries") or []
+        if str(item).strip()
+    ]
+    proposal_ref = (
+        _graph_ref("insight_proposal", str(proposal.get("id") or ""))
+        if proposal is not None
+        else ""
+    )
+    related_ids = list(source_entries)
+    if proposal_ref:
+        related_ids.append(proposal_ref)
+    record_graph_event(
+        store,
+        event_type="ask_reinforced",
+        subject_id=str(cluster.get("id") or cluster.get("cluster_key") or ""),
+        subject_kind="query_cluster",
+        subject_label=str(
+            cluster.get("display_query")
+            or cluster.get("normalized_subject")
+            or cluster.get("cluster_key")
+            or "Query cluster"
+        ),
+        related_ids=related_ids,
+        details={
+            "energy": float(cluster.get("demand_score") or 0.0) + 0.35,
+            "stability": float(cluster.get("maturity_score") or 0.0),
+            "intent": str(cluster.get("intent") or ""),
+            "cluster_key": str(cluster.get("cluster_key") or ""),
+            "visual_role": "reinforced_query",
+            "source_entries": [item for item in cluster.get("source_entries") or [] if str(item).strip()],
+            "insight_id": str(proposal.get("id") or cluster.get("insight_id") or "")
+            if proposal is not None or cluster.get("insight_id")
+            else "",
+        },
+        created_at=str(cluster.get("updated_at") or cluster.get("last_seen_at") or utc_now()),
+    )
+    if proposal is None:
+        return
+    supporting_entries = [
+        _graph_ref("canonical_entry", item)
+        for item in proposal.get("supporting_entries") or []
+        if str(item).strip()
+    ]
+    record_graph_event(
+        store,
+        event_type="proposal_materialized",
+        subject_id=str(proposal.get("id") or ""),
+        subject_kind="insight_proposal",
+        subject_label=str(proposal.get("title") or proposal.get("id") or "Insight proposal"),
+        related_ids=[_graph_ref("query_cluster", str(cluster.get("id") or "")), *supporting_entries],
+        details={
+            "energy": 0.94,
+            "stability": float(cluster.get("maturity_score") or 0.0),
+            "kind": str(proposal.get("kind") or "concept"),
+            "review_state": str(proposal.get("review_state") or "proposed"),
+            "hypothesis": str(proposal.get("hypothesis") or ""),
+            "proposed_answer": str(proposal.get("proposed_answer") or ""),
+            "supporting_entries": [
+                item for item in proposal.get("supporting_entries") or [] if str(item).strip()
+            ],
+            "trigger_queries": [
+                item for item in proposal.get("trigger_queries") or [] if str(item).strip()
+            ],
+            "visual_role": "forming_insight",
+        },
+    )
+
+
+def emit_managed_graph_events(
+    *,
+    kb_path: str | Path,
+    store: PlatformStore | None,
+    operation: str,
+    request_payload: dict[str, Any],
+    payload: dict[str, Any],
+    apply_result: dict[str, Any],
+    commit_sha: str,
+) -> None:
+    if store is None:
+        return
+    kb_root = Path(kb_path).resolve()
+    applied_by_path = {
+        str(item.get("relative_path") or ""): item for item in apply_result.get("operations", [])
+    }
+    planned_by_path = {
+        str(item.get("relative_path") or ""): item for item in payload.get("operations", [])
+    }
+
+    if operation == "ingest":
+        for relative_path, applied in applied_by_path.items():
+            if not relative_path.startswith("entries/"):
+                continue
+            planned = planned_by_path.get(relative_path) or {}
+            content = str(planned.get("content") or "")
+            related_links = [
+                _graph_ref("canonical_entry", item)
+                for item in extract_wikilinks(content)
+                if str(item).strip()
+            ]
+            event_type = "ingest_created" if applied.get("change_type") == "create" else "ingest_updated"
+            record_graph_event(
+                store,
+                event_type=event_type,
+                subject_id=str(planned.get("name") or Path(relative_path).stem),
+                subject_kind="canonical_entry",
+                subject_label=str(planned.get("name") or Path(relative_path).stem),
+                entry_target=str(planned.get("name") or Path(relative_path).stem),
+                related_ids=related_links,
+                details={
+                    "energy": 1.0 if event_type == "ingest_created" else 0.72,
+                    "stability": 0.82 if event_type == "ingest_created" else 0.9,
+                    "relative_path": relative_path,
+                    "change_type": str(applied.get("change_type") or ""),
+                    "commit_sha": commit_sha,
+                    "summary": str(payload.get("summary") or ""),
+                    "visual_role": "fresh_ingest" if event_type == "ingest_created" else "refreshed_entry",
+                },
+            )
+        return
+
+    if operation != "insight":
+        return
+
+    action = str(request_payload.get("action") or "").strip()
+    insight_id = str(request_payload.get("insight_id") or "").strip()
+    if action not in {"promote", "merge"} or not insight_id:
+        return
+    detail = get_insight_detail(kb_root, insight_id, store=store)
+    proposal = detail["proposal"]
+    supporting_entries = [
+        _graph_ref("canonical_entry", item)
+        for item in proposal.get("supporting_entries") or []
+        if str(item).strip()
+    ]
+    event_type = "insight_promoted" if action == "promote" else "insight_merged"
+    target_name = ""
+    for relative_path, applied in applied_by_path.items():
+        if relative_path.startswith("entries/") and applied.get("change_type") in {"create", "update"}:
+            target_name = str((planned_by_path.get(relative_path) or {}).get("name") or Path(relative_path).stem)
+            break
+    if not target_name:
+        target_name = str(
+            request_payload.get("new_title")
+            or request_payload.get("target_name")
+            or proposal.get("title")
+            or insight_id
+        ).strip()
+    record_graph_event(
+        store,
+        event_type=event_type,
+        subject_id=target_name,
+        subject_kind="canonical_entry",
+        subject_label=target_name,
+        entry_target=target_name,
+        related_ids=[_graph_ref("insight_proposal", insight_id), *supporting_entries],
+        details={
+            "energy": 1.04 if event_type == "insight_promoted" else 0.88,
+            "stability": 0.98 if event_type == "insight_promoted" else 0.95,
+            "proposal_id": insight_id,
+            "proposal_title": str(proposal.get("title") or insight_id),
+            "supporting_entries": [
+                item for item in proposal.get("supporting_entries") or [] if str(item).strip()
+            ],
+            "visual_role": "recent_canonical",
+            "commit_sha": commit_sha,
+            "review_note": str(request_payload.get("note") or ""),
+        },
+    )
+
+
+def _query_cluster_stats(kb_path: str | Path, store: PlatformStore | None) -> dict[str, Any]:
+    if store is None or not hasattr(store, "list_signal_clusters"):
+        return {
+            "clusters": [],
+            "emerging": [],
+            "stress_points": [],
+            "cluster_coverage": 0.0,
+            "ready_clusters": [],
+        }
+    data = inventory(kb_path)
+    clusters = list(store.list_signal_clusters(limit=200))
+    for cluster in clusters:
+        source_entries = [item for item in cluster.get("source_entries") or [] if item in data["docs"]]
+        cluster["source_entries"] = source_entries
+        cluster["source_entry_count"] = len(source_entries)
+    total_formal = max(len(data["entries"]), 1)
+    covered_entries = {
+        entry
+        for cluster in clusters
+        for entry in cluster.get("source_entries") or []
+        if entry in data["entries"]
+    }
+    cluster_coverage = round(len(covered_entries) / total_formal, 3) if data["entries"] else 0.0
+    emerging = sorted(
+        [
+            cluster
+            for cluster in clusters
+            if cluster.get("status") in {"clustered", "ready", "materialized"}
+        ],
+        key=lambda item: (
+            -float(item.get("demand_score") or 0.0),
+            -float(item.get("maturity_score") or 0.0),
+            str(item.get("last_seen_at") or ""),
+        ),
+    )[:8]
+    stress_points: list[dict[str, Any]] = []
+    by_entry: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"entry": "", "cluster_count": 0, "signal_count": 0, "synthesized_count": 0, "query_examples": []}
+    )
+    for cluster in clusters:
+        for entry in cluster.get("source_entries") or []:
+            bucket = by_entry[entry]
+            bucket["entry"] = entry
+            bucket["cluster_count"] += 1
+            bucket["signal_count"] += int(cluster.get("signal_count") or 0)
+            if str(cluster.get("result_mode") or "") == "synthesized":
+                bucket["synthesized_count"] += 1
+            if cluster.get("display_query") and len(bucket["query_examples"]) < 3:
+                bucket["query_examples"].append(cluster["display_query"])
+    stress_points = sorted(
+        by_entry.values(),
+        key=lambda item: (-item["signal_count"], -item["synthesized_count"], item["entry"]),
+    )[:8]
+    ready_clusters = [
+        cluster
+        for cluster in clusters
+        if cluster.get("status") == "ready" and not cluster.get("insight_id")
+    ]
+    return {
+        "clusters": clusters,
+        "emerging": emerging,
+        "stress_points": stress_points,
+        "cluster_coverage": cluster_coverage,
+        "ready_clusters": ready_clusters,
+    }
+
+
+def _insights_dir(kb_path: str | Path) -> Path:
+    return Path(kb_path).resolve() / "insights"
+
+
+def list_insight_proposals(kb_path: str | Path) -> list[dict[str, Any]]:
+    data = inventory(kb_path)
+    return sorted(
+        list(data.get("insight_docs", {}).values()),
+        key=lambda item: (
+            {"proposed": 0, "observing": 1, "promoted": 2, "merged": 3, "rejected": 4, "archived": 5}.get(
+                str(item.get("review_state") or "proposed"),
+                9,
+            ),
+            str(item.get("title") or item.get("id") or ""),
+        ),
+    )
+
+
+def get_insight_detail(kb_path: str | Path, insight_id: str, *, store: PlatformStore | None = None) -> dict[str, Any]:
+    data = inventory(kb_path)
+    for proposal in data.get("insight_docs", {}).values():
+        if proposal.get("id") == insight_id or proposal.get("name") == insight_id:
+            cluster = None
+            if store is not None and hasattr(store, "list_signal_clusters"):
+                candidates = [
+                    item
+                    for item in store.list_signal_clusters(limit=200)
+                    if item.get("insight_id") == proposal["id"]
+                ]
+                cluster = candidates[0] if candidates else None
+            return {
+                "proposal": proposal,
+                "cluster": cluster,
+                "recommended_action": infer_recommended_action(
+                    kind=str(proposal.get("kind") or "concept"),
+                    supporting_entries=list(proposal.get("supporting_entries") or []),
+                ),
+            }
+    raise FileNotFoundError(insight_id)
+
+
+def _render_frontmatter_with_body(frontmatter: dict[str, Any], body: str) -> str:
+    yaml_block = yaml.safe_dump(frontmatter, allow_unicode=True, sort_keys=False).strip()
+    return f"---\n{yaml_block}\n---\n\n{body.strip()}\n"
+
+
+def _ensure_section(sections: dict[str, str], name: str, content: str) -> dict[str, str]:
+    updated = dict(sections)
+    existing = str(updated.get(name) or "").strip()
+    addition = content.strip()
+    if not addition:
+        return updated
+    if existing:
+        if addition not in existing:
+            updated[name] = f"{existing}\n\n{addition}".strip()
+    else:
+        updated[name] = addition
+    return updated
+
+
+def _compose_entry_body(*, title: str, summary: str, sections: dict[str, str], entry_type: str) -> str:
+    order = ["Scope", "Related"] if entry_type == "concept" else ["Trigger", "Why", "Risks", "Related"]
+    body_parts = [f"# {title}", "", summary.strip() or title]
+    rendered_related = sections.get("Related", "")
+    if rendered_related and "[[" not in rendered_related:
+        rendered_related = "\n".join(f"- [[{item.strip()}]]" for item in rendered_related.splitlines() if item.strip())
+    for name in order:
+        content = sections.get(name, "").strip()
+        if not content:
+            continue
+        body_parts.extend(["", f"## {name}", content])
+    for name, content in sections.items():
+        if name in order or not str(content).strip():
+            continue
+        body_parts.extend(["", f"## {name}", str(content).strip()])
+    return "\n".join(body_parts).strip() + "\n"
+
+
+def prepare_insight_review_payload(
+    kb_path: str | Path,
+    *,
+    insight_id: str,
+    action: str,
+    target_name: str | None = None,
+    note: str = "",
+    entry_type: str | None = None,
+    new_title: str | None = None,
+) -> dict[str, Any]:
+    root = Path(kb_path).resolve()
+    detail = get_insight_detail(root, insight_id)
+    proposal = detail["proposal"]
+    insight_path = Path(proposal["path"])
+    insight_content = insight_path.read_text(encoding="utf-8")
+    insight_frontmatter, insight_body = split_frontmatter(insight_content)
+    insight_sections, _ = split_sections(insight_body)
+    summary = str(proposal.get("proposed_answer") or proposal.get("hypothesis") or proposal.get("title") or "").strip()
+    supporting_entries = list(proposal.get("supporting_entries") or [])
+
+    updated_frontmatter = dict(insight_frontmatter)
+    updated_sections = dict(insight_sections)
+    operations: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    if note.strip():
+        updated_sections = _ensure_section(updated_sections, "Review Notes", f"- {note.strip()}")
+
+    if action == "observe":
+        updated_frontmatter["review_state"] = "observing"
+        operations.append(
+            {
+                "name": insight_path.stem,
+                "relative_path": str(insight_path.relative_to(root)),
+                "change_type": "update",
+                "rationale": "Mark insight proposal as observing",
+                "content": _render_frontmatter_with_body(
+                    updated_frontmatter,
+                    _compose_entry_body(
+                        title=str(updated_frontmatter.get("title") or proposal["title"]),
+                        summary=str(updated_frontmatter.get("hypothesis") or summary),
+                        sections=updated_sections,
+                        entry_type="concept",
+                    ),
+                ),
+                "base_hash": content_hash(insight_content),
+            }
+        )
+        return {"summary": "Insight kept in observing state.", "warnings": warnings, "operations": operations}
+
+    if action == "reject":
+        updated_frontmatter["review_state"] = "rejected"
+        operations.append(
+            {
+                "name": insight_path.stem,
+                "relative_path": str(insight_path.relative_to(root)),
+                "change_type": "update",
+                "rationale": "Reject insight proposal",
+                "content": _render_frontmatter_with_body(
+                    updated_frontmatter,
+                    _compose_entry_body(
+                        title=str(updated_frontmatter.get("title") or proposal["title"]),
+                        summary=str(updated_frontmatter.get("hypothesis") or summary),
+                        sections=updated_sections,
+                        entry_type="concept",
+                    ),
+                ),
+                "base_hash": content_hash(insight_content),
+            }
+        )
+        return {"summary": "Insight rejected.", "warnings": warnings, "operations": operations}
+
+    if action == "promote":
+        canonical_name = str(new_title or proposal.get("title") or proposal["name"]).strip()
+        canonical_entry_type = str(entry_type or ("lesson" if proposal.get("kind") == "lesson" else "concept")).strip()
+        canonical_frontmatter = {
+            "type": canonical_entry_type,
+            "status": "inferred",
+            "aliases": [],
+            "sources": [f"insight:{proposal['id']}"],
+        }
+        canonical_sections = {
+            "Scope" if canonical_entry_type == "concept" else "Trigger": "Derived from a reviewed insight proposal.",
+            "Why" if canonical_entry_type == "lesson" else "Related": "\n".join(
+                f"- [[{item}]]" for item in supporting_entries
+            ).strip(),
+        }
+        if canonical_entry_type == "lesson":
+            canonical_sections["Why"] = summary
+            canonical_sections["Risks"] = "Validate and refine this inferred workflow with domain owners."
+            canonical_sections["Related"] = "\n".join(f"- [[{item}]]" for item in supporting_entries).strip()
+        else:
+            canonical_sections["Scope"] = summary
+            canonical_sections["Related"] = "\n".join(f"- [[{item}]]" for item in supporting_entries).strip()
+        canonical_body = _compose_entry_body(
+            title=canonical_name,
+            summary=summary,
+            sections=canonical_sections,
+            entry_type=canonical_entry_type,
+        )
+        operations.append(
+            {
+                "name": canonical_name,
+                "relative_path": f"entries/{canonical_name}.md",
+                "change_type": "update" if (root / "entries" / f"{canonical_name}.md").exists() else "create",
+                "rationale": "Promote reviewed insight proposal into canonical knowledge",
+                "content": _render_frontmatter_with_body(canonical_frontmatter, canonical_body),
+                "base_hash": content_hash((root / "entries" / f"{canonical_name}.md").read_text(encoding="utf-8"))
+                if (root / "entries" / f"{canonical_name}.md").exists()
+                else None,
+            }
+        )
+        updated_frontmatter["review_state"] = "promoted"
+        updated_sections = _ensure_section(updated_sections, "Review Notes", f"- Promoted to [[{canonical_name}]].")
+        operations.append(
+            {
+                "name": insight_path.stem,
+                "relative_path": str(insight_path.relative_to(root)),
+                "change_type": "update",
+                "rationale": "Mark insight as promoted",
+                "content": _render_frontmatter_with_body(
+                    updated_frontmatter,
+                    _compose_entry_body(
+                        title=str(updated_frontmatter.get("title") or proposal["title"]),
+                        summary=str(updated_frontmatter.get("hypothesis") or summary),
+                        sections=updated_sections,
+                        entry_type="concept",
+                    ),
+                ),
+                "base_hash": content_hash(insight_content),
+            }
+        )
+        return {"summary": f"Promoted insight into `{canonical_name}`.", "warnings": warnings, "operations": operations}
+
+    if action == "merge":
+        if not target_name:
+            raise ValueError("target_name is required for merge")
+        target_path = resolve_kb_document_path(root, target_name)
+        if target_path is None:
+            raise FileNotFoundError(target_name)
+        target_content = target_path.read_text(encoding="utf-8")
+        target_frontmatter, target_body = split_frontmatter(target_content)
+        target_sections, target_preamble = split_sections(target_body)
+        target_entry_type = str(target_frontmatter.get("type") or "concept").strip() or "concept"
+        target_summary = target_preamble.strip() or target_name
+        if target_entry_type == "lesson":
+            target_sections = _ensure_section(target_sections, "Why", summary)
+        else:
+            target_sections = _ensure_section(target_sections, "Scope", summary)
+        target_sections = _ensure_section(
+            target_sections,
+            "Related",
+            "\n".join(f"- [[{item}]]" for item in supporting_entries if item != target_name).strip(),
+        )
+        operations.append(
+            {
+                "name": target_name,
+                "relative_path": str(target_path.relative_to(root)),
+                "change_type": "update",
+                "rationale": "Merge reviewed insight proposal into canonical entry",
+                "content": _render_frontmatter_with_body(
+                    target_frontmatter,
+                    _compose_entry_body(
+                        title=target_name,
+                        summary=target_summary,
+                        sections=target_sections,
+                        entry_type=target_entry_type,
+                    ),
+                ),
+                "base_hash": content_hash(target_content),
+            }
+        )
+        updated_frontmatter["review_state"] = "merged"
+        updated_sections = _ensure_section(updated_sections, "Review Notes", f"- Merged into [[{target_name}]].")
+        operations.append(
+            {
+                "name": insight_path.stem,
+                "relative_path": str(insight_path.relative_to(root)),
+                "change_type": "update",
+                "rationale": "Mark insight as merged",
+                "content": _render_frontmatter_with_body(
+                    updated_frontmatter,
+                    _compose_entry_body(
+                        title=str(updated_frontmatter.get("title") or proposal["title"]),
+                        summary=str(updated_frontmatter.get("hypothesis") or summary),
+                        sections=updated_sections,
+                        entry_type="concept",
+                    ),
+                ),
+                "base_hash": content_hash(insight_content),
+            }
+        )
+        return {"summary": f"Merged insight into `{target_name}`.", "warnings": warnings, "operations": operations}
+
+    raise ValueError(f"unsupported insight review action: {action}")
+
+
+def materialize_insight_proposal(
+    kb_path: str | Path,
+    *,
+    cluster: dict[str, Any],
+) -> dict[str, Any]:
+    root = Path(kb_path).resolve()
+    insights_dir = _insights_dir(root)
+    insights_dir.mkdir(parents=True, exist_ok=True)
+    language = str(cluster.get("language") or "en")
+    title = insight_title_from_cluster(
+        normalized_subject=str(cluster.get("normalized_subject") or cluster.get("display_query") or ""),
+        language=language,
+        intent=str(cluster.get("intent") or "definition"),
+    )
+    cluster_key = str(cluster.get("cluster_key") or "")
+    insight_id = f"insight-{slugify_filename(title)}"
+    if cluster_key:
+        fingerprint = hashlib.sha1(cluster_key.encode("utf-8")).hexdigest()[:8]
+        insight_id = f"{insight_id}-{fingerprint}"
+    frontmatter = insight_frontmatter(cluster, insight_id=insight_id, title=title)
+    content = render_insight_markdown(frontmatter)
+    filename = f"{slugify_filename(title)}.md"
+    target = insights_dir / filename
+    suffix = 2
+    while target.exists():
+        existing = parse_insight(target)
+        if existing.get("id") == insight_id:
+            break
+        target = insights_dir / f"{slugify_filename(title)}-{suffix}.md"
+        suffix += 1
+    target.write_text(content, encoding="utf-8")
+    proposal = parse_insight(target)
+    proposal["recommended_action"] = infer_recommended_action(
+        kind=str(proposal.get("kind") or "concept"),
+        supporting_entries=list(proposal.get("supporting_entries") or []),
+    )
+    return proposal
+
+
+def record_explore_signal(
+    *,
+    kb_path: str | Path,
+    store: PlatformStore,
+    question: str,
+    entrypoint: str,
+    strategy: str,
+    result: dict[str, Any],
+    actor_fingerprint_value: str = "",
+    response_language: str | None = None,
+) -> dict[str, Any]:
+    kb_snapshot = inventory(kb_path)
+    kb_language = str(kb_snapshot.get("default_language") or "en")
+    query_language = detect_query_language(question, default_language=kb_language)
+    normalized_query = normalize_query_for_kb(question, kb_language=kb_language)
+    intent = detect_intent(normalized_query, language=query_language)
+    subject = normalize_subject(normalized_query, language=query_language)
+    cluster_key = build_cluster_key(
+        language=kb_language,
+        intent=intent,
+        normalized_subject=subject,
+    )
+    sources = [str(item).strip() for item in result.get("sources") or [] if str(item).strip()]
+    mode = str(result.get("mode") or "").strip()
+    if not mode:
+        if not sources:
+            mode = "gap"
+        elif len(sources) == 1 and not (result.get("gaps") or []):
+            mode = "direct"
+        else:
+            mode = "synthesized"
+    signal = store.record_question_signal(
+        raw_query=question,
+        normalized_query=normalized_query,
+        query_language=query_language,
+        kb_language=kb_language,
+        response_language=response_language or query_language,
+        entrypoint=entrypoint,
+        strategy=strategy,
+        result_mode=mode,
+        confidence=str(result.get("confidence") or "low"),
+        source_entries=sources,
+        actor_fingerprint=actor_fingerprint_value,
+        cluster_key=cluster_key,
+        intent=intent,
+        normalized_subject=subject,
+        answer_excerpt=str(result.get("answer") or "")[:500],
+    )
+    cluster = store.get_signal_cluster_by_key(cluster_key) or {}
+    proposal = None
+    if cluster.get("status") == "ready" and not cluster.get("insight_id"):
+        proposal = materialize_insight_proposal(kb_path, cluster=cluster)
+        store.attach_insight_to_cluster(
+            cluster_id=str(cluster["id"]),
+            insight_id=str(proposal["id"]),
+            status="materialized",
+        )
+        cluster = store.get_signal_cluster(str(cluster["id"])) or cluster
+    emit_explore_graph_events(
+        store=store,
+        cluster=cluster,
+        proposal=proposal,
+    )
+    envelope = {
+        "query": question,
+        "entrypoint": entrypoint,
+        "strategy": strategy,
+        "mode": mode,
+        "answer": str(result.get("answer") or ""),
+        "confidence": str(result.get("confidence") or "low"),
+        "sources": sources,
+        "proposal_state": "materialized" if proposal else str(cluster.get("status") or "none"),
+        "query_language": query_language,
+        "kb_language": kb_language,
+        "response_language": response_language or query_language,
+        "kb_normalized_query": normalized_query,
+        "signal_id": signal.get("id"),
+        "signal_cluster_id": cluster.get("id"),
+        "insight_id": proposal.get("id") if proposal else cluster.get("insight_id"),
+    }
+    return {"signal": signal, "cluster": cluster, "proposal": proposal, "envelope": envelope}
+
+
 def search_kb(kb_path: str | Path, query: str, *, limit: int = 20) -> list[dict[str, Any]]:
     raw_query = query.strip()
     if not raw_query:
@@ -1276,40 +2048,673 @@ def get_entry_detail(kb_path: str | Path, name: str) -> dict[str, Any]:
     }
 
 
-def graph_payload(kb_path: str | Path) -> dict[str, Any]:
+def graph_payload(
+    kb_path: str | Path,
+    *,
+    store: PlatformStore | None = None,
+    graph_kind: str = "portal",
+    focus: str | None = None,
+    scene: str | None = None,
+) -> dict[str, Any]:
     data = inventory(kb_path)
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-    for name, doc in data["docs"].items():
-        nodes.append(
-            {
-                "id": name,
-                "label": name,
-                "kind": doc["kind"],
-                "entry_type": doc["entry_type"],
-                "status": doc["status"],
-                "inbound_count": doc["inbound_count"],
-            }
+    cluster_stats = _query_cluster_stats(kb_path, store)
+    proposals_by_id = {
+        str(item["id"]): item for item in list_insight_proposals(kb_path)
+    }
+    clusters_by_id = {
+        str(item["id"]): item for item in cluster_stats["clusters"]
+    }
+    scene_key = "admin" if graph_kind == "admin" else ("full" if str(scene or "").strip() == "full" else "home")
+    budget = GRAPH_SCENE_BUDGETS[scene_key]
+    anchor_specs = {
+        "fresh": {"id": "anchor::fresh", "label": "Fresh knowledge basin", "x": -90, "y": 22, "z": 30},
+        "forming": {"id": "anchor::forming", "label": "Forming knowledge basin", "x": 10, "y": 58, "z": -18},
+        "stable": {"id": "anchor::stable", "label": "Stable knowledge basin", "x": 98, "y": -24, "z": 34},
+    }
+    graph_events = (
+        store.list_graph_events(limit=600)
+        if store is not None and hasattr(store, "list_graph_events")
+        else []
+    )
+    selected_events: list[dict[str, Any]] = []
+    for item in graph_events:
+        score = _graph_event_score(item)
+        if score <= 0.08:
+            continue
+        enriched = dict(item)
+        details = enriched.get("details") or {}
+        age_seconds = max(
+            (datetime.now(timezone.utc) - _event_timestamp(str(enriched.get("created_at") or ""))).total_seconds(),
+            0.0,
         )
-        for target in doc["graph_links"]:
-            edges.append({"source": name, "target": target, "kind": "related"})
-    for name, doc in data["index_docs"].items():
-        nodes.append(
-            {
-                "id": name,
-                "label": name,
-                "kind": "index",
-                "entry_type": "index",
-                "status": "n/a",
-                "inbound_count": 0,
-            }
+        half_life_days = float(details.get("half_life_days") or 18.0)
+        half_life_seconds = max(half_life_days, 1.0) * 24 * 60 * 60
+        recentness = math.exp(-age_seconds / half_life_seconds)
+        stability = float(details.get("stability") or 0.0)
+        burst_level = max(
+            0.08,
+            min(
+                1.0,
+                float(details.get("burst_level") or 0.0)
+                or score * 0.72
+                + (0.24 if str(enriched.get("event_type") or "").startswith("ingest") else 0.0)
+                + (0.16 if str(enriched.get("event_type") or "") == "proposal_materialized" else 0.0)
+                - stability * 0.14,
+            ),
         )
-        for target in doc["links"]:
-            edges.append({"source": name, "target": target, "kind": "index_link"})
-    return {"nodes": nodes, "edges": edges}
+        formation_stage = str(details.get("formation_stage") or "").strip()
+        if not formation_stage:
+            event_type = str(enriched.get("event_type") or "")
+            if event_type.startswith("ingest") and burst_level >= 0.7:
+                formation_stage = "bursting"
+            elif event_type in {"proposal_materialized", "ask_reinforced"}:
+                formation_stage = "condensing"
+            elif event_type in {"insight_promoted", "insight_merged"}:
+                formation_stage = "stable"
+            else:
+                formation_stage = "stirring"
+        enriched["_score"] = score
+        enriched["_recentness"] = round(recentness, 4)
+        enriched["_burst_level"] = round(burst_level, 4)
+        enriched["_formation_stage"] = formation_stage
+        selected_events.append(enriched)
+    selected_events.sort(
+        key=lambda item: (
+            -float(item.get("_score") or 0.0),
+            -_event_priority(str(item.get("event_type") or "")),
+            str(item.get("created_at") or ""),
+        )
+    )
+    selected_events = selected_events[: int(budget["events"])]
+
+    nodes_by_id: dict[str, dict[str, Any]] = {}
+    edges_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    stage_priority = {
+        "dormant": 0,
+        "stable": 1,
+        "stirring": 2,
+        "condensing": 3,
+        "bursting": 4,
+    }
+
+    def _stable_seed(value: str) -> int:
+        return int(hashlib.sha1(value.encode("utf-8")).hexdigest()[:8], 16)
+
+    def _position_near(anchor_id: str, node_id: str, spread: float = 42.0) -> tuple[float, float, float]:
+        anchor = anchor_specs.get(anchor_id.replace("anchor::", ""), anchor_specs["stable"])
+        seed = _stable_seed(node_id)
+        dx = ((seed % 200) / 100 - 1) * spread
+        dy = (((seed // 7) % 200) / 100 - 1) * spread * 0.55
+        dz = (((seed // 13) % 200) / 100 - 1) * spread
+        return (
+            round(anchor["x"] + dx, 3),
+            round(anchor["y"] + dy, 3),
+            round(anchor["z"] + dz, 3),
+        )
+
+    def _anchor_for_event(event_type: str, visual_role: str = "") -> str:
+        if event_type.startswith("ingest"):
+            return "anchor::fresh"
+        if event_type in {"proposal_materialized", "ask_reinforced"} or "forming" in visual_role:
+            return "anchor::forming"
+        return "anchor::stable"
+
+    def _canonical_node(name: str) -> dict[str, Any]:
+        doc = data["docs"].get(name) or {}
+        return {
+            "id": _graph_ref("canonical_entry", name),
+            "label": doc.get("title") or name,
+            "kind": "formal",
+            "node_type": "canonical_entry",
+            "entry_type": doc.get("entry_type") or "concept",
+            "status": doc.get("status") or "fact",
+            "state": "stable" if doc.get("status") in {"fact", "inferred"} else "soft",
+            "summary": doc.get("summary") or "",
+            "details": {
+                "related_links": list(doc.get("graph_links") or []),
+                "aliases": list(doc.get("aliases") or []),
+                "sources": list(doc.get("sources") or []),
+            },
+            "entry_target": name,
+        }
+
+    def _proposal_node(proposal_id: str) -> dict[str, Any]:
+        proposal = proposals_by_id.get(proposal_id) or {}
+        return {
+            "id": _graph_ref("insight_proposal", proposal_id),
+            "label": proposal.get("title") or proposal_id,
+            "kind": "insight",
+            "node_type": "insight_proposal",
+            "entry_type": proposal.get("kind") or "concept",
+            "status": proposal.get("review_state") or "proposed",
+            "state": proposal.get("review_state") or "proposed",
+            "summary": proposal.get("proposed_answer") or proposal.get("hypothesis") or "",
+            "details": {
+                "hypothesis": proposal.get("hypothesis") or "",
+                "proposed_answer": proposal.get("proposed_answer") or "",
+                "supporting_entries": list(proposal.get("supporting_entries") or []),
+                "trigger_queries": list(proposal.get("trigger_queries") or []),
+            },
+            "entry_target": None,
+        }
+
+    def _cluster_node(cluster_id: str) -> dict[str, Any]:
+        cluster = clusters_by_id.get(cluster_id) or {}
+        return {
+            "id": _graph_ref("query_cluster", cluster_id),
+            "label": cluster.get("display_query") or cluster.get("normalized_subject") or cluster_id,
+            "kind": "signal_cluster",
+            "node_type": "query_cluster",
+            "entry_type": cluster.get("intent") or "definition",
+            "status": cluster.get("status") or "captured",
+            "state": cluster.get("status") or "captured",
+            "summary": cluster.get("normalized_subject") or "",
+            "details": {
+                "intent": cluster.get("intent") or "",
+                "source_entries": list(cluster.get("source_entries") or []),
+                "demand_score": float(cluster.get("demand_score") or 0.0),
+                "maturity_score": float(cluster.get("maturity_score") or 0.0),
+            },
+            "entry_target": None,
+        }
+
+    def _index_node(name: str, doc: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": _graph_ref("index_segment", name),
+            "label": doc.get("title") or name,
+            "kind": "index",
+            "node_type": "index_segment",
+            "entry_type": "index",
+            "status": "n/a",
+            "state": "stable",
+            "summary": doc.get("summary") or "",
+            "details": {"segment": doc.get("segment") or "", "links": list(doc.get("links") or [])},
+            "entry_target": None,
+        }
+
+    def ensure_anchor(anchor_id: str) -> None:
+        anchor = anchor_specs.get(anchor_id.replace("anchor::", ""), anchor_specs["stable"])
+        if anchor["id"] not in nodes_by_id:
+            nodes_by_id[anchor["id"]] = {
+                "id": anchor["id"],
+                "label": anchor["label"],
+                "kind": "anchor",
+                "node_type": "cluster_anchor",
+                "entry_type": "anchor",
+                "status": "stable",
+                "state": "stable",
+                "summary": anchor["label"],
+                "visual_role": "knowledge_basin",
+                "event_type": "",
+                "energy": 0.35,
+                "stability": 1.0,
+                "burst_level": 0.08,
+                "formation_stage": "stable",
+                "recentness": 0.12,
+                "weight": 1.3,
+                "x": anchor["x"],
+                "y": anchor["y"],
+                "z": anchor["z"],
+                "fx": anchor["x"],
+                "fy": anchor["y"],
+                "fz": anchor["z"],
+            }
+
+    def ensure_node(
+        node: dict[str, Any],
+        *,
+        event_type: str = "",
+        visual_role: str = "",
+        energy: float = 0.4,
+        stability: float = 0.7,
+        anchor_id: str = "anchor::stable",
+        burst_level: float = 0.12,
+        formation_stage: str = "stable",
+        recentness: float = 0.2,
+    ) -> None:
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            return
+        ensure_anchor(anchor_id)
+        existing = nodes_by_id.get(node_id)
+        target = existing or dict(node)
+        priority = _event_priority(event_type)
+        current_priority = _event_priority(str(target.get("event_type") or ""))
+        if not existing or priority >= current_priority:
+            target["event_type"] = event_type
+            target["visual_role"] = visual_role or target.get("visual_role") or "stable_canonical"
+        target["energy"] = round(max(float(target.get("energy") or 0.0), energy), 4)
+        target["stability"] = round(max(float(target.get("stability") or 0.0), stability), 4)
+        target["burst_level"] = round(max(float(target.get("burst_level") or 0.0), burst_level), 4)
+        target["recentness"] = round(max(float(target.get("recentness") or 0.0), recentness), 4)
+        current_stage = str(target.get("formation_stage") or "stable")
+        if stage_priority.get(formation_stage, 0) >= stage_priority.get(current_stage, 0):
+            target["formation_stage"] = formation_stage
+        target["weight"] = round(
+            max(float(target.get("weight") or 1.0), 1.0 + target["energy"] * 1.9 + target["recentness"] * 0.7),
+            4,
+        )
+        target["anchor_id"] = anchor_id
+        if "x" not in target or existing is None:
+            x, y, z = _position_near(anchor_id, node_id, spread=34.0 if target["node_type"] == "canonical_entry" else 26.0)
+            target["x"], target["y"], target["z"] = x, y, z
+        nodes_by_id[node_id] = target
+
+    def add_edge(
+        source: str,
+        target: str,
+        *,
+        edge_type: str,
+        strength: float,
+        activation: float,
+        formation_role: str,
+        pulse_level: float = 0.0,
+    ) -> None:
+        if not source or not target or source == target:
+            return
+        key = tuple(sorted((source, target)) + [edge_type])  # type: ignore[list-item]
+        existing = edges_by_key.get(key)
+        if existing:
+            existing["strength"] = round(max(float(existing.get("strength") or 0.0), strength), 4)
+            existing["activation"] = round(max(float(existing.get("activation") or 0.0), activation), 4)
+            existing["pulse_level"] = round(max(float(existing.get("pulse_level") or 0.0), pulse_level), 4)
+            return
+        edges_by_key[key] = {
+            "source": source,
+            "target": target,
+            "kind": edge_type,
+            "edge_type": edge_type,
+            "strength": round(strength, 4),
+            "activation": round(activation, 4),
+            "formation_role": formation_role,
+            "pulse_level": round(pulse_level, 4),
+        }
+
+    def ensure_reference(ref: str, *, energy: float, anchor_id: str, event_type: str, visual_role: str) -> str:
+        kind, raw_id = _split_graph_ref(ref)
+        if kind == "entry" and raw_id in data["docs"]:
+            ensure_node(
+                _canonical_node(raw_id),
+                event_type=event_type,
+                visual_role=visual_role,
+                energy=energy,
+                stability=0.88 if data["docs"][raw_id].get("status") in {"fact", "inferred"} else 0.66,
+                anchor_id=anchor_id,
+                burst_level=0.12,
+                formation_stage="stable",
+                recentness=0.24,
+            )
+            return _graph_ref("canonical_entry", raw_id)
+        if kind == "insight" and raw_id in proposals_by_id:
+            ensure_node(
+                _proposal_node(raw_id),
+                event_type=event_type,
+                visual_role=visual_role,
+                energy=energy,
+                stability=0.48,
+                anchor_id=anchor_id,
+                burst_level=0.5,
+                formation_stage="condensing",
+                recentness=0.54,
+            )
+            return _graph_ref("insight_proposal", raw_id)
+        if kind == "cluster" and raw_id in clusters_by_id:
+            ensure_node(
+                _cluster_node(raw_id),
+                event_type=event_type,
+                visual_role=visual_role,
+                energy=energy,
+                stability=float(clusters_by_id[raw_id].get("maturity_score") or 0.25),
+                anchor_id=anchor_id,
+                burst_level=0.42,
+                formation_stage="stirring",
+                recentness=0.46,
+            )
+            return _graph_ref("query_cluster", raw_id)
+        if kind == "index" and raw_id in data["index_docs"]:
+            ensure_node(
+                _index_node(raw_id, data["index_docs"][raw_id]),
+                event_type=event_type,
+                visual_role="segment_context",
+                energy=energy,
+                stability=0.9,
+                anchor_id="anchor::stable",
+                burst_level=0.14,
+                formation_stage="stable",
+                recentness=0.22,
+            )
+            return _graph_ref("index_segment", raw_id)
+        return ""
+
+    for event in selected_events:
+        event_type = str(event.get("event_type") or "")
+        details = event.get("details") or {}
+        visual_role = str(details.get("visual_role") or "").strip()
+        anchor_id = _anchor_for_event(event_type, visual_role)
+        subject_kind = str(event.get("subject_kind") or "")
+        subject_id = str(event.get("subject_id") or "")
+        subject_ref = _graph_ref(subject_kind, subject_id)
+        score = float(event.get("_score") or 0.0)
+        if subject_kind == "canonical_entry" and subject_id in data["docs"]:
+            ensure_node(
+                _canonical_node(subject_id),
+                event_type=event_type,
+                visual_role=visual_role or ("recent_canonical" if event_type.startswith("insight_") else "fresh_ingest"),
+                energy=score,
+                stability=float(details.get("stability") or 0.92),
+                anchor_id=anchor_id,
+                burst_level=float(event.get("_burst_level") or 0.2),
+                formation_stage=str(event.get("_formation_stage") or "stable"),
+                recentness=float(event.get("_recentness") or 0.2),
+            )
+        elif subject_kind == "insight_proposal" and subject_id in proposals_by_id:
+            ensure_node(
+                _proposal_node(subject_id),
+                event_type=event_type,
+                visual_role=visual_role or "forming_insight",
+                energy=score,
+                stability=float(details.get("stability") or 0.42),
+                anchor_id=anchor_id,
+                burst_level=float(event.get("_burst_level") or 0.52),
+                formation_stage=str(event.get("_formation_stage") or "condensing"),
+                recentness=float(event.get("_recentness") or 0.58),
+            )
+        elif subject_kind == "query_cluster" and subject_id in clusters_by_id:
+            ensure_node(
+                _cluster_node(subject_id),
+                event_type=event_type,
+                visual_role=visual_role or "reinforced_query",
+                energy=score,
+                stability=float(details.get("stability") or 0.3),
+                anchor_id=anchor_id,
+                burst_level=float(event.get("_burst_level") or 0.44),
+                formation_stage=str(event.get("_formation_stage") or "stirring"),
+                recentness=float(event.get("_recentness") or 0.48),
+            )
+        elif subject_kind == "index_segment" and subject_id in data["index_docs"]:
+            ensure_node(
+                _index_node(subject_id, data["index_docs"][subject_id]),
+                event_type=event_type,
+                visual_role="segment_context",
+                energy=score,
+                stability=0.9,
+                anchor_id="anchor::stable",
+                burst_level=0.12,
+                formation_stage="stable",
+                recentness=float(event.get("_recentness") or 0.22),
+            )
+        ensure_anchor(anchor_id)
+        if subject_ref:
+            add_edge(
+                anchor_id,
+                subject_ref,
+                edge_type="belongs_to_cluster",
+                strength=max(0.35, score),
+                activation=max(0.25, score),
+                formation_role="knowledge_basin",
+                pulse_level=max(0.12, float(event.get("_burst_level") or 0.0) * 0.58),
+            )
+
+        related_refs = [str(item).strip() for item in event.get("related_ids") or [] if str(item).strip()]
+        for ref in related_refs:
+            related_ref = ensure_reference(
+                ref,
+                energy=max(0.22, score * 0.68),
+                anchor_id=anchor_id,
+                event_type=event_type,
+                visual_role="supporting_entry" if ref.startswith("entry::") else "forming_context",
+            )
+            if not related_ref or not subject_ref:
+                continue
+            edge_type = "weak_affinity"
+            formation_role = "story_context"
+            pulse_level = max(0.08, float(event.get("_recentness") or 0.0) * 0.42)
+            if event_type == "ask_reinforced":
+                edge_type = "ask_reinforcement"
+                formation_role = "reinforcement"
+                pulse_level = max(0.42, float(event.get("_burst_level") or 0.0))
+            elif event_type == "proposal_materialized":
+                edge_type = "supports"
+                formation_role = "formation_support"
+                pulse_level = max(0.46, float(event.get("_burst_level") or 0.0))
+            elif event_type in {"insight_promoted", "insight_merged"} and ref.startswith("insight::"):
+                edge_type = "routes_to"
+                formation_role = "canonicalization"
+                pulse_level = max(0.52, float(event.get("_burst_level") or 0.0))
+            elif event_type.startswith("ingest"):
+                edge_type = "weak_affinity"
+                formation_role = "ingest_context"
+                pulse_level = max(0.28, float(event.get("_burst_level") or 0.0) * 0.7)
+            add_edge(
+                subject_ref,
+                related_ref,
+                edge_type=edge_type,
+                strength=max(0.22, score * 0.9),
+                activation=max(0.18, score),
+                formation_role=formation_role,
+                pulse_level=pulse_level,
+            )
+
+    def _fill_stable_context(minimum_visible: int = 9) -> None:
+        ensure_anchor("anchor::stable")
+        visible_entry_refs = {
+            node_id
+            for node_id, node in nodes_by_id.items()
+            if node.get("node_type") == "canonical_entry"
+        }
+        top_entries = sorted(
+            [
+                (name, doc)
+                for name, doc in data["docs"].items()
+                if doc["kind"] == "formal"
+            ],
+            key=lambda item: (-int(item[1].get("inbound_count") or 0), item[0]),
+        )[:10]
+        for name, doc in top_entries:
+            entry_ref = _graph_ref("canonical_entry", name)
+            if entry_ref in visible_entry_refs and len(visible_entry_refs) >= minimum_visible:
+                continue
+            ensure_node(
+                _canonical_node(name),
+                event_type="",
+                visual_role="stable_canonical",
+                energy=max(0.24, 0.15 + float(doc.get("inbound_count") or 0.0) * 0.07),
+                stability=0.94,
+                anchor_id="anchor::stable",
+                burst_level=0.1,
+                formation_stage="stable",
+                recentness=0.18,
+            )
+            visible_entry_refs.add(entry_ref)
+            add_edge(
+                "anchor::stable",
+                entry_ref,
+                edge_type="belongs_to_cluster",
+                strength=0.3,
+                activation=0.18,
+                formation_role="knowledge_basin",
+                pulse_level=0.08,
+            )
+        for name, doc in top_entries:
+            for target in doc.get("graph_links") or []:
+                source_ref = _graph_ref("canonical_entry", name)
+                target_ref = _graph_ref("canonical_entry", target)
+                if source_ref in visible_entry_refs and target_ref in visible_entry_refs:
+                    add_edge(
+                        source_ref,
+                        target_ref,
+                        edge_type="weak_affinity",
+                        strength=0.26,
+                        activation=0.16,
+                        formation_role="stable_context",
+                        pulse_level=0.06,
+                    )
+
+    if not selected_events:
+        _fill_stable_context()
+    elif len([node for node in nodes_by_id.values() if node.get("node_type") != "cluster_anchor"]) < 8:
+        _fill_stable_context()
+
+    visible_doc_names = {
+        raw_id
+        for node_id in nodes_by_id
+        for kind, raw_id in [_split_graph_ref(node_id)]
+        if kind == "entry" and raw_id in data["docs"]
+    }
+    for name in sorted(visible_doc_names):
+        doc = data["docs"][name]
+        for target in doc.get("graph_links") or []:
+            if target in visible_doc_names:
+                add_edge(
+                    _graph_ref("canonical_entry", name),
+                    _graph_ref("canonical_entry", target),
+                    edge_type="weak_affinity",
+                    strength=0.24,
+                    activation=0.18,
+                    formation_role="knowledge_context",
+                    pulse_level=0.08,
+                )
+
+    if scene_key == "admin":
+        index_candidates = [
+            (name, doc)
+            for name, doc in data["index_docs"].items()
+            if not doc.get("is_root")
+            and any(link in visible_doc_names for link in doc.get("links") or [])
+        ][:6]
+        for name, doc in index_candidates:
+            index_ref = ensure_reference(
+                _graph_ref("index_segment", name),
+                energy=0.22,
+                anchor_id="anchor::stable",
+                event_type="",
+                visual_role="segment_context",
+            )
+            for link in doc.get("links") or []:
+                if link in visible_doc_names:
+                    add_edge(
+                        index_ref,
+                        _graph_ref("canonical_entry", link),
+                        edge_type="belongs_to_cluster",
+                        strength=0.3,
+                        activation=0.2,
+                        formation_role="index_projection",
+                        pulse_level=0.08,
+                    )
+
+    nodes = list(nodes_by_id.values())
+    edges = list(edges_by_key.values())
+
+    if focus:
+        focus_id = focus
+        for candidate in (
+            focus,
+            _graph_ref("canonical_entry", focus),
+            _graph_ref("insight_proposal", focus),
+            _graph_ref("query_cluster", focus),
+        ):
+            if any(node["id"] == candidate for node in nodes):
+                focus_id = candidate
+                break
+        related_ids = {focus_id}
+        frontier = {focus_id}
+        for _ in range(2):
+            next_frontier: set[str] = set()
+            for edge in edges:
+                if edge["source"] in frontier or edge["target"] in frontier:
+                    related_ids.add(edge["source"])
+                    related_ids.add(edge["target"])
+                    next_frontier.add(edge["source"])
+                    next_frontier.add(edge["target"])
+            frontier = next_frontier
+        nodes = [node for node in nodes if node["id"] in related_ids]
+        edges = [
+            edge for edge in edges if edge["source"] in related_ids and edge["target"] in related_ids
+        ]
+    else:
+        nodes = sorted(
+            nodes,
+            key=lambda item: (
+                0 if item["node_type"] == "cluster_anchor" else 1,
+                -float(item.get("energy") or 0.0),
+                -float(item.get("weight") or 0.0),
+                item["id"],
+            ),
+        )[: int(budget["nodes"])]
+        visible = {node["id"] for node in nodes}
+        edges = [
+            edge
+            for edge in sorted(
+                edges,
+                key=lambda item: (
+                    -float(item.get("activation") or 0.0),
+                    -float(item.get("strength") or 0.0),
+                    item["source"],
+                    item["target"],
+                ),
+            )
+            if edge["source"] in visible and edge["target"] in visible
+        ][: int(budget["edges"])]
+
+    focus_seed = next(
+        (node["id"] for node in nodes if node["node_type"] != "cluster_anchor"),
+        nodes[0]["id"] if nodes else "",
+    )
+    story_caption = ""
+    if selected_events:
+        lead = selected_events[0]
+        story_caption = str(
+            (lead.get("details") or {}).get("proposed_answer")
+            or lead.get("subject_label")
+            or ""
+        ).strip()
+    elif nodes:
+        story_caption = str(
+            next((node.get("label") for node in nodes if node["node_type"] != "cluster_anchor"), "")
+            or nodes[0].get("label")
+            or ""
+        ).strip()
+
+    return {
+        "graph_version": "insights-v2",
+        "graph_kind": graph_kind,
+        "scene_mode": budget["scene_mode"],
+        "focus_seed": focus_seed,
+        "story_caption": story_caption,
+        "ambient_seed": hashlib.sha1(
+            f"{kb_path}:{scene_key}:{','.join(str(item.get('id') or '') for item in selected_events[:6])}".encode("utf-8")
+        ).hexdigest()[:12],
+        "playback_events": [
+            {
+                "id": str(item.get("id") or f"event-{index}"),
+                "event_type": str(item.get("event_type") or ""),
+                "subject_ref": _graph_ref(str(item.get("subject_kind") or ""), str(item.get("subject_id") or "")),
+                "related_refs": [str(ref) for ref in item.get("related_ids") or [] if str(ref).strip()],
+                "caption": str(
+                    (item.get("details") or {}).get("proposed_answer")
+                    or item.get("subject_label")
+                    or ""
+                ).strip(),
+            }
+            for index, item in enumerate(selected_events[: min(6, len(selected_events))])
+        ],
+        "kb_language": data.get("default_language") or "en",
+        "generated_at": utc_now(),
+        "stats": {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "formal_entry_count": len(data["entries"]),
+            "insight_count": len(data.get("insights") or []),
+            "query_cluster_count": len(cluster_stats["clusters"]),
+            "cluster_coverage": cluster_stats["cluster_coverage"],
+            "event_count": len(selected_events),
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
 
 
-def summarize_health_report(report: dict[str, Any]) -> dict[str, Any]:
+def summarize_health_report(report: dict[str, Any], *, cluster_coverage: float | None = None) -> dict[str, Any]:
     return {
         "formal_entry_count": report["formal_entry_count"],
         "placeholder_count": report["placeholder_count"],
@@ -1319,12 +2724,18 @@ def summarize_health_report(report: dict[str, Any]) -> dict[str, Any]:
         "promotable_placeholder_count": report["promotable_placeholder_count"],
         "canonical_gap_count": report["canonical_gap_count"],
         "invalid_index_count": report["invalid_index_count"],
+        "cluster_coverage": cluster_coverage if cluster_coverage is not None else 0.0,
     }
 
 
-def build_health_issue_queue(kb_path: str | Path) -> list[dict[str, Any]]:
+def build_health_issue_queue(
+    kb_path: str | Path,
+    *,
+    store: PlatformStore | None = None,
+) -> list[dict[str, Any]]:
     report = audit_kb(kb_path)
     data = inventory(kb_path)
+    cluster_stats = _query_cluster_stats(kb_path, store)
     issues: list[dict[str, Any]] = []
 
     for item in report["entry_validation"]:
@@ -1464,6 +2875,69 @@ def build_health_issue_queue(kb_path: str | Path) -> list[dict[str, Any]]:
                 )
             )
 
+    root_doc = data["index_docs"].get("index.root")
+    if root_doc and len(data["entries"]) >= 8 and len(root_doc.get("links") or []) <= 1:
+        issues.append(
+            issue(
+                issue_type="root_index_skeleton",
+                severity="medium",
+                target="index.root",
+                summary="根索引仍接近空骨架，无法承载稳定入口聚类",
+                suggested_action="run_tidy",
+                evidence={"root_links": list(root_doc.get("links") or []), "formal_entry_count": len(data["entries"])},
+            )
+        )
+
+    non_root_indexes = [item for item in data["index_docs"].values() if not item.get("is_root")]
+    if len(data["entries"]) >= 12 and not non_root_indexes:
+        issues.append(
+            issue(
+                issue_type="missing_segment_index",
+                severity="medium",
+                target="indexes",
+                summary="正式条目规模已增长，但缺少分段 index 作为稳定聚类入口",
+                suggested_action="run_tidy",
+                evidence={"formal_entry_count": len(data["entries"])},
+            )
+        )
+
+    cluster_coverage = cluster_stats["cluster_coverage"]
+    if len(data["entries"]) >= 6 and cluster_coverage < 0.5:
+        issues.append(
+            issue(
+                issue_type="low_cluster_coverage",
+                severity="medium",
+                target="knowledge-base",
+                summary="知识聚类覆盖率偏低，索引网络尚未形成足够稳定的知识盆地",
+                suggested_action="run_tidy",
+                evidence={"cluster_coverage": cluster_coverage},
+            )
+        )
+
+    for cluster in cluster_stats["ready_clusters"][:10]:
+        issues.append(
+            issue(
+                issue_type="latent_cluster_ready",
+                severity="low",
+                target=str(cluster.get("normalized_subject") or cluster.get("display_query") or cluster.get("cluster_key") or "cluster"),
+                summary="隐性知识簇已经成熟，建议物化为 insight proposal 或进入整理队列",
+                suggested_action="run_tidy",
+                evidence=cluster,
+            )
+        )
+
+    if non_root_indexes and cluster_coverage < 0.75:
+        issues.append(
+            issue(
+                issue_type="index_cluster_drift",
+                severity="low",
+                target="indexes",
+                summary="现有 index 入口与实际高频知识簇出现偏移，建议重构 segment index",
+                suggested_action="run_tidy",
+                evidence={"cluster_coverage": cluster_coverage, "index_count": len(non_root_indexes)},
+            )
+        )
+
     return sorted(issues, key=lambda item: (severity_rank(item["severity"]), item["target"]))
 
 
@@ -1490,16 +2964,23 @@ def severity_rank(severity: str) -> int:
     return {"blocking": 0, "high": 1, "medium": 2, "low": 3}.get(severity, 4)
 
 
-def get_health_payload(kb_path: str | Path) -> dict[str, Any]:
+def get_health_payload(
+    kb_path: str | Path,
+    *,
+    store: PlatformStore | None = None,
+) -> dict[str, Any]:
     report = audit_kb(kb_path)
-    issues = build_health_issue_queue(kb_path)
+    cluster_stats = _query_cluster_stats(kb_path, store)
+    issues = build_health_issue_queue(kb_path, store=store)
     counts: dict[str, int] = {}
     for item in issues:
         counts[item["severity"]] = counts.get(item["severity"], 0) + 1
     return {
-        "summary": summarize_health_report(report),
+        "summary": summarize_health_report(report, cluster_coverage=cluster_stats["cluster_coverage"]),
         "severity_counts": counts,
         "issues": issues,
+        "emerging_clusters": cluster_stats["emerging"],
+        "canonical_stress_points": cluster_stats["stress_points"],
     }
 
 
@@ -1813,6 +3294,8 @@ def validate_target_content(path: Path, content: str) -> dict[str, Any] | None:
             return validate_index(temp_path)
         finally:
             temp_path.unlink(missing_ok=True)
+    if path.parent.name == "insights":
+        return validate_insight_content(path, content)
     kind = "placeholder" if path.parent.name == "placeholders" else "formal"
     return validate_entry(text=content, name=path.stem, kind=kind)
 

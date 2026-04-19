@@ -127,20 +127,32 @@ uv tool install --from . sediment --force --reinstall --compile-bytecode
 
 ---
 
-## 3.5) Quartz（可选）在内网的处理
+## 3.5) Graph / Quartz 前端构建链（可选）
 
-Sediment 核心 CLI 不依赖 Node/npm；只有 `/portal/graph-view` 的 Quartz 页面需要 npm 依赖。
+Sediment 运行时本身不依赖 Node/npm；终端用户仍然只需要 `pip install sediment`。
 
-如果你需要 Quartz，请把 npm 源切到企业内部 registry 后再安装：
+只有在你要修改或重建浏览器图形资产时，才需要 Node/npm，例如：
+
+- `/portal/graph-view` 的 Insights Graph
+- 可选的 Quartz 运行时资源
+
+如果你需要重建这些前端资产，请先把 npm 源切到企业内部 registry：
 
 ```bash
-# 示例
 npm config set registry https://<your-internal-npm>/
+cd /path/to/Sediment/frontend/graph
+npm ci
+python ../../scripts/build_graph_assets.py
+```
+
+如果你不改图前端，这一步可以跳过，不影响 CLI、主流程和 wheel 安装。
+
+如果你还需要单独安装 Quartz 运行时，请继续在共享 Sediment state 目录下执行：
+
+```bash
 cd <sediment-state>/quartz-runtime/quartz
 npm i
 ```
-
-如果你不需要图谱页，可以先跳过 Quartz，不影响 CLI 与主流程。
 
 ---
 

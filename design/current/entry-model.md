@@ -8,6 +8,12 @@ Sediment 当前使用三类知识条目：
 
 正式条目放在 `entries/`，缺口条目放在 `placeholders/`。
 
+补充判断：
+
+- `entries/` 继续承载 canonical knowledge state
+- `knowledge-base/insights/` 承载“推理出、待确认”的 `InsightProposal`
+- `insights/` 是白盒层，但默认不属于公共 ask 的 canonical knowledge surface
+
 ## 1. Formal Entry Frontmatter
 
 `concept` 和 `lesson` 统一使用 YAML frontmatter：
@@ -111,6 +117,38 @@ aliases: []
 
 - 文件必须明确说明“缺了什么”
 - placeholder 可以作为 gap evidence 使用，但不能单独充当强证据
+
+## 4.5 InsightProposal
+
+`InsightProposal` 是平台层的白盒知识候选，不等同于正式条目。
+
+当前目录与格式：
+
+- 存放目录：`knowledge-base/insights/`
+- 文件格式：Markdown + YAML frontmatter
+- 典型 frontmatter：
+
+```yaml
+id: insight-hot-backup-workflow-1234abcd
+title: Hot backup workflow
+kind: workflow
+review_state: proposed
+origin: explore
+```
+
+正文固定包含：
+
+- `Hypothesis`
+- `Proposed Answer`
+- `Supporting Entries`
+- `Trigger Queries`
+- `Review Notes`
+
+约束：
+
+- `review_state` 只表示工作流状态，不表示 epistemic truth
+- proposal 可以被 `observe / reject / merge / promote`
+- 只有 `promote` / `merge` 之后，知识才进入 canonical layer
 
 ## 5. Provenance 约束在条目模型中的落地
 

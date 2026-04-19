@@ -8,6 +8,7 @@ from typing import Any
 
 import yaml
 
+from sediment.insights import DEFAULT_KB_LANGUAGE, parse_insight
 from sediment.i18n import kb_localized_aliases, kb_sentence_markers
 from sediment.settings import load_settings
 
@@ -249,6 +250,7 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
     entry_objects: dict[str, ParsedEntry] = {}
     alias_map: dict[str, list[str]] = defaultdict(list)
     index_objects: dict[str, ParsedIndex] = {}
+    insight_objects: dict[str, dict[str, Any]] = {}
 
     for kind, subdir in (("formal", "entries"), ("placeholder", "placeholders")):
         current = root / subdir
@@ -294,9 +296,24 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
         parsed_index = parse_index(path)
         index_objects[parsed_index.name] = parsed_index
 
+    insights_dir = root / "insights"
+    if insights_dir.is_dir():
+        for path in sorted(insights_dir.glob("*.md")):
+            if path.name == ".gitkeep":
+                continue
+            parsed = parse_insight(path)
+            insight_objects[parsed["id"]] = parsed
+
+    root_index = root / index_config()["root_file"]
+    default_language = DEFAULT_KB_LANGUAGE
+    if root_index.is_file():
+        frontmatter, _ = split_frontmatter(root_index.read_text(encoding="utf-8"))
+        default_language = str(frontmatter.get("default_language") or "").strip().lower() or DEFAULT_KB_LANGUAGE
+
     return {
         "kb_path": str(root),
         "index_config": index_config(),
+        "default_language": default_language,
         "entries": entries,
         "placeholders": placeholders,
         "aliases": {alias: sorted(set(names)) for alias, names in alias_map.items()},
@@ -305,6 +322,9 @@ def inventory(kb_path: str | Path) -> dict[str, Any]:
         "indexes": sorted(index_objects.keys()),
         "index_objects": index_objects,
         "index_docs": {name: item.to_record() for name, item in index_objects.items()},
+        "insights": sorted(insight_objects.keys()),
+        "insight_objects": insight_objects,
+        "insight_docs": insight_objects,
         "docs": docs,
     }
 
@@ -328,6 +348,7 @@ def resolve_kb_document_path(kb_path: str | Path, filename: str) -> Path | None:
     candidates = [
         root / "entries" / f"{filename}.md",
         root / "placeholders" / f"{filename}.md",
+        root / "insights" / f"{filename}.md",
         root / index_config()["root_file"],
     ]
     for path in _index_paths(root):

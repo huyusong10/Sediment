@@ -78,15 +78,23 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
   - Quartz 关系图谱必须表达知识条目之间的关系；导航型索引页（根索引与分段索引）可以保留在站点导航中，但不能作为图谱节点污染关系视图
   - 当当前页面本身是导航型索引页时，局部关系图组件应直接隐藏，而不是展示空白图谱框
 - `/portal/graph-view`
-  - 兼容性入口
-  - Quartz 已构建时重定向到 `/quartz/`
-  - Quartz 未构建时显示 fallback 说明页
-  - 意见反馈
+  - Sediment 自己的动态 `Insights Graph`
+  - 用于表达“隐性知识正在形成”的知识宇宙 / 知识磁场
+  - 不再重定向到 `/quartz/`
+  - 保留弱化后的 `Open Quartz` 次级入口，Quartz 继续承担 canonical knowledge 的静态图谱
+  - 门户图以形成感、强化通路、凝聚中的知识和局部事件回放为重点，不直接暴露后台治理术语
+  - 门户与后台共用同一套 3D 图引擎，但门户使用 `portal-story` 渲染 profile，后台使用 `admin-governance`
+  - 图页默认是沉浸式宇宙界面，不再沿用普通门户页头、页标题和右侧说明栏
+  - 节点默认点击行为是打开右侧 `focus sheet`，而不是立即跳转条目；portal 侧不再提供“打开条目”主动作
 
 ### 2.3 前台功能要求
 
 - 支持 live suggestion 下拉、debounce、键盘导航与“查看全部结果”
-- 搜索建议弹层不应导致搜索按钮、统计区或最近更新发生布局位移
+- 首页不再保留“最近更新”并列模块；Graph hero 直接成为主叙事面
+- 首页 `知识宇宙` hero 必须全宽独占一行，不允许右侧再并排说明或统计面板切碎主视觉
+- Graph hero 必须在首页首屏可见范围内展示 3D 场景，让用户第一眼直接感知“知识正在形成”
+- 首页图下方只允许存在轻量信息带；legend、snapshot 与 formation story 必须收敛为横向辅助信息，而不是回退为双栏工作台
+- 搜索建议弹层不应导致搜索按钮、统计区或 Graph hero 发生布局位移
 - 搜索状态文案固定在搜索控件下方，并预留稳定高度，避免 suggestion / 搜索态切换时推挤按钮或结果区
 - 支持查看结构化条目详情，而不是 modal-only 渲染
 - 支持查看 Markdown 正文渲染结果
@@ -132,19 +140,23 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
   - health 摘要
   - 只读问题概览
   - 最近活动与审计
+  - 增加 `emerging clusters`、`cluster coverage` 与 `canonical stress points`
   - 治理焦点列表和最近活动列表都设置较大的最大高度并启用滚动，避免后台首屏被超长队列无限拉长
   - 两列信息卡片使用 top-aligned 布局，不把短列强行拉伸成与长列等高
 - `/admin/kb`
   - 显示名称为“知识库管理”
-  - 模块职责：在同一工作台里完成导入、治理触发、探索诊断三类动作，而不是承载文件编辑流程
-  - 桌面端布局采用“左上 ingest + 右上 tidy + 右下 explore + 下方 Live 诊断区”的工作台结构，避免把三类动作堆成同一纵向长表单
+  - 模块职责：作为知识运营中枢，在同一工作台里完成导入、治理触发、隐性知识审阅、治理图诊断与 Live 轨迹，而不是承载文件编辑流程
+  - 顶层不再新增 `/admin/insights`；Insights 相关能力吸收进 `/admin/kb`
+  - 当前工作台拆成四个子工作区：`operations / insights / graph / live`
   - 对外契约：
 
     | 区域 | 用户输入 | 成功反馈 | 失败反馈 |
     | --- | --- | --- | --- |
     | Ingest | 文件、文件夹或压缩包 | 创建 `uploaded_document` inbox item，并经 ready / batch 入队 ingest；结果写入消息区与 Live | 在消息区与 Live 中暴露失败原因 |
     | Tidy | 单个原因输入 | 以知识库治理 scope 创建 tidy 任务；结果写入消息区与 Live | 在消息区与 Live 中暴露失败原因 |
-    | Explore | 问题 / 场景输入 | 成功结果必须来自 Agent 输出，并在结果区展示 | 失败必须显示显式失败态，不能把固定错误包装成回答卡片 |
+    | Explore | 问题 / 场景输入 | 成功结果必须来自 Agent 输出，并在结果区展示；同时写入 signal / cluster | 失败必须显示显式失败态，不能把固定错误包装成回答卡片 |
+    | Insights | 选择 proposal、填写目标 / 标题 / 备注 | 创建受管 `insight_review` job，并把结果写入版本历史 | 在消息区与 Live 中暴露失败原因 |
+    | Graph | 选择图谱节点 | 展示 cluster / proposal / canonical 之间的治理关系，并允许跳转到 insights / files | 图数据缺失时展示明确空状态 |
     | Live | 无额外输入 | 持续追加 ingest / tidy / explore 的请求与运行轨迹 | 保留最后一条失败诊断，便于人工排障 |
 
   - 共享约束：
@@ -233,10 +245,29 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
 
 图谱节点至少区分：
 
-- `concept`
-- `lesson`
-- `placeholder`
-- `index`
+- `cluster_anchor`
+- `query_cluster`
+- `insight_proposal`
+- `canonical_entry`
+- `index_segment`
+
+图谱边至少区分：
+
+- `weak_affinity`
+- `ask_reinforcement`
+- `supports`
+- `routes_to`
+- `belongs_to_cluster`
+
+补充约束：
+
+- 门户图和后台图共用同一 graph payload，但采用不同渲染 profile
+- 门户图强调形成感与动效；后台图强调证据、去向和动作
+- 门户首页与 `/portal/graph-view` 共用同一事件驱动数据源：首页是压缩 hero 视图，图页是完整沉浸式视图
+- 图谱默认只投影近期或仍有能量的 ingest / ask / proposal / promote / merge 事件局部，不再尝试浏览全量知识库存
+- 门户图的视觉重点是“小核心点 + halo + 事件喷发 + 通路脉冲”，而不是 Quartz 风格的全量大节点库存图
+- 当近期事件不足时，门户图允许用最近稳定 canonical + 一跳弱连接补足构图，但仍必须按“形成中”语义渲染，不能退回静态 inventory 图
+- `cluster / segment` 是检索与可视化投影，不等于目录 taxonomy
 
 图谱边至少区分：
 

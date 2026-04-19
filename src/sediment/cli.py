@@ -903,7 +903,9 @@ def _write_instance_scaffold(
 
 
 def _default_root_index_scaffold(*, knowledge_label: str, locale: str) -> str:
-    is_zh = str(locale).strip().lower() == "zh"
+    normalized_locale = str(locale).strip().lower()
+    is_zh = normalized_locale == "zh"
+    default_language = "zh" if normalized_locale.startswith("zh") else "en"
     summary = (
         "把正式条目或后续分段索引链接到这里，作为知识库的顶层入口。"
         if is_zh
@@ -914,6 +916,7 @@ def _default_root_index_scaffold(*, knowledge_label: str, locale: str) -> str:
             "---",
             "kind: index",
             "segment: root",
+            f"default_language: {default_language}",
             "---",
             f"# {knowledge_label}",
             "",

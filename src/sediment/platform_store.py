@@ -7,7 +7,20 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-JSON_FIELDS = {"request_payload", "result_payload", "details", "analysis"}
+from sediment.insights import (
+    cluster_state,
+    compute_demand_score,
+    compute_maturity_score,
+)
+
+JSON_FIELDS = {
+    "request_payload",
+    "result_payload",
+    "details",
+    "related_ids",
+    "analysis",
+    "source_entries",
+}
 ACTIVE_INGEST_JOB_STATUSES = (
     "queued",
     "running",
@@ -180,6 +193,73 @@ class PlatformStore:
 
                 CREATE INDEX IF NOT EXISTS idx_ingest_batches_status
                 ON ingest_batches(status, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS question_signals (
+                    id TEXT PRIMARY KEY,
+                    raw_query TEXT NOT NULL,
+                    normalized_query TEXT NOT NULL,
+                    query_language TEXT NOT NULL,
+                    kb_language TEXT NOT NULL,
+                    response_language TEXT NOT NULL,
+                    entrypoint TEXT NOT NULL,
+                    strategy TEXT NOT NULL,
+                    result_mode TEXT NOT NULL,
+                    confidence TEXT NOT NULL,
+                    source_entries TEXT,
+                    actor_fingerprint TEXT,
+                    cluster_key TEXT NOT NULL,
+                    answer_excerpt TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_question_signals_cluster_created
+                ON question_signals(cluster_key, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_question_signals_created
+                ON question_signals(created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS signal_clusters (
+                    id TEXT PRIMARY KEY,
+                    cluster_key TEXT NOT NULL UNIQUE,
+                    cluster_kind TEXT NOT NULL,
+                    language TEXT NOT NULL,
+                    intent TEXT NOT NULL,
+                    normalized_subject TEXT NOT NULL,
+                    display_query TEXT NOT NULL,
+                    result_mode TEXT NOT NULL,
+                    source_entries TEXT,
+                    signal_count INTEGER NOT NULL DEFAULT 0,
+                    unique_actor_count INTEGER NOT NULL DEFAULT 0,
+                    demand_score REAL NOT NULL DEFAULT 0,
+                    maturity_score REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    insight_id TEXT,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    materialized_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_signal_clusters_status_updated
+                ON signal_clusters(status, updated_at DESC);
+
+                CREATE TABLE IF NOT EXISTS graph_events (
+                    id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    subject_id TEXT NOT NULL,
+                    subject_kind TEXT NOT NULL,
+                    subject_label TEXT NOT NULL,
+                    entry_target TEXT,
+                    related_ids TEXT,
+                    details TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_graph_events_type_created
+                ON graph_events(event_type, created_at DESC);
+
+                CREATE INDEX IF NOT EXISTS idx_graph_events_created
+                ON graph_events(created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS repo_locks (
                     id TEXT PRIMARY KEY,
@@ -1580,6 +1660,367 @@ class PlatformStore:
                 """,
                 (limit,),
             ).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def record_question_signal(
+        self,
+        *,
+        raw_query: str,
+        normalized_query: str,
+        query_language: str,
+        kb_language: str,
+        response_language: str,
+        entrypoint: str,
+        strategy: str,
+        result_mode: str,
+        confidence: str,
+        source_entries: list[str],
+        cluster_key: str,
+        intent: str,
+        normalized_subject: str,
+        actor_fingerprint: str = "",
+        answer_excerpt: str = "",
+    ) -> dict[str, Any]:
+        signal_id = uuid.uuid4().hex
+        now = utc_now()
+        encoded_sources = self._encode_json(list(dict.fromkeys(source_entries)))
+        with self._connect() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO question_signals (
+                        id,
+                        raw_query,
+                        normalized_query,
+                        query_language,
+                        kb_language,
+                        response_language,
+                        entrypoint,
+                        strategy,
+                        result_mode,
+                        confidence,
+                        source_entries,
+                        actor_fingerprint,
+                        cluster_key,
+                        answer_excerpt,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        signal_id,
+                        raw_query,
+                        normalized_query,
+                        query_language,
+                        kb_language,
+                        response_language,
+                        entrypoint,
+                        strategy,
+                        result_mode,
+                        confidence,
+                        encoded_sources,
+                        actor_fingerprint,
+                        cluster_key,
+                        answer_excerpt,
+                        now,
+                    ),
+                )
+                cluster_row = conn.execute(
+                    """
+                    SELECT *
+                    FROM signal_clusters
+                    WHERE cluster_key = ?
+                    """,
+                    (cluster_key,),
+                ).fetchone()
+                rows = conn.execute(
+                    """
+                    SELECT source_entries, actor_fingerprint, result_mode, created_at
+                    FROM question_signals
+                    WHERE cluster_key = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (cluster_key,),
+                ).fetchall()
+                unique_sources: list[str] = []
+                actors: set[str] = set()
+                last_seen_at = now
+                for row in rows:
+                    for item in json.loads(row["source_entries"] or "[]"):
+                        if item not in unique_sources:
+                            unique_sources.append(item)
+                    if str(row["actor_fingerprint"] or "").strip():
+                        actors.add(str(row["actor_fingerprint"]))
+                    last_seen_at = str(row["created_at"] or last_seen_at)
+                signal_count = len(rows)
+                unique_actor_count = len(actors)
+                demand_score = compute_demand_score(
+                    signal_count=signal_count,
+                    unique_actor_count=unique_actor_count,
+                    last_seen_at=last_seen_at,
+                )
+                maturity_score = compute_maturity_score(
+                    signal_count=signal_count,
+                    unique_actor_count=unique_actor_count,
+                    source_entries=unique_sources,
+                    mode=result_mode,
+                    normalized_subject=normalized_subject,
+                )
+                status = cluster_state(
+                    signal_count=signal_count,
+                    unique_actor_count=unique_actor_count,
+                    source_entries=unique_sources,
+                    demand_score=demand_score,
+                    maturity_score=maturity_score,
+                    insight_id=(
+                        str(cluster_row["insight_id"]).strip()
+                        if cluster_row is not None and cluster_row["insight_id"] is not None
+                        else None
+                    ),
+                )
+                if cluster_row is None:
+                    conn.execute(
+                        """
+                        INSERT INTO signal_clusters (
+                            id,
+                            cluster_key,
+                            cluster_kind,
+                            language,
+                            intent,
+                            normalized_subject,
+                            display_query,
+                            result_mode,
+                            source_entries,
+                            signal_count,
+                            unique_actor_count,
+                            demand_score,
+                            maturity_score,
+                            status,
+                            insight_id,
+                            first_seen_at,
+                            last_seen_at,
+                            materialized_at,
+                            updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            uuid.uuid4().hex,
+                            cluster_key,
+                            "query_cluster",
+                            kb_language,
+                            intent,
+                            normalized_subject,
+                            raw_query,
+                            result_mode,
+                            self._encode_json(unique_sources),
+                            signal_count,
+                            unique_actor_count,
+                            demand_score,
+                            maturity_score,
+                            status,
+                            None,
+                            now,
+                            last_seen_at,
+                            None,
+                            now,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE signal_clusters
+                        SET language = ?,
+                            intent = ?,
+                            normalized_subject = ?,
+                            display_query = ?,
+                            result_mode = ?,
+                            source_entries = ?,
+                            signal_count = ?,
+                            unique_actor_count = ?,
+                            demand_score = ?,
+                            maturity_score = ?,
+                            status = ?,
+                            last_seen_at = ?,
+                            updated_at = ?
+                        WHERE cluster_key = ?
+                        """,
+                        (
+                            kb_language,
+                            intent,
+                            normalized_subject,
+                            raw_query,
+                            result_mode,
+                            self._encode_json(unique_sources),
+                            signal_count,
+                            unique_actor_count,
+                            demand_score,
+                            maturity_score,
+                            status,
+                            last_seen_at,
+                            now,
+                            cluster_key,
+                        ),
+                    )
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            else:
+                conn.execute("COMMIT")
+        signal = self.get_question_signal(signal_id)
+        assert signal is not None
+        return signal
+
+    def get_question_signal(self, signal_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM question_signals WHERE id = ?",
+                (signal_id,),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def list_question_signals(
+        self,
+        *,
+        cluster_key: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 500))
+        query = "SELECT * FROM question_signals"
+        params: list[Any] = []
+        if cluster_key:
+            query += " WHERE cluster_key = ?"
+            params.append(cluster_key)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def get_signal_cluster(self, cluster_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM signal_clusters WHERE id = ?",
+                (cluster_id,),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def get_signal_cluster_by_key(self, cluster_key: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM signal_clusters WHERE cluster_key = ?",
+                (cluster_key,),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def list_signal_clusters(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 500))
+        query = "SELECT * FROM signal_clusters"
+        params: list[Any] = []
+        if status:
+            query += " WHERE status = ?"
+            params.append(status)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [self._decode_row(row) for row in rows]
+
+    def attach_insight_to_cluster(
+        self,
+        *,
+        cluster_id: str,
+        insight_id: str,
+        status: str = "materialized",
+    ) -> dict[str, Any] | None:
+        now = utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE signal_clusters
+                SET insight_id = ?,
+                    status = ?,
+                    materialized_at = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (insight_id, status, now, now, cluster_id),
+            )
+        return self.get_signal_cluster(cluster_id)
+
+    def record_graph_event(
+        self,
+        *,
+        event_type: str,
+        subject_id: str,
+        subject_kind: str,
+        subject_label: str,
+        entry_target: str | None = None,
+        related_ids: list[str] | None = None,
+        details: dict[str, Any] | None = None,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        event_id = uuid.uuid4().hex
+        now = created_at or utc_now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO graph_events (
+                    id,
+                    event_type,
+                    subject_id,
+                    subject_kind,
+                    subject_label,
+                    entry_target,
+                    related_ids,
+                    details,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    event_type,
+                    subject_id,
+                    subject_kind,
+                    subject_label,
+                    entry_target,
+                    self._encode_json(list(dict.fromkeys(related_ids or []))),
+                    self._encode_json(details),
+                    now,
+                ),
+            )
+        return self.get_graph_event(event_id)
+
+    def get_graph_event(self, event_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM graph_events WHERE id = ?",
+                (event_id,),
+            ).fetchone()
+        return self._decode_row(row)
+
+    def list_graph_events(
+        self,
+        *,
+        event_types: tuple[str, ...] | None = None,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(limit, 1000))
+        query = "SELECT * FROM graph_events"
+        params: list[Any] = []
+        if event_types:
+            placeholders = ", ".join("?" for _ in event_types)
+            query += f" WHERE event_type IN ({placeholders})"
+            params.extend(event_types)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
         return [self._decode_row(row) for row in rows]
 
     def create_admin_session(

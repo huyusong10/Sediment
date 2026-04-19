@@ -137,8 +137,35 @@ def tracked_changes(*, repo_root: str | Path, tracked_paths: list[str]) -> list[
     return changes
 
 
-def ensure_tracked_paths_clean(*, repo_root: str | Path, tracked_paths: list[str]) -> None:
+def _normalize_pathspecs(paths: list[str] | tuple[str, ...] | None) -> list[str]:
+    normalized: list[str] = []
+    for item in paths or []:
+        value = str(item).strip().replace("\\", "/").lstrip("./")
+        if not value:
+            continue
+        normalized.append(value.rstrip("/"))
+    return normalized
+
+
+def ensure_tracked_paths_clean(
+    *,
+    repo_root: str | Path,
+    tracked_paths: list[str],
+    allowed_paths: list[str] | None = None,
+    allowed_prefixes: list[str] | None = None,
+) -> None:
     changes = tracked_changes(repo_root=repo_root, tracked_paths=tracked_paths)
+    allowed = set(_normalize_pathspecs(allowed_paths))
+    prefixes = tuple(
+        f"{prefix}/" for prefix in _normalize_pathspecs(allowed_prefixes)
+    )
+    if allowed or prefixes:
+        changes = [
+            item
+            for item in changes
+            if item["path"] not in allowed
+            and not any(item["path"].startswith(prefix) for prefix in prefixes)
+        ]
     if changes:
         paths = ", ".join(sorted({item["path"] for item in changes}))
         raise GitOperationError(
@@ -146,9 +173,17 @@ def ensure_tracked_paths_clean(*, repo_root: str | Path, tracked_paths: list[str
         )
 
 
-def restore_tracked_paths(*, repo_root: str | Path, tracked_paths: list[str]) -> None:
+def restore_tracked_paths(
+    *,
+    repo_root: str | Path,
+    tracked_paths: list[str],
+    paths: list[str] | None = None,
+) -> None:
     root = Path(repo_root).resolve()
-    _run_git(root, "restore", "--staged", "--worktree", "--", *tracked_paths)
+    targets = list(tracked_paths) if paths is None else _normalize_pathspecs(paths)
+    if not targets:
+        return
+    _run_git(root, "restore", "--staged", "--worktree", "--", *targets)
 
 
 def recent_commits(*, repo_root: str | Path, limit: int = 12) -> list[dict[str, Any]]:
@@ -184,7 +219,7 @@ def recent_commits(*, repo_root: str | Path, limit: int = 12) -> list[dict[str, 
                 "trailers": trailers,
                 "sediment_operation": operation,
                 "is_sediment_managed": bool(operation),
-                "revertible": operation in {"ingest", "tidy"},
+                "revertible": operation in {"ingest", "tidy", "insight"},
             }
         )
     return commits
@@ -198,11 +233,12 @@ def commit_tracked_changes(
     operation: str,
     reason: str,
     extra_trailers: dict[str, str | None] | None = None,
+    paths: list[str] | None = None,
 ) -> dict[str, Any]:
     git = git_settings_payload(settings)
     repo_root = git["repo_root"]
     _ensure_ready_repo(repo_root)
-    tracked = git["tracked_paths"]
+    tracked = list(git["tracked_paths"]) if paths is None else _normalize_pathspecs(paths)
     changes = tracked_changes(repo_root=repo_root, tracked_paths=tracked)
     if not changes:
         raise GitOperationError("no tracked changes to commit")

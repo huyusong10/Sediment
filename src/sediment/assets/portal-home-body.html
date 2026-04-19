@@ -21,7 +21,57 @@
     </div>
   </section>
 
-  <section class="panel">
+  <section class="panel graph-universe-hero" data-testid="portal-home-graph-layout">
+    <div class="row spread graph-universe-head">
+      <div class="graph-universe-copy">
+        <h2>__GRAPH_HERO_TITLE__</h2>
+        <p class="subtle">__GRAPH_HERO_NOTE__</p>
+      </div>
+      <div class="graph-universe-actions">__OPEN_GRAPH_LINK__</div>
+    </div>
+    <div
+      class="graph-frame portal-graph-frame graph-frame-home-universe"
+      id="portal-insights-graph"
+      data-testid="portal-home-graph"
+    ></div>
+    <div class="subtle graph-caption" id="portal-graph-caption">__GRAPH_CAPTION__</div>
+  </section>
+
+  <section class="panel graph-universe-strip" data-testid="portal-universe-strip">
+    <div class="graph-universe-strip-grid">
+      <div class="graph-universe-strip-block graph-universe-strip-copy">
+        <strong>__GRAPH_FRAME_TITLE__</strong>
+        <p class="subtle">__GRAPH_FRAME_NOTE__</p>
+      </div>
+      <div class="graph-universe-strip-block graph-universe-strip-legend">
+        <div class="graph-legend graph-legend-inline">
+          <div><span class="legend-dot legend-dot-weak"></span> __LEGEND_WEAK__</div>
+          <div><span class="legend-dot legend-dot-active"></span> __LEGEND_ACTIVE__</div>
+          <div><span class="legend-dot legend-dot-forming"></span> __LEGEND_FORMING__</div>
+          <div><span class="legend-dot legend-dot-stable"></span> __LEGEND_STABLE__</div>
+        </div>
+      </div>
+      <div class="graph-universe-strip-block graph-universe-strip-story">
+        <strong>__GRAPH_STORY_TITLE__</strong>
+        <p class="subtle" id="portal-graph-story" data-testid="portal-graph-story">__GRAPH_STORY_BODY__</p>
+      </div>
+      <div class="graph-universe-strip-block">
+        <strong>__STATS_TITLE__</strong>
+        <div class="stats stats-inline" id="portal-stats" data-testid="portal-stats"></div>
+      </div>
+      <div class="graph-universe-strip-block">
+        <strong>__GRAPH_STATS_TITLE__</strong>
+        <div class="graph-stats-grid graph-stats-grid-inline" id="portal-graph-stats" data-testid="portal-graph-stats">
+          <div class="stat"><strong>0</strong><span>__STAT_NODES__</span></div>
+          <div class="stat"><strong>0</strong><span>__STAT_EDGES__</span></div>
+          <div class="stat"><strong>0%</strong><span>__STAT_COVERAGE__</span></div>
+          <div class="stat"><strong>0</strong><span>__STAT_INSIGHTS__</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel portal-search-panel">
     <div class="row spread">
       <h2>__PAGE_KICKER__</h2>
     </div>
@@ -51,14 +101,23 @@
     <div class="notice" id="portal-message" data-testid="portal-message" role="status" aria-live="polite"></div>
   </section>
 
-  <section class="stack">
-    <div class="panel">
-      <h2>__STATS_TITLE__</h2>
-      <div class="stats stats-inline" id="portal-stats" data-testid="portal-stats"></div>
-    </div>
-    <div class="panel">
-      <h2>__UPDATES_TITLE__</h2>
-      <div class="list" id="recent-updates" data-testid="portal-recent-updates"></div>
-    </div>
-  </section>
+  <div class="graph-focus-sheet" id="portal-graph-focus" data-testid="portal-graph-focus" hidden>
+    <div class="graph-focus-sheet-backdrop" data-action="close-graph-focus"></div>
+    <aside
+      class="graph-focus-sheet-card"
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby="portal-graph-focus-title"
+    >
+      <div class="row spread graph-focus-sheet-header">
+        <div>
+          <div class="subtle graph-focus-sheet-kicker">__GRAPH_MODAL_TITLE__</div>
+          <h2 id="portal-graph-focus-title" class="graph-focus-sheet-title">__GRAPH_MODAL_TITLE__</h2>
+          <div class="subtle graph-focus-sheet-subtitle" id="portal-graph-focus-subtitle"></div>
+        </div>
+        <button type="button" class="button" data-action="close-graph-focus">__GRAPH_MODAL_CLOSE__</button>
+      </div>
+      <div class="graph-focus-sheet-body" id="portal-graph-focus-body"></div>
+    </aside>
+  </div>
 </div>

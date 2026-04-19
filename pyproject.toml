@@ -32,6 +32,7 @@ include = [
     "src/sediment/**/*.py",
     "src/sediment/**/*.html",
     "src/sediment/**/*.js",
+    "src/sediment/**/*.css",
     "src/sediment/**/*.md",
     "src/sediment/**/*.yaml",
     "src/sediment/**/*.svg",
@@ -46,6 +47,7 @@ packages = ["src/sediment"]
 [tool.hatch.build.targets.sdist]
 include = [
     "src",
+    "frontend",
     "tests",
     "scripts",
     "design",

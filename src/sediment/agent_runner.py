@@ -28,7 +28,9 @@ from sediment.platform_services import (
     build_diff,
     content_hash,
     determine_target_path,
+    emit_managed_graph_events,
     extract_upload_text,
+    prepare_insight_review_payload,
     prepare_document_submission,
     stage_workspace_copy,
     validate_target_content,
@@ -142,6 +144,9 @@ class AgentRunner:
                 return
             if job["job_type"] == "tidy":
                 self._run_tidy(job)
+                return
+            if job["job_type"] == "insight_review":
+                self._run_insight_review(job)
                 return
             LOGGER.error(
                 "job.unsupported",
@@ -284,6 +289,44 @@ class AgentRunner:
         finally:
             self._cleanup_workspace(workspace)
 
+    def _run_insight_review(self, job: dict[str, Any]) -> None:
+        workspace = stage_workspace_copy(self.kb_path, self.workspaces_dir, job["id"])
+        try:
+            with bind_log_context(job_id=job["id"]):
+                self.store.update_job(
+                    job["id"],
+                    status="running",
+                    started_at=utc_now(),
+                    runner_host=socket.gethostname(),
+                    workspace_path=str(workspace),
+                )
+                request_payload = job.get("request_payload") or {}
+                payload = prepare_insight_review_payload(
+                    workspace / "knowledge-base",
+                    insight_id=str(request_payload.get("insight_id") or ""),
+                    action=str(request_payload.get("action") or ""),
+                    target_name=str(request_payload.get("target_name") or "").strip() or None,
+                    note=str(request_payload.get("note") or "").strip(),
+                    entry_type=str(request_payload.get("entry_type") or "").strip() or None,
+                    new_title=str(request_payload.get("new_title") or "").strip() or None,
+                )
+                latest = self.store.get_job(job["id"])
+                if latest and latest["status"] == "cancel_requested":
+                    self.store.update_job(
+                        job["id"],
+                        status="cancelled",
+                        finished_at=utc_now(),
+                        error_message="job cancelled by admin",
+                        result_payload=payload,
+                        workspace_path=None,
+                    )
+                    return
+                self._apply_payload_and_commit(job, payload, operation="insight")
+        except Exception as exc:  # noqa: BLE001
+            self._fail_job(job, error_message=str(exc))
+        finally:
+            self._cleanup_workspace(workspace)
+
     def _resolve_ingest_source(self, job: dict[str, Any]) -> dict[str, Any]:
         request_payload = job.get("request_payload") or {}
         if job.get("source_submission_id"):
@@ -355,6 +398,14 @@ class AgentRunner:
         actor_name = str(request_payload.get("actor_name") or "").strip() or git["system_author_name"]
         actor_id = str(request_payload.get("actor_id") or "").strip() or None
         actor_role = str(request_payload.get("actor_role") or "committer").strip() or "committer"
+        commit_paths = self._payload_commit_paths(
+            payload,
+            repo_root=git["repo_root"],
+        )
+        allowed_dirty_prefixes = self._allowed_dirty_prefixes(
+            operation=operation,
+            repo_root=git["repo_root"],
+        )
         self._claim_repo_lock(
             owner_name=actor_name,
             owner_id=actor_id,
@@ -366,6 +417,8 @@ class AgentRunner:
             ensure_tracked_paths_clean(
                 repo_root=git["repo_root"],
                 tracked_paths=git["tracked_paths"],
+                allowed_paths=commit_paths if operation == "insight" else None,
+                allowed_prefixes=allowed_dirty_prefixes if operation == "insight" else None,
             )
             apply_result = apply_operations(
                 self.kb_path,
@@ -382,12 +435,14 @@ class AgentRunner:
                 operation=operation,
                 reason=self._build_commit_reason(job, payload, operation=operation),
                 extra_trailers=self._build_commit_trailers(job, operation=operation),
+                paths=commit_paths,
             )
         except Exception as exc:
             try:
                 restore_tracked_paths(
                     repo_root=git["repo_root"],
                     tracked_paths=git["tracked_paths"],
+                    paths=commit_paths,
                 )
             except GitOperationError:
                 pass
@@ -431,6 +486,54 @@ class AgentRunner:
                 "source_submission_id": job.get("source_submission_id"),
             },
         )
+        emit_managed_graph_events(
+            kb_path=self.kb_path,
+            store=self.store,
+            operation=operation,
+            request_payload=request_payload,
+            payload=payload,
+            apply_result=apply_result,
+            commit_sha=commit_result["commit_sha"],
+        )
+
+    def _payload_commit_paths(
+        self,
+        payload: dict[str, Any],
+        *,
+        repo_root: str | Path,
+    ) -> list[str]:
+        repo_prefix = self._kb_repo_prefix(repo_root=repo_root)
+        paths: list[str] = []
+        for operation in payload.get("operations", []):
+            relative_path = str(operation.get("relative_path") or "").strip().replace("\\", "/")
+            if not relative_path:
+                continue
+            if repo_prefix:
+                paths.append(f"{repo_prefix}/{relative_path}".strip("/"))
+            else:
+                paths.append(relative_path.lstrip("./"))
+        return sorted(dict.fromkeys(paths))
+
+    def _allowed_dirty_prefixes(
+        self,
+        *,
+        operation: str,
+        repo_root: str | Path,
+    ) -> list[str]:
+        if operation != "insight":
+            return []
+        repo_prefix = self._kb_repo_prefix(repo_root=repo_root)
+        if repo_prefix:
+            return [f"{repo_prefix}/insights"]
+        return ["insights"]
+
+    def _kb_repo_prefix(self, *, repo_root: str | Path) -> str:
+        root = Path(repo_root).resolve()
+        kb_root = self.kb_path.resolve()
+        try:
+            return str(kb_root.relative_to(root)).replace("\\", "/").strip("/")
+        except ValueError:
+            return "knowledge-base"
 
     def _claim_repo_lock(
         self,
@@ -500,6 +603,15 @@ class AgentRunner:
             if summary:
                 lines.extend(["", summary])
             return "\n".join(lines)
+        if operation == "insight":
+            request_payload = job.get("request_payload") or {}
+            action = str(request_payload.get("action") or "review").strip() or "review"
+            insight_id = str(request_payload.get("insight_id") or job.get("target_entry_name") or "insight").strip()
+            summary = str(payload.get("summary") or "").strip()
+            lines = [f"insight({action}): {insight_id}"]
+            if summary:
+                lines.extend(["", summary])
+            return "\n".join(lines)
         scope = str(request_payload.get("scope") or "health_blocking").strip()
         reason = str(request_payload.get("reason") or payload.get("summary") or "maintenance").strip()
         summary = str(payload.get("summary") or "").strip()
@@ -526,6 +638,12 @@ class AgentRunner:
             request_payload = job.get("request_payload") or {}
             if request_payload.get("scope"):
                 trailers["Sediment-Tidy-Scope"] = str(request_payload["scope"])
+        if operation == "insight":
+            request_payload = job.get("request_payload") or {}
+            if request_payload.get("insight_id"):
+                trailers["Sediment-Insight-Id"] = str(request_payload["insight_id"])
+            if request_payload.get("action"):
+                trailers["Sediment-Insight-Action"] = str(request_payload["action"])
         return trailers
 
     def _run_ingest_agent(

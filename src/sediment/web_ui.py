@@ -365,6 +365,8 @@ def shared_shell(
     *,
     locale: str,
     page_script_name: str | None = None,
+    extra_script_names: list[str] | None = None,
+    page_style_names: list[str] | None = None,
     page_data: object | None = None,
     shell_variant: str = "portal",
 ) -> str:
@@ -373,9 +375,14 @@ def shared_shell(
     toggle_aria_label = "切换语言" if active_locale == "zh" else "Switch language"
     theme_dark_label = "切换到暗色" if active_locale == "zh" else "Switch to dark mode"
     theme_light_label = "切换到明亮" if active_locale == "zh" else "Switch to light mode"
-    page_script_tag = (
-        f'<script src="{_asset_url(page_script_name)}"></script>' if page_script_name else ""
-    )
+    extra_tags = []
+    for style_name in page_style_names or []:
+        extra_tags.append(f'<link rel="stylesheet" href="{_asset_url(style_name)}" />')
+    for script_name in extra_script_names or []:
+        extra_tags.append(f'<script src="{_asset_url(script_name)}"></script>')
+    if page_script_name:
+        extra_tags.append(f'<script src="{_asset_url(page_script_name)}"></script>')
+    page_script_tag = "".join(extra_tags)
     return render_shell_template(
         title,
         body,
@@ -567,6 +574,47 @@ def portal_html(
             else "$CODEX_HOME/skills/ or your agent runtime's skills directory"
         ),
         "SKILL_DOWNLOADS": _tutorial_skill_cards(active_locale),
+        "GRAPH_HERO_TITLE": "知识宇宙" if is_zh else "Knowledge universe",
+        "GRAPH_HERO_NOTE": (
+            "不是全量知识图，而是知识从碎片里持续迸发、汇聚、稳定下来的那一刻。"
+            if is_zh
+            else "Not the full knowledge map, but the moment when knowledge bursts from fragments, gathers, and settles."
+        ),
+        "GRAPH_FRAME_TITLE": "知识磁场" if is_zh else "Knowledge field",
+        "GRAPH_FRAME_NOTE": (
+            "ingest 会把新知识抛入场中，explore / tidy 会唤醒既有碎片，把它们压缩成新的通路与知识节点。"
+            if is_zh
+            else "Ingest throws new knowledge into the field, while explore and tidy awaken fragments and compress them into new routes and nodes."
+        ),
+        "GRAPH_CAPTION": (
+            "你看到的不是库存，而是最近仍然有能量的知识形成过程。"
+            if is_zh
+            else "This surface shows knowledge while it is still alive with formation energy, not the full inventory."
+        ),
+        "GRAPH_STORY_TITLE": "最近形成的场" if is_zh else "Formation field",
+        "GRAPH_STORY_BODY": (
+            "灰线是尚弱的关联，脉冲通路表示近期提问或治理动作正在把知识压缩成更稳定的结构。"
+            if is_zh
+            else "Gray links are weak affinities; pulsing routes show recent questions or governance actions compressing knowledge into more stable structures."
+        ),
+        "LEGEND_WEAK": "弱连接" if is_zh else "Weak affinity",
+        "LEGEND_ACTIVE": "强化通路" if is_zh else "Reinforced route",
+        "LEGEND_FORMING": "正在形成" if is_zh else "Forming knowledge",
+        "LEGEND_STABLE": "稳定节点" if is_zh else "Stable knowledge",
+        "STATS_TITLE": "知识概览" if is_zh else "Knowledge snapshot",
+        "GRAPH_STATS_TITLE": "宇宙脉冲" if is_zh else "Universe pulse",
+        "STAT_NODES": "节点" if is_zh else "Nodes",
+        "STAT_EDGES": "连线" if is_zh else "Edges",
+        "STAT_COVERAGE": "聚类覆盖" if is_zh else "Cluster coverage",
+        "STAT_INSIGHTS": "候选知识" if is_zh else "Insight proposals",
+        "OPEN_GRAPH_LINK": _nav_link(
+            "展开宇宙" if is_zh else "Open universe",
+            _localized_path("/portal/graph-view", active_locale),
+            variant="action",
+        ),
+        "GRAPH_EXPAND_LABEL": "展开宇宙" if is_zh else "Open universe",
+        "GRAPH_MODAL_TITLE": "知识详情" if is_zh else "Knowledge detail",
+        "GRAPH_MODAL_CLOSE": "关闭" if is_zh else "Close",
         **nav,
     }
     templates = {
@@ -609,7 +657,6 @@ def portal_html(
             "indexes": "索引" if is_zh else "Indexes",
             "pending": "待处理收件" if is_zh else "Pending inbox items",
             "health": "治理问题" if is_zh else "Health issues",
-            "updates_empty": "暂无最近更新" if is_zh else "No recent updates yet.",
             "home_ready": "知识库已就绪。" if is_zh else "Knowledge base ready.",
             "search_placeholder": (
                 "搜索概念、规则、经验，比如：热备份 泄洪 暗流"
@@ -651,15 +698,42 @@ def portal_html(
             "submitted_text_prefix": "已提交文本意见：" if is_zh else "Submitted text feedback: ",
             "submitted_file_prefix": "已暂存文档：" if is_zh else "Staged document: ",
             "unknown_error": "未知错误" if is_zh else "Unknown error",
+            "graph_modal_title": "知识详情" if is_zh else "Knowledge detail",
+            "graph_modal_close": "关闭" if is_zh else "Close",
+            "graph_event": "最近事件" if is_zh else "Recent event",
+            "graph_focus_reason": "为什么出现在这里" if is_zh else "Why it appears here",
+            "graph_focus_summary": "当前摘要" if is_zh else "Current summary",
+            "graph_focus_hypothesis": "形成假设" if is_zh else "Formation hypothesis",
+            "graph_supporting_entries": "支撑知识" if is_zh else "Supporting knowledge",
+            "graph_trigger_queries": "触发问题" if is_zh else "Trigger queries",
+            "graph_neighbor_nodes": "共同形成的邻近节点" if is_zh else "Nearby co-forming nodes",
+            "graph_focus_empty": "当前还没有更多上下文。" if is_zh else "There is no additional context yet.",
+            "graph_story_empty": "当前还没有足够强的形成事件。" if is_zh else "There are not enough strong formation events yet.",
         },
     }
+    shell_kwargs = {
+        "locale": active_locale,
+        "page_script_name": "portal.js",
+        "page_data": page_data,
+        "shell_variant": "portal",
+    }
+    if page == "home":
+        page_data.update(
+            {
+                "graphApi": _localized_path("/api/portal/graph", active_locale) + "&scene=home"
+                if "?" in _localized_path("/api/portal/graph", active_locale)
+                else _localized_path("/api/portal/graph", active_locale) + "?scene=home",
+                "graphKind": "portal",
+                "graphLocale": active_locale,
+                "graphScene": "home",
+            }
+        )
+        shell_kwargs["page_style_names"] = ["graph.bundle.css"]
+        shell_kwargs["extra_script_names"] = ["graph.bundle.js"]
     return shared_shell(
         _document_title(page_title, knowledge_name),
         body,
-        locale=active_locale,
-        page_script_name="portal.js",
-        page_data=page_data,
-        shell_variant="portal",
+        **shell_kwargs,
     )
 
 
@@ -672,41 +746,69 @@ def portal_graph_html(
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
-    page_title = "Quartz"
-    nav = _public_nav(active_locale, page="quartz")
+    page_title = "知识宇宙" if is_zh else "Knowledge universe"
     body = _render_html_template(
-        "portal-quartz-fallback-body.html",
+        "portal-graph-body.html",
         LOGO_INLINE=_logo_inline(),
         KNOWLEDGE_NAME=knowledge_name,
         INSTANCE_NAME=instance_name,
         PAGE_TITLE=page_title,
-        STATUS_LABEL=(
-            "站点已构建，可直接打开 Quartz。" if quartz.get("site_available") else "当前实例还没有可用的 Quartz 站点。"
+        GRAPH_HINT=(
+            "点击节点进入聚焦，再点背景回到漫游。"
             if is_zh
-            else "Quartz site is built and ready." if quartz.get("site_available") else "This instance does not have a built Quartz site yet."
+            else "Click a node to focus, then click the void to drift again."
         ),
-        DETAIL_TEXT=(
-            f"runtime: {quartz.get('runtime_path', '-')}\nsite: {quartz.get('site_path', '-')}"
+        GRAPH_CAPTION=(
+            "这不是条目列表，而是最近仍在发光的知识形成瞬间。"
+            if is_zh
+            else "This is not a list of entries, but the moments of knowledge formation that still glow."
         ),
-        ACTIONS_TITLE="操作" if is_zh else "Actions",
-        ADMIN_KB_LINK=_nav_link(
-            "前往管理台设置页" if is_zh else "Open admin settings page",
-            _localized_path("/admin/system", active_locale),
+        MODAL_TITLE="知识详情" if is_zh else "Knowledge detail",
+        MODAL_CLOSE="关闭" if is_zh else "Close",
+        HOME_FLOAT_LINK=_nav_link(
+            "返回知识库" if is_zh else "Back to knowledge base",
+            _localized_path("/", active_locale),
             variant="action",
         ),
         OPEN_QUARTZ_LINK=_nav_link(
             "打开 Quartz" if is_zh else "Open Quartz",
             _localized_path("/quartz/", active_locale),
-            primary=True,
             variant="action",
             new_tab=True,
         ),
-        **nav,
     )
     return shared_shell(
         _document_title(page_title, knowledge_name),
         body,
         locale=active_locale,
+        page_script_name="graph.bundle.js",
+        page_style_names=["graph.bundle.css"],
+        page_data={
+            "graphApi": _localized_path("/api/portal/graph", active_locale) + "&scene=full"
+            if "?" in _localized_path("/api/portal/graph", active_locale)
+            else _localized_path("/api/portal/graph", active_locale) + "?scene=full",
+            "graphKind": "portal",
+            "graphLocale": active_locale,
+            "graphScene": "full",
+            "entryPrefix": "/entries/",
+            "ui": {
+                "graph_modal_title": "知识详情" if is_zh else "Knowledge detail",
+                "graph_modal_close": "关闭" if is_zh else "Close",
+                "graph_event": "最近事件" if is_zh else "Recent event",
+                "graph_focus_reason": "为什么出现在这里" if is_zh else "Why it appears here",
+                "graph_focus_summary": "当前摘要" if is_zh else "Current summary",
+                "graph_focus_hypothesis": "形成假设" if is_zh else "Formation hypothesis",
+                "graph_supporting_entries": "支撑知识" if is_zh else "Supporting knowledge",
+                "graph_trigger_queries": "触发问题" if is_zh else "Trigger queries",
+                "graph_neighbor_nodes": "共同形成的邻近节点" if is_zh else "Nearby co-forming nodes",
+                "graph_focus_empty": "当前还没有更多上下文。"
+                if is_zh
+                else "There is no additional context yet.",
+                "graph_story_empty": "当前还没有足够强的形成事件。"
+                if is_zh
+                else "There are not enough strong formation events yet.",
+            },
+        },
         shell_variant="portal",
     )
 
@@ -814,9 +916,23 @@ def admin_html(
             ISSUE_NOTE="只读概览，不在这里直接执行操作" if is_zh else "Read-only overview for current blockers",
             ACTIVITY_TITLE="最近活动" if is_zh else "Recent activity",
             ACTIVITY_NOTE="审计与操作痕迹" if is_zh else "audit trail",
+            EMERGING_TITLE="形成中的知识" if is_zh else "Emerging knowledge",
+            EMERGING_NOTE="高频 latent clusters" if is_zh else "high-signal latent clusters",
+            STRESS_TITLE="Canonical 压力点" if is_zh else "Canonical stress points",
+            STRESS_NOTE="哪些正式知识正在被长尾问题围攻" if is_zh else "where long-tail questions keep converging",
         ),
         "kb": _render_html_template(
             "admin-kb-section.html",
+            KB_WORKSPACE_TITLE="知识运营工作台" if is_zh else "Knowledge operations workspace",
+            KB_WORKSPACE_NOTE=(
+                "把导入、隐性知识形成、治理图和实时轨迹收进同一个知识运营表面。"
+                if is_zh
+                else "Bring ingest, latent knowledge formation, governance graph, and live runtime traces into one operational surface."
+            ),
+            PANE_OPERATIONS="操作" if is_zh else "Operations",
+            PANE_INSIGHTS="Insights",
+            PANE_GRAPH="图谱" if is_zh else "Graph",
+            PANE_LIVE="Live",
             INGEST_TITLE="导入" if is_zh else "Ingest",
             INGEST_TIP=_tutorial_tip(
                 "拖入文档后直接入队。" if is_zh else "Drop documents and enqueue immediately.",
@@ -902,6 +1018,52 @@ def admin_html(
             LIVE_CLEAR_BUTTON="清空记录" if is_zh else "Clear log",
             LIVE_STATUS="等待下一次导入 / 整理 / 探索。" if is_zh else "Waiting for the next ingest / tidy / explore run.",
             LIVE_EMPTY="LIVE READY\n" if is_zh else "LIVE READY\n",
+            INSIGHTS_TITLE="形成中的知识" if is_zh else "Emerging insights",
+            INSIGHTS_NOTE=(
+                "这些候选还没有进入 canonical 共识层，但已经具备被审阅和提升的价值。"
+                if is_zh
+                else "These candidates are not canonical yet, but they already contain enough evidence to be reviewed and promoted."
+            ),
+            INSIGHTS_SUMMARY_EMPTY="等待 insight proposal..." if is_zh else "Waiting for insight proposals...",
+            INSIGHT_DETAIL_TITLE="Proposal 详情" if is_zh else "Proposal detail",
+            INSIGHT_DETAIL_TIP=_tutorial_tip(
+                "查看假设、支撑条目和触发问题，然后决定下一步。" if is_zh else "Inspect the hypothesis, evidence, and trigger queries before deciding the next move.",
+                (
+                    "Promote 会创建新的 canonical entry；Merge 会把结论回灌到现有条目；Observe 和 Reject 只更新 insight 层。"
+                    if is_zh
+                    else "Promote creates a new canonical entry; Merge folds the conclusion back into an existing entry; Observe and Reject only mutate the insights layer."
+                ),
+                locale=active_locale,
+                testid="admin-kb-insight-tip",
+            ),
+            INSIGHT_DETAIL_EMPTY="选择一条 proposal 以查看细节。" if is_zh else "Select a proposal to inspect its details.",
+            INSIGHT_TARGET_PLACEHOLDER="merge 目标条目，例如：热备份" if is_zh else "Merge target, for example: hot backup",
+            INSIGHT_TITLE_PLACEHOLDER="promote 后的新条目标题" if is_zh else "New canonical title for promote",
+            INSIGHT_NOTE_PLACEHOLDER="可选备注" if is_zh else "Optional note",
+            INSIGHT_ACTION_OBSERVE="继续观察" if is_zh else "Keep observing",
+            INSIGHT_ACTION_MERGE="并入现有条目" if is_zh else "Merge",
+            INSIGHT_ACTION_PROMOTE="提升为正式知识" if is_zh else "Promote",
+            INSIGHT_ACTION_REJECT="拒绝" if is_zh else "Reject",
+            INSIGHT_STATUS="选择动作后会创建受管 job，并写入版本历史。" if is_zh else "Each review action becomes a managed job and is recorded in version history.",
+            GRAPH_TITLE="治理图" if is_zh else "Governance graph",
+            GRAPH_NOTE=(
+                "这张图表达 query cluster、insight proposal 与 canonical entry 之间的治理关系。"
+                if is_zh
+                else "This view shows the governance relationships between query clusters, insight proposals, and canonical entries."
+            ),
+            GRAPH_STATS_EMPTY="等待图谱载入..." if is_zh else "Waiting for graph data...",
+            GRAPH_DETAIL_TITLE="图谱细节" if is_zh else "Graph detail",
+            GRAPH_DETAIL_TIP=_tutorial_tip(
+                "点击节点后，查看它和哪些知识或信号相连。" if is_zh else "Select a node to inspect the knowledge and signals connected to it.",
+                (
+                    "后台图优先强调证据、去向和动作，不追求门户图里的氛围动效。"
+                    if is_zh
+                    else "The admin graph prioritizes evidence, destinations, and actions rather than the atmospheric effects used in the portal graph."
+                ),
+                locale=active_locale,
+                testid="admin-kb-graph-tip",
+            ),
+            GRAPH_DETAIL_EMPTY="点击图中的节点，查看证据和建议动作。" if is_zh else "Select a graph node to inspect evidence and suggested actions.",
         ),
         "files": _render_html_template(
             "admin-files-section.html",
@@ -1072,6 +1234,8 @@ def admin_html(
         body,
         locale=active_locale,
         page_script_name="admin.js",
+        extra_script_names=["graph.bundle.js"],
+        page_style_names=["graph.bundle.css"],
         page_data={
             "ui": {
                 "section": section,

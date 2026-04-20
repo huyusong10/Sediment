@@ -10,19 +10,73 @@
         <div data-shell-utility></div>
       </div>
     </div>
-    <div
-      class="graph-immersive-secondary-action"
-      data-testid="portal-graph-quartz-link"
-    >
-      __OPEN_QUARTZ_LINK__
-    </div>
-    <div class="graph-immersive-hint" data-testid="portal-graph-hint">__GRAPH_HINT__</div>
+    <section class="graph-universe-hud" id="portal-graph-hud" data-testid="portal-graph-hud" aria-label="Universe HUD">
+      <div class="graph-hud-row graph-hud-row-search">
+        <div class="graph-hud-search">
+          <label class="sr-only" for="portal-graph-search-input">Graph search</label>
+          <input
+            id="portal-graph-search-input"
+            class="graph-hud-input"
+            type="search"
+            autocomplete="off"
+            data-testid="portal-graph-search-input"
+          />
+          <div class="graph-hud-search-status subtle" id="portal-graph-search-status"></div>
+          <div
+            class="graph-hud-search-popover"
+            id="portal-graph-search-suggestions"
+            data-testid="portal-graph-search-suggestions"
+            hidden
+          ></div>
+        </div>
+        <div class="graph-hud-actions" data-testid="portal-graph-hud-actions">
+          <button type="button" class="button" data-action="graph-hotspot-prev" data-testid="portal-graph-hotspot-prev"></button>
+          <button type="button" class="button" data-action="graph-hotspot" data-testid="portal-graph-hotspot"></button>
+          <button type="button" class="button" data-action="graph-explore" data-testid="portal-graph-explore"></button>
+          <button type="button" class="button" data-action="graph-history-back" data-testid="portal-graph-history-back"></button>
+        </div>
+      </div>
+      <div class="graph-hud-row graph-hud-row-controls">
+        <div class="graph-hud-chip-group" id="portal-graph-strategies" data-testid="portal-graph-strategies"></div>
+        <div class="graph-hud-chip-group" id="portal-graph-filters" data-testid="portal-graph-filters"></div>
+        <details class="graph-hud-settings" id="portal-graph-settings" data-testid="portal-graph-settings">
+          <summary class="button" id="portal-graph-settings-summary"></summary>
+          <div class="graph-hud-settings-body" id="portal-graph-budget-options"></div>
+        </details>
+        <div class="graph-hud-count subtle" id="portal-graph-count" data-testid="portal-graph-count"></div>
+      </div>
+      <div class="graph-hud-row">
+        <div class="graph-hud-status subtle" id="portal-graph-status" data-testid="portal-graph-status"></div>
+      </div>
+      <div class="graph-hud-row graph-hud-row-trail">
+        <div class="graph-hud-trail subtle" id="portal-graph-trail" data-testid="portal-graph-trail">
+          <span id="portal-graph-trail-from"></span>
+          <span id="portal-graph-trail-to"></span>
+        </div>
+        <div class="graph-hud-actions">
+          <button type="button" class="button" data-action="graph-trail-run" data-testid="portal-graph-trail-run"></button>
+          <button type="button" class="button" data-action="graph-trail-clear" data-testid="portal-graph-trail-clear"></button>
+        </div>
+      </div>
+    </section>
     <div
       class="graph-frame portal-graph-frame graph-frame-immersive graph-frame-universe"
       id="portal-insights-graph"
       data-testid="portal-insights-graph"
     ></div>
-    <div class="graph-immersive-caption subtle" id="portal-graph-caption">__GRAPH_CAPTION__</div>
+    <section class="graph-info-card" id="portal-graph-info-card" data-testid="portal-graph-info-card">
+      <div class="graph-info-card-kicker subtle" id="portal-graph-info-kicker"></div>
+      <h2 class="graph-info-card-title" id="portal-graph-info-title"></h2>
+      <div class="graph-info-card-body subtle" id="portal-graph-info-body"></div>
+      <div class="graph-info-card-status subtle" id="portal-graph-info-status"></div>
+    </section>
+    <section class="graph-minimap" id="portal-graph-minimap" data-testid="portal-graph-minimap">
+      <div class="graph-minimap-title subtle" id="portal-graph-minimap-title"></div>
+      <div class="graph-minimap-stage">
+        <canvas id="portal-graph-minimap-canvas" width="200" height="200"></canvas>
+        <div class="graph-minimap-frustum" id="portal-graph-minimap-frustum" data-testid="portal-graph-minimap-frustum"></div>
+      </div>
+    </section>
   </div>
 
   <div class="graph-focus-sheet graph-focus-sheet-immersive" id="portal-graph-focus" data-testid="portal-graph-focus" hidden>
@@ -38,6 +92,10 @@
           <div class="subtle graph-focus-sheet-kicker">__MODAL_TITLE__</div>
           <h2 id="portal-graph-focus-title" class="graph-focus-sheet-title">__MODAL_TITLE__</h2>
           <div class="subtle graph-focus-sheet-subtitle" id="portal-graph-focus-subtitle"></div>
+          <div class="graph-focus-sheet-inline-actions">
+            <button type="button" class="button" id="portal-graph-trail-start-button" data-testid="portal-graph-trail-start"></button>
+            <button type="button" class="button" id="portal-graph-trail-end-button" data-testid="portal-graph-trail-end"></button>
+          </div>
         </div>
         <button type="button" class="button" data-action="close-graph-focus">__MODAL_CLOSE__</button>
       </div>

@@ -96,6 +96,7 @@ from sediment.platform_services import (
     get_health_payload,
     get_insight_detail,
     get_portal_home,
+    graph_neighborhood_payload,
     graph_payload,
     kb_document_browser_payload,
     kb_file_management_payload,
@@ -106,6 +107,7 @@ from sediment.platform_services import (
     search_kb,
     search_kb_file_suggestions,
     search_kb_suggestions,
+    shortest_graph_path,
 )
 from sediment.platform_store import PlatformStore, utc_now
 from sediment.quartz_runtime import (
@@ -4176,11 +4178,13 @@ async def _ui_asset(request):
 
 async def _portal_graph_page(request):
     locale = _request_locale(request)
+    focus = str(request.query_params.get("focus", "")).strip() or None
     return _html_response(
         portal_graph_html(
             knowledge_name=KNOWLEDGE_NAME,
             instance_name=INSTANCE_NAME,
             locale=locale,
+            focus=focus,
             quartz=quartz_status(
                 runtime_dir=QUARTZ_RUNTIME_DIR,
                 site_dir=QUARTZ_SITE_DIR,
@@ -4359,7 +4363,7 @@ async def _api_portal_search_suggest(request):
     return _json_response(
         {
             "query": query,
-            "suggestions": search_kb_suggestions(KB_PATH, query),
+            "suggestions": search_kb_suggestions(KB_PATH, query, store=_platform_store()),
         }
     )
 
@@ -4375,6 +4379,7 @@ async def _api_portal_entry(request):
 async def _api_portal_graph(request):
     focus = str(request.query_params.get("focus", "")).strip() or None
     scene = str(request.query_params.get("scene", "")).strip() or None
+    budget = str(request.query_params.get("budget", "")).strip() or None
     return _json_response(
         graph_payload(
             KB_PATH,
@@ -4382,6 +4387,74 @@ async def _api_portal_graph(request):
             graph_kind="portal",
             focus=focus,
             scene=scene,
+            budget=budget,
+        )
+    )
+
+
+async def _api_portal_graph_hotspots(request):
+    kind = str(request.query_params.get("kind", "")).strip() or "all"
+    budget = str(request.query_params.get("budget", "")).strip() or None
+    payload = graph_payload(
+        KB_PATH,
+        store=_platform_store(),
+        graph_kind="portal",
+        scene="universe",
+        budget=budget,
+    )
+    hotspots = payload.get("hotspots") or []
+    if kind == "recent":
+        hotspots = [item for item in hotspots if item.get("reason_code") in {"recent", "bursting"}]
+    elif kind == "tacit":
+        hotspots = [item for item in hotspots if item.get("reason_code") == "tacit"]
+    queue_mode = "empty"
+    if hotspots:
+        queue_mode = (
+            "recommended"
+            if all(str(item.get("reason_code") or "") == "all" for item in hotspots)
+            else "hotspot"
+        )
+    return _json_response(
+        {
+            "kind": kind,
+            "items": hotspots[:24],
+            "mode": queue_mode,
+            "generated_at": payload.get("generated_at"),
+        }
+    )
+
+
+async def _api_portal_graph_neighborhood(request):
+    node_id = str(request.query_params.get("id", "")).strip()
+    if not node_id:
+        return _json_response({"error": "missing id"}, status=400)
+    try:
+        depth = int(request.query_params.get("depth", "2"))
+    except ValueError:
+        return _json_response({"error": "invalid depth"}, status=400)
+    budget = str(request.query_params.get("budget", "")).strip() or None
+    return _json_response(
+        graph_neighborhood_payload(
+            KB_PATH,
+            node_id=node_id,
+            depth=depth,
+            store=_platform_store(),
+            budget=budget,
+        )
+    )
+
+
+async def _api_portal_graph_path(request):
+    source_id = str(request.query_params.get("from", "")).strip()
+    target_id = str(request.query_params.get("to", "")).strip()
+    if not source_id or not target_id:
+        return _json_response({"error": "missing from/to"}, status=400)
+    return _json_response(
+        shortest_graph_path(
+            KB_PATH,
+            source_id=source_id,
+            target_id=target_id,
+            store=_platform_store(),
         )
     )
 
@@ -6416,6 +6489,9 @@ def create_starlette_app():
         Route("/api/portal/search/suggest", _api_portal_search_suggest),
         Route("/api/portal/entries/{name:str}", _api_portal_entry),
         Route("/api/portal/graph", _api_portal_graph),
+        Route("/api/portal/graph/hotspots", _api_portal_graph_hotspots),
+        Route("/api/portal/graph/neighborhood", _api_portal_graph_neighborhood),
+        Route("/api/portal/graph/path", _api_portal_graph_path),
         Route("/api/portal/submissions/text", _api_portal_submit_text, methods=["POST"]),
         Route("/api/portal/submissions/document", _api_portal_submit_document, methods=["POST"]),
         Route("/api/admin/overview", _api_admin_overview),

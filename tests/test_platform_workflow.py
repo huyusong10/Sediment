@@ -550,7 +550,8 @@ def test_quartz_build_api_serves_site_without_server_restart(tmp_path: Path, mon
     assert "Built Quartz" not in graph_page.text
     assert 'data-testid="portal-insights-graph"' in graph_page.text
     assert 'data-testid="portal-graph-focus"' in graph_page.text
-    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in graph_page.text
+    assert 'data-testid="portal-graph-info-card"' in graph_page.text
+    assert 'data-testid="portal-graph-quartz-link"' not in graph_page.text
 
 
 def test_graph_payload_exposes_insights_shape_and_cluster_stats(tmp_path: Path) -> None:
@@ -562,9 +563,10 @@ def test_graph_payload_exposes_insights_shape_and_cluster_stats(tmp_path: Path) 
 
     assert payload["graph_version"] == "insights-v2"
     assert payload["graph_kind"] == "portal"
-    assert payload["scene_mode"] == "portal-story"
+    assert payload["scene_mode"] == "portal-universe-lite"
     assert payload["kb_language"] == "en"
     assert {"nodes", "edges", "stats", "ambient_seed", "playback_events"} <= set(payload)
+    assert payload["featured_mode"] == "recommended"
     assert payload["stats"]["formal_entry_count"] >= 3
     assert payload["stats"]["query_cluster_count"] == 0
     assert payload["stats"]["event_count"] >= 0
@@ -576,10 +578,76 @@ def test_graph_payload_exposes_insights_shape_and_cluster_stats(tmp_path: Path) 
     assert all("burst_level" in node for node in payload["nodes"])
     assert all("formation_stage" in node for node in payload["nodes"])
     assert all("recentness" in node for node in payload["nodes"])
+    assert all("hotspot_score" in node for node in payload["nodes"])
+    assert all("maturity_estimate" in node for node in payload["nodes"])
+    assert all("last_event_at" in node for node in payload["nodes"])
+    assert all(node["fx"] == node["x"] for node in payload["nodes"])
+    assert all(node["fy"] == node["y"] for node in payload["nodes"])
+    assert all(node["fz"] == node["z"] for node in payload["nodes"])
     assert any(edge["edge_type"] in {"belongs_to_cluster", "weak_affinity"} for edge in payload["edges"])
     assert all("activation" in edge for edge in payload["edges"])
     assert all("formation_role" in edge for edge in payload["edges"])
     assert all("pulse_level" in edge for edge in payload["edges"])
+
+
+def test_portal_home_preview_reuses_universe_coordinates(tmp_path: Path) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    store = PlatformStore(tmp_path / "platform.db")
+    store.init()
+
+    home_payload = graph_payload(kb_path, store=store, graph_kind="portal", scene="home")
+    universe_payload = graph_payload(kb_path, store=store, graph_kind="portal", scene="universe")
+
+    universe_nodes = {str(node["id"]): node for node in universe_payload["nodes"]}
+    shared_ids = {str(node["id"]) for node in home_payload["nodes"]} & set(universe_nodes)
+
+    assert shared_ids
+    for node_id in shared_ids:
+        home_node = next(node for node in home_payload["nodes"] if str(node["id"]) == node_id)
+        universe_node = universe_nodes[node_id]
+        assert home_node["x"] == universe_node["x"]
+        assert home_node["y"] == universe_node["y"]
+        assert home_node["z"] == universe_node["z"]
+        assert home_node["fx"] == universe_node["fx"]
+        assert home_node["fy"] == universe_node["fy"]
+        assert home_node["fz"] == universe_node["fz"]
+
+
+def test_portal_universe_layout_spreads_nodes_into_expansive_constellation(tmp_path: Path) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    store = PlatformStore(tmp_path / "platform.db")
+    store.init()
+
+    payload = graph_payload(kb_path, store=store, graph_kind="portal", scene="universe")
+    visible_nodes = [node for node in payload["nodes"] if node["node_type"] != "cluster_anchor"]
+
+    xs = [float(node["x"]) for node in visible_nodes]
+    ys = [float(node["y"]) for node in visible_nodes]
+    zs = [float(node["z"]) for node in visible_nodes]
+
+    assert max(xs) - min(xs) >= 80
+    assert max(ys) - min(ys) >= 30
+    assert max(zs) - min(zs) >= 80
+
+
+def test_portal_hotspot_endpoint_reports_recommended_fallback_when_kb_has_no_forming_hotspots(
+    tmp_path: Path, monkeypatch
+) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    response = client.get("/api/portal/graph/hotspots?kind=all")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["mode"] == "recommended"
+    assert payload["items"]
+    assert all(item["reason_code"] == "all" for item in payload["items"])
 
 
 def test_admin_explore_materializes_insight_after_repeated_cross_actor_queries(
@@ -607,9 +675,10 @@ def test_admin_explore_materializes_insight_after_repeated_cross_actor_queries(
     assert admin_graph["stats"]["query_cluster_count"] >= 1
     assert admin_graph["stats"]["insight_count"] >= 1
     assert admin_graph["stats"]["event_count"] >= 1
-    assert portal_graph["scene_mode"] == "portal-story"
+    assert portal_graph["scene_mode"] == "portal-universe-lite"
     assert portal_graph["stats"]["event_count"] >= 1
-    assert portal_graph["playback_events"]
+    assert portal_graph["playback_events"] == []
+    assert portal_graph["featured_mode"] == "hotspot"
     assert any(node["node_type"] == "insight_proposal" for node in admin_graph["nodes"])
     assert any(node["event_type"] == "proposal_materialized" for node in admin_graph["nodes"])
     assert any(edge["edge_type"] == "ask_reinforcement" for edge in admin_graph["edges"])

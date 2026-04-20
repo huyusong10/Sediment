@@ -97,6 +97,10 @@ MCP 治理工具写入契约：
 - `GET /api/portal/entries/{name}`
 - `GET /api/portal/graph`
 - `GET /api/portal/graph?focus=...`
+- `GET /api/portal/graph?scene=universe&budget=conservative|medium|aggressive`
+- `GET /api/portal/graph/hotspots?kind=recent|tacit|all`
+- `GET /api/portal/graph/neighborhood?id=...&depth=1..4`
+- `GET /api/portal/graph/path?from=...&to=...`
 - `POST /api/portal/submissions/text`
 - `POST /api/portal/submissions/document`
 
@@ -158,10 +162,16 @@ MCP 治理工具写入契约：
 补充契约：
 
 - `/api/portal/graph` 与 `/api/admin/graph` 共用统一 payload，至少包含 `graph_version`、`graph_kind`、`kb_language`、`stats`、`nodes`、`edges`
-- graph payload 必须以事件驱动局部投影为默认语义，并额外提供 `scene_mode`、`focus_seed`、`story_caption`、`ambient_seed`、`playback_events`
+- graph payload 顶层 shape 保持统一，但 portal 侧允许 `scene=home / full / universe / universe_focus` 切换不同 LOD；portal universe scene 必须复用后端稳定坐标，并额外提供 `scene_mode`、`focus_seed`、`story_caption`、`ambient_seed`、`playback_events`
 - `nodes` / `edges` 顶层 shape 保持稳定，便于图前端独立演进
+- universe scene 的 graph payload 在保持顶层 shape 不变的前提下，额外支持 `budget`、`hotspots`、`stats.visible_*` 与 `stats.total_*`
 - node 至少补充 `visual_role`、`energy`、`stability`、`entry_target`、`event_type`、`burst_level`、`formation_stage`、`recentness`
+- portal universe node 继续在相同 shape 上扩充 `hotspot_score`、`cluster_id`、`cluster_label`、`last_event_at`、`maturity_estimate`、`tacit_pulse`
+- portal 固定坐标 scene 的 node 还必须暴露 `fx / fy / fz`，并与 `x / y / z` 对齐
 - edge 至少补充 `activation`、`formation_role` 与 `pulse_level`
+- `/api/portal/graph/hotspots` 返回 `{ kind, mode, items[] }`，其中每个 item 至少包含 `id`、`reason_code`、`reason_label_zh`、`reason_label_en`、`score`
+- `/api/portal/graph/neighborhood` 返回与 `/api/portal/graph` 相同的 graph payload shape，并在 `stats.depth` 上暴露本次邻域层级
+- `/api/portal/graph/path` 返回 `{ from, to, found, node_ids, nodes, edges[] }`；`edges[]` 至少包含 `source`、`target`、`edge_type`
 - `POST /api/admin/insights/{id}/review` 只接受 `observe / promote / merge / reject`
 - insight review 不直接改文件；服务端只创建受管 `insight_review` job，由 Agent Runner 在隔离工作区执行并提交
 - `insight_review` 的 Git 提交必须只覆盖该次 payload 命中的路径，不能顺手提交整个 `knowledge-base/`

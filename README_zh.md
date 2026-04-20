@@ -132,6 +132,17 @@ sediment init
 这个目录里已经带着完整的 `knowledge-base/`，所以可以直接初始化，
 不需要先从空目录重新搭骨架。
 
+现在这个官方样例还额外带着 placeholder、分段 index、insight proposal、
+`demo-materials/` 和一个本地运行态播种脚本：
+
+```bash
+uv run --project .. python scripts/seed_runtime_demo.py --workspace .
+```
+
+这个脚本只会把 clusters、graph events 和 inbox 示例写进本地
+`.sediment_state/`，不会改动仓库里的白盒 Markdown。更完整的演示路径见
+[examples/README_zh.md](examples/README_zh.md)。
+
 先列出实例，再检查当前实例是否可用：
 
 ```bash

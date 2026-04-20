@@ -5,6 +5,7 @@ import json
 import re
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import yaml
@@ -261,12 +262,28 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert quartz_page.status_code == 200
     assert 'data-testid="portal-insights-graph"' in quartz_page.text
     assert 'data-testid="portal-graph-focus"' in quartz_page.text
-    assert 'data-testid="portal-graph-hint"' in quartz_page.text
+    assert 'data-testid="portal-graph-info-card"' in quartz_page.text
+    assert 'data-testid="portal-graph-status"' in quartz_page.text
     assert 'data-testid="portal-graph-layout"' not in quartz_page.text
     assert 'src="/ui-assets/graph.bundle.js"' in quartz_page.text
     assert 'href="/ui-assets/graph.bundle.css"' in quartz_page.text
     assert "Knowledge universe" in quartz_page.text
-    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in quartz_page.text
+    assert 'data-testid="portal-graph-quartz-link"' not in quartz_page.text
+
+    focused_graph_page = client.get(
+        "/portal/graph-view?lang=en&focus=entry::热备份",
+        headers={"accept-language": "en-US"},
+    )
+    assert focused_graph_page.status_code == 200
+    page_data = _extract_page_data(focused_graph_page.text)
+    assert page_data["pageKind"] == "graph"
+    assert page_data["graphScene"] == "universe_focus"
+    assert page_data["initialFocus"] == "entry::热备份"
+    graph_api = str(page_data["graphApi"])
+    graph_query = parse_qs(urlparse(graph_api).query)
+    assert graph_query["scene"] == ["universe_focus"]
+    assert graph_query["budget"] == ["medium"]
+    assert graph_query["focus"] == ["entry::热备份"]
 
 
 def test_portal_default_language_prefers_english_without_zh_signal(tmp_path: Path, monkeypatch) -> None:
@@ -324,7 +341,7 @@ def test_page_data_covers_frontend_ui_keys_for_portal_and_admin(tmp_path: Path, 
     assert missing_admin_keys == []
 
 
-def test_portal_graph_page_uses_new_window_launcher_when_quartz_site_exists(
+def test_portal_graph_page_stays_self_contained_when_quartz_site_exists(
     tmp_path: Path, monkeypatch
 ) -> None:
     project_root, kb_path = build_platform_project(tmp_path)
@@ -347,8 +364,48 @@ def test_portal_graph_page_uses_new_window_launcher_when_quartz_site_exists(
     assert "Knowledge universe" in page.text
     assert "Quartz Ready" not in page.text
     assert str(page.url).endswith("/portal/graph-view")
-    assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in page.text
+    assert 'data-testid="portal-graph-quartz-link"' not in page.text
     assert "<iframe" not in page.text
+
+
+def test_portal_graph_page_exposes_universe_hud_and_minimap_shell(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    page = client.get("/portal/graph-view?lang=zh")
+
+    assert page.status_code == 200
+    assert 'data-testid="portal-graph-hud"' in page.text
+    assert 'data-testid="portal-graph-search-input"' in page.text
+    assert 'data-testid="portal-graph-hotspot"' in page.text
+    assert 'data-testid="portal-graph-trail-run"' in page.text
+    assert 'data-testid="portal-graph-minimap"' in page.text
+    assert 'data-testid="portal-graph-minimap-frustum"' in page.text
+
+
+def test_portal_graph_universe_api_exposes_navigation_metadata(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    client, _server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        tmp_path / "state",
+    )
+
+    payload = client.get("/api/portal/graph?scene=universe&budget=medium").json()
+
+    assert payload["scene_mode"] == "portal-universe"
+    assert payload["budget"] == "medium"
+    assert payload["stats"]["total_node_count"] >= payload["stats"]["visible_node_count"]
+    assert payload["hotspots"]
+    assert all("hotspot_score" in node for node in payload["nodes"])
+    assert all("maturity_estimate" in node for node in payload["nodes"])
+    assert all("last_event_at" in node for node in payload["nodes"])
 
 
 def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) -> None:

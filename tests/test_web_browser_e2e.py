@@ -142,9 +142,10 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
                 }""",
                 selectable[0],
             )
-            expect(page.get_by_test_id("portal-graph-focus")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-focus")).not_to_contain_text("打开条目")
-            page.get_by_test_id("portal-graph-focus").get_by_role("button").click()
+            expect(page).to_have_url(re.compile(".*/portal/graph-view\\?lang=zh&focus=.*"))
+            expect(page.get_by_test_id("portal-graph-info-card")).to_be_visible()
+
+            page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
 
             page.get_by_test_id("portal-search-input").fill("热备份")
             page.get_by_test_id("portal-search-button").click()
@@ -704,13 +705,25 @@ def test_portal_graph_page_renders_dynamic_insights_surface(tmp_path: Path, monk
             page.goto(f"{live['base_url']}/portal/graph-view?lang=zh", wait_until="domcontentloaded")
             expect(page).to_have_title(re.compile("知识宇宙"))
             expect(page.get_by_test_id("portal-graph-immersive-page")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-hint")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-info-card")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-status")).to_contain_text("推荐节点")
+            expect(page.get_by_test_id("portal-graph-status")).to_contain_text("暂无 tacit 节点")
+            expect(page.get_by_test_id("portal-graph-status")).to_contain_text("暂无问题簇节点")
             expect(page.get_by_test_id("portal-graph-focus")).to_be_hidden()
             expect(page.locator(".hero")).to_have_count(0)
             page.wait_for_function(
                 "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
             )
             assert page.locator("#portal-insights-graph canvas").count() >= 1
+            page.wait_for_function(
+                """() => {
+                  const buttons = Array.from(document.querySelectorAll('#portal-graph-filters button'));
+                  if (buttons.length < 4) return false;
+                  const states = Object.fromEntries(buttons.map((button) => [button.dataset.id, button.disabled]));
+                  return states.all === false && states.canonical === false && states.tacit === true && states.cluster === true;
+                }"""
+            )
+            expect(page.get_by_test_id("portal-graph-info-card")).to_contain_text("操作指南")
             node_ids = page.evaluate(
                 """() => {
                   const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
@@ -719,6 +732,20 @@ def test_portal_graph_page_renders_dynamic_insights_surface(tmp_path: Path, monk
             )
             selectable = [item for item in node_ids if not str(item).startswith("anchor::")]
             assert selectable
+            original_positions = page.evaluate(
+                """() => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  if (typeof api?.payload !== 'function') return {};
+                  const payload = api.payload();
+                  const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
+                  return Object.fromEntries(
+                    nodes.slice(0, 12).map((node) => [
+                      String(node.id),
+                      [Number(node.x || 0), Number(node.y || 0), Number(node.z || 0)],
+                    ]),
+                  );
+                }"""
+            )
             page.evaluate(
                 """(nodeId) => {
                   const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
@@ -727,11 +754,28 @@ def test_portal_graph_page_renders_dynamic_insights_surface(tmp_path: Path, monk
                 selectable[0],
             )
             expect(page.get_by_test_id("portal-graph-focus")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-focus")).to_contain_text("最近事件")
+            expect(page.get_by_test_id("portal-graph-focus")).to_contain_text("为什么出现在这里")
+            expect(page.get_by_test_id("portal-graph-focus")).to_contain_text("当前摘要")
             expect(page.get_by_test_id("portal-graph-focus")).not_to_contain_text("打开条目")
+            current_positions = page.evaluate(
+                """(expected) => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  if (typeof api?.payload !== 'function') return {};
+                  const payload = api.payload();
+                  const nodes = new Map((Array.isArray(payload?.nodes) ? payload.nodes : []).map((node) => [String(node.id), node]));
+                  return Object.fromEntries(
+                    Object.keys(expected).map((nodeId) => {
+                      const node = nodes.get(nodeId);
+                      return [nodeId, node ? [Number(node.x || 0), Number(node.y || 0), Number(node.z || 0)] : null];
+                    }),
+                  );
+                }""",
+                original_positions,
+            )
+            assert current_positions == original_positions
 
 
-def test_portal_graph_page_keeps_quartz_as_new_tab_link(tmp_path: Path, monkeypatch) -> None:
+def test_portal_graph_page_hides_quartz_launcher_even_when_site_exists(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         quartz_index = live["server_module"].QUARTZ_SITE_DIR / "index.html"
         quartz_index.parent.mkdir(parents=True, exist_ok=True)
@@ -745,13 +789,28 @@ def test_portal_graph_page_keeps_quartz_as_new_tab_link(tmp_path: Path, monkeypa
 
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
-            with page.expect_popup() as popup_info:
-                page.get_by_test_id("portal-graph-quartz-link").locator('a[target="_blank"]').click()
-            popup = popup_info.value
-            popup.wait_for_load_state("domcontentloaded")
             expect(page).to_have_url(re.compile(".*/portal/graph-view.*"))
-            expect(popup).to_have_url(re.compile(".*/quartz/.*"))
-            expect(popup.locator("body")).to_contain_text("Quartz Ready")
+            expect(page.get_by_test_id("portal-graph-immersive-page")).to_be_visible()
+            expect(page.get_by_test_id("portal-graph-quartz-link")).to_have_count(0)
+
+
+def test_portal_graph_exposes_middle_mouse_pan_binding(tmp_path: Path, monkeypatch) -> None:
+    with live_server(tmp_path, monkeypatch) as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/portal/graph-view?lang=zh", wait_until="domcontentloaded")
+            page.wait_for_function(
+                "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
+            )
+            before = page.evaluate(
+                """() => {
+                  const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
+                  return typeof api?.debugCameraState === 'function' ? api.debugCameraState() : null;
+                }"""
+            )
+            assert before is not None
+            assert before["enablePan"] is True
+            assert before["mouseButtons"]["middle"] == before["mouseButtons"]["right"]
+            assert before["mouseButtons"]["middle"] != before["mouseButtons"]["left"]
 
 
 def test_quartz_graph_hides_index_pages_and_renders_entry_pages_when_served_through_sediment(

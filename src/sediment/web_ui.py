@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from html import escape
+from urllib.parse import quote
 
 from sediment.package_data import render_asset_template
 from sediment.web_ui_shared import (
@@ -642,6 +643,7 @@ def portal_html(
             "search": _localized_path("/search", active_locale),
             "tutorial": _localized_path("/tutorial", active_locale),
             "submit": _localized_path("/submit", active_locale),
+            "graphView": _localized_path("/portal/graph-view", active_locale),
             "entryPrefix": "/entries/",
             "quartz": _localized_path("/quartz/", active_locale),
         },
@@ -736,10 +738,16 @@ def portal_graph_html(
     knowledge_name: str,
     instance_name: str,
     locale: str,
+    focus: str | None = None,
     quartz: dict[str, object],
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
+    graph_api = _localized_path("/api/portal/graph", active_locale)
+    graph_hotspots_api = _localized_path("/api/portal/graph/hotspots", active_locale)
+    graph_neighborhood_api = _localized_path("/api/portal/graph/neighborhood", active_locale)
+    graph_path_api = _localized_path("/api/portal/graph/path", active_locale)
+    search_suggest_api = _localized_path("/api/portal/search/suggest", active_locale)
     page_title = "知识宇宙" if is_zh else "Knowledge universe"
     body = _render_html_template(
         "portal-graph-body.html",
@@ -747,16 +755,6 @@ def portal_graph_html(
         KNOWLEDGE_NAME=knowledge_name,
         INSTANCE_NAME=instance_name,
         PAGE_TITLE=page_title,
-        GRAPH_HINT=(
-            "点击节点进入聚焦，再点背景回到漫游。"
-            if is_zh
-            else "Click a node to focus, then click the void to drift again."
-        ),
-        GRAPH_CAPTION=(
-            "这不是条目列表，而是最近仍在发光的知识形成瞬间。"
-            if is_zh
-            else "This is not a list of entries, but the moments of knowledge formation that still glow."
-        ),
         MODAL_TITLE="知识详情" if is_zh else "Knowledge detail",
         MODAL_CLOSE="关闭" if is_zh else "Close",
         HOME_FLOAT_LINK=_nav_link(
@@ -764,13 +762,12 @@ def portal_graph_html(
             _localized_path("/", active_locale),
             variant="action",
         ),
-        OPEN_QUARTZ_LINK=_nav_link(
-            "打开 Quartz" if is_zh else "Open Quartz",
-            _localized_path("/quartz/", active_locale),
-            variant="action",
-            new_tab=True,
-        ),
     )
+    initial_focus = str(focus or "").strip()
+    graph_scene = "universe_focus" if initial_focus else "universe"
+    graph_query = f"scene={graph_scene}&budget=medium"
+    if initial_focus:
+        graph_query += f"&focus={quote(initial_focus)}"
     return shared_shell(
         _document_title(page_title, knowledge_name),
         body,
@@ -778,13 +775,26 @@ def portal_graph_html(
         page_script_name="graph.bundle.js",
         page_style_names=["graph.bundle.css"],
         page_data={
-            "graphApi": _localized_path("/api/portal/graph", active_locale) + "&scene=full"
-            if "?" in _localized_path("/api/portal/graph", active_locale)
-            else _localized_path("/api/portal/graph", active_locale) + "?scene=full",
+            "pageKind": "graph",
+            "graphApi": graph_api + f"&{graph_query}"
+            if "?" in graph_api
+            else graph_api + f"?{graph_query}",
+            "hotspotsApi": graph_hotspots_api,
+            "neighborhoodApi": graph_neighborhood_api,
+            "searchSuggestApi": search_suggest_api,
+            "pathApi": graph_path_api,
             "graphKind": "portal",
             "graphLocale": active_locale,
-            "graphScene": "full",
+            "graphScene": graph_scene,
+            "initialFocus": initial_focus,
             "entryPrefix": "/entries/",
+            "routes": {
+                "graphView": _localized_path("/portal/graph-view", active_locale),
+                "home": _localized_path("/", active_locale),
+            },
+            "defaultStrategy": "edge_walk",
+            "defaultBudget": "medium",
+            "hiddenBudgets": ["aggressive"],
             "ui": {
                 "graph_modal_title": "知识详情" if is_zh else "Knowledge detail",
                 "graph_modal_close": "关闭" if is_zh else "Close",
@@ -801,6 +811,115 @@ def portal_graph_html(
                 "graph_story_empty": "当前还没有足够强的形成事件。"
                 if is_zh
                 else "There are not enough strong formation events yet.",
+                "graph_info_guide_title": "操作指南" if is_zh else "How to roam",
+                "graph_info_guide_body": (
+                    "点击节点聚焦；拖拽旋转，滚轮缩放；按住中键平移视角；点击空白返回漫游；/ 搜索，J/K 热点，R 探索，Esc 取消聚焦。"
+                    if is_zh
+                    else "Click a node to focus; drag to orbit, scroll to zoom; hold middle mouse to pan; click the void to roam again; / search, J/K hotspots, R explore, Esc clears focus."
+                ),
+                "graph_info_idle_status": (
+                    "当前视角不会推动知识星球重排，切换只改变镜头；漫游时可中键平移。"
+                    if is_zh
+                    else "The universe stays position-locked here. Navigation only moves the camera, and middle mouse pans the view."
+                ),
+                "hud_search_placeholder": "搜索一个知识节点"
+                if is_zh
+                else "Search a knowledge node",
+                "hud_search_loading": "正在搜索…"
+                if is_zh
+                else "Searching…",
+                "hud_search_empty": "没有找到匹配项"
+                if is_zh
+                else "No matching nodes",
+                "hud_hotspot": "找到热点" if is_zh else "Find hotspot",
+                "hud_hotspot_prev": "上一个热点" if is_zh else "Previous hotspot",
+                "hud_explore": "探索" if is_zh else "Explore",
+                "hud_backtrack": "后退" if is_zh else "Back",
+                "hud_strategy_edge_walk": "沿边漫游"
+                if is_zh
+                else "Edge walk",
+                "hud_strategy_unvisited": "未访问优先"
+                if is_zh
+                else "Unvisited first",
+                "hud_strategy_cluster": "跨簇轮换"
+                if is_zh
+                else "Cluster rotation",
+                "hud_filter_all": "全部" if is_zh else "All",
+                "hud_filter_tacit": "仅 tacit" if is_zh else "Tacit",
+                "hud_filter_canonical": "仅正式知识"
+                if is_zh
+                else "Canonical",
+                "hud_filter_cluster": "仅问题簇"
+                if is_zh
+                else "Clusters",
+                "hud_count_template": "可见 {visible} / 总数 {total}"
+                if is_zh
+                else "{visible} visible / {total} total",
+                "hud_status_default": (
+                    "这片宇宙已固定坐标，切换只改变视角。"
+                    if is_zh
+                    else "This universe is position-locked. Navigation changes the view only."
+                ),
+                "hud_status_hotspot_fallback": (
+                    "当前没有正在形成的热点，热点按钮会退化为推荐节点。"
+                    if is_zh
+                    else "There are no actively forming hotspots right now, so hotspot jumps fall back to recommended nodes."
+                ),
+                "hud_status_hotspot_empty": (
+                    "当前知识库暂无可跳转的热点。"
+                    if is_zh
+                    else "There are no hotspot targets available in this knowledge base."
+                ),
+                "hud_status_no_tacit": (
+                    "当前知识库暂无 tacit 节点。"
+                    if is_zh
+                    else "There are no tacit nodes in this knowledge base yet."
+                ),
+                "hud_status_no_cluster": (
+                    "当前知识库暂无问题簇节点。"
+                    if is_zh
+                    else "There are no query-cluster nodes in this knowledge base yet."
+                ),
+                "hud_status_explore_empty": (
+                    "当前没有下一个可探索节点。"
+                    if is_zh
+                    else "There is no next node to explore from here."
+                ),
+                "hud_settings_title": "规模档位"
+                if is_zh
+                else "Scale budget",
+                "hud_budget_conservative": "保守"
+                if is_zh
+                else "Conservative",
+                "hud_budget_medium": "中等"
+                if is_zh
+                else "Medium",
+                "hud_budget_aggressive": "激进"
+                if is_zh
+                else "Aggressive",
+                "hud_keyboard_hint": "/ 搜索 · J/K 热点 · R 探索 · Esc 取消焦点"
+                if is_zh
+                else "/ search · J/K hotspots · R explore · Esc clear focus",
+                "hud_you_arrived": "你到了"
+                if is_zh
+                else "You arrived",
+                "hud_trail_from": "起点" if is_zh else "From",
+                "hud_trail_to": "终点" if is_zh else "To",
+                "hud_trail_set_start": "设为起点"
+                if is_zh
+                else "Set start",
+                "hud_trail_set_end": "设为终点"
+                if is_zh
+                else "Set end",
+                "hud_trail_run": "绘制小径"
+                if is_zh
+                else "Draw trail",
+                "hud_trail_clear": "清空小径"
+                if is_zh
+                else "Clear trail",
+                "hud_minimap_title": "迷你地图"
+                if is_zh
+                else "Mini map",
             },
         },
         shell_variant="portal",

@@ -13,6 +13,7 @@ Sediment 的设计文档按三层组织：
   - [current/platform-architecture.md](current/platform-architecture.md)
   - [current/interfaces-and-review-flow.md](current/interfaces-and-review-flow.md)
   - [current/web-surfaces.md](current/web-surfaces.md)
+  - [current/sample-workspace.md](current/sample-workspace.md)
   - [current/delivery-roadmap.md](current/delivery-roadmap.md)
 - 演进记录：[evolution/README.md](evolution/README.md)
 

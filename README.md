@@ -135,6 +135,17 @@ sediment init
 That directory already contains the sample `knowledge-base/`, so you can
 initialize it directly instead of starting from an empty directory.
 
+The sample workspace now also includes checked-in placeholders, segmented
+indexes, insight proposals, `demo-materials/`, and a local runtime seed helper:
+
+```bash
+uv run --project .. python scripts/seed_runtime_demo.py --workspace .
+```
+
+That seed helper only populates the local `.sediment_state/` runtime area so the
+portal graph, admin insights, and inbox surfaces are easier to demo end-to-end.
+See [examples/README.md](examples/README.md) for the full walkthrough.
+
 List the known instances and check the current one:
 
 ```bash

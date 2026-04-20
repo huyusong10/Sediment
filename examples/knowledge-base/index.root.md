@@ -1,8 +1,9 @@
 ---
 kind: index
 segment: root
+default_language: zh
 entry_count: 105
-last_tidied_at: 2026-04-14
+last_tidied_at: 2026-04-21
 ---
 # 哈基米系统知识索引
 

@@ -76,9 +76,46 @@ GRAPH_EVENT_BASE_ENERGY = {
     "insight_merged": 0.88,
 }
 GRAPH_SCENE_BUDGETS = {
-    "home": {"events": 14, "nodes": 40, "edges": 80, "scene_mode": "portal-story"},
-    "full": {"events": 24, "nodes": 70, "edges": 120, "scene_mode": "portal-immersive"},
-    "admin": {"events": 28, "nodes": 90, "edges": 140, "scene_mode": "admin-governance"},
+    "home": {
+        "events": 14,
+        "nodes": 20,
+        "edges": 44,
+        "scene_mode": "portal-universe-lite",
+        "default_budget": "conservative",
+    },
+    "full": {
+        "events": 24,
+        "nodes": 70,
+        "edges": 120,
+        "scene_mode": "portal-universe",
+        "default_budget": "conservative",
+    },
+    "admin": {
+        "events": 28,
+        "nodes": 90,
+        "edges": 140,
+        "scene_mode": "admin-governance",
+        "default_budget": "conservative",
+    },
+    "universe": {
+        "events": 120,
+        "nodes": 1500,
+        "edges": 2800,
+        "scene_mode": "portal-universe",
+        "default_budget": "medium",
+    },
+    "universe_focus": {
+        "events": 120,
+        "nodes": 800,
+        "edges": 1600,
+        "scene_mode": "portal-universe",
+        "default_budget": "medium",
+    },
+}
+GRAPH_UNIVERSE_BUDGET_PRESETS = {
+    "conservative": {"nodes": 800, "edges": 1600, "neighborhood_nodes": 400},
+    "medium": {"nodes": 1500, "edges": 2800, "neighborhood_nodes": 800},
+    "aggressive": {"nodes": 3000, "edges": 5400, "neighborhood_nodes": 1500},
 }
 GRAPH_EVENT_PRIORITY = {
     "insight_promoted": 6,
@@ -1200,6 +1237,557 @@ def _event_priority(event_type: str) -> int:
     return GRAPH_EVENT_PRIORITY.get(str(event_type or "").strip(), 0)
 
 
+def _graph_scene_key(graph_kind: str, scene: str | None) -> str:
+    normalized = str(scene or "").strip()
+    if graph_kind == "admin":
+        return "admin"
+    if normalized in {"universe", "universe_focus"}:
+        return normalized
+    if normalized == "full":
+        return "full"
+    return "home"
+
+
+def _graph_scene_budget(scene_key: str, budget: str | None = None) -> dict[str, Any]:
+    definition = dict(GRAPH_SCENE_BUDGETS[scene_key])
+    budget_name = str(budget or definition.get("default_budget") or "conservative").strip()
+    if scene_key not in {"universe", "universe_focus"}:
+        definition["budget_name"] = definition.get("default_budget") or "conservative"
+        return definition
+    preset = GRAPH_UNIVERSE_BUDGET_PRESETS.get(budget_name) or GRAPH_UNIVERSE_BUDGET_PRESETS[
+        str(definition.get("default_budget") or "medium")
+    ]
+    definition.update(preset)
+    definition["budget_name"] = (
+        budget_name if budget_name in GRAPH_UNIVERSE_BUDGET_PRESETS else definition.get("default_budget") or "medium"
+    )
+    return definition
+
+
+def _graph_anchor_specs() -> dict[str, dict[str, Any]]:
+    return {
+        "fresh": {"id": "anchor::fresh", "label": "Fresh knowledge basin", "x": -188, "y": 34, "z": 122},
+        "forming": {"id": "anchor::forming", "label": "Forming knowledge basin", "x": 176, "y": 68, "z": -136},
+        "stable": {"id": "anchor::stable", "label": "Stable knowledge basin", "x": 0, "y": -8, "z": 0},
+    }
+
+
+def _stable_seed(value: str) -> int:
+    return int(hashlib.sha1(value.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _position_near_anchor(anchor_id: str, node_id: str, *, spread: float = 42.0) -> tuple[float, float, float]:
+    anchor_specs = _graph_anchor_specs()
+    anchor = anchor_specs.get(anchor_id.replace("anchor::", ""), anchor_specs["stable"])
+    seed = _stable_seed(node_id)
+    dx = ((seed % 200) / 100 - 1) * spread
+    dy = (((seed // 7) % 200) / 100 - 1) * spread * 0.55
+    dz = (((seed // 13) % 200) / 100 - 1) * spread
+    return (
+        round(anchor["x"] + dx, 3),
+        round(anchor["y"] + dy, 3),
+        round(anchor["z"] + dz, 3),
+    )
+
+
+def _anchor_layout_profile(anchor_id: str) -> dict[str, float]:
+    normalized = str(anchor_id or "").replace("anchor::", "")
+    if normalized == "forming":
+        return {
+            "base_radius": 30.0,
+            "radial_step": 14.5,
+            "vertical_amplitude": 38.0,
+            "depth_jitter": 6.5,
+        }
+    if normalized == "fresh":
+        return {
+            "base_radius": 26.0,
+            "radial_step": 13.5,
+            "vertical_amplitude": 34.0,
+            "depth_jitter": 5.5,
+        }
+    return {
+        "base_radius": 42.0,
+        "radial_step": 18.5,
+        "vertical_amplitude": 56.0,
+        "depth_jitter": 8.0,
+    }
+
+
+def _apply_anchor_constellation_layout(nodes_by_id: dict[str, dict[str, Any]]) -> None:
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for node in nodes_by_id.values():
+        if str(node.get("node_type") or "") == "cluster_anchor":
+            continue
+        grouped[str(node.get("anchor_id") or "anchor::stable")].append(node)
+
+    golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+    for anchor_id, items in grouped.items():
+        anchor = nodes_by_id.get(anchor_id)
+        if not anchor:
+            continue
+        profile = _anchor_layout_profile(anchor_id)
+        anchor_x = float(anchor.get("x") or 0.0)
+        anchor_y = float(anchor.get("y") or 0.0)
+        anchor_z = float(anchor.get("z") or 0.0)
+        ranked = sorted(
+            items,
+            key=lambda item: (
+                -float(item.get("energy") or 0.0),
+                -float(item.get("recentness") or 0.0),
+                -float(item.get("hotspot_score") or _compute_hotspot_score(item)),
+                str(item.get("id") or ""),
+            ),
+        )
+        total = max(len(ranked), 1)
+        for index, node in enumerate(ranked):
+            seed = _stable_seed(str(node.get("id") or f"{anchor_id}:{index}"))
+            node_type = str(node.get("node_type") or "")
+            role_scale = 0.84 if node_type == "insight_proposal" else 0.92 if node_type == "query_cluster" else 1.0
+            energy = _clamp(float(node.get("energy") or 0.0), 0.0, 1.0)
+            recentness = _clamp(float(node.get("recentness") or 0.0), 0.0, 1.0)
+            shell_radius = (profile["base_radius"] + profile["radial_step"] * math.sqrt(index + 1.0)) * role_scale
+            shell_radius *= _clamp(1.02 - energy * 0.12 - recentness * 0.05, 0.82, 1.02)
+            theta = golden_angle * index + ((seed % 360) / 360.0) * 0.82
+            vertical_seed = (((seed // 17) % 200) / 100.0) - 1.0
+            depth_seed = (((seed // 23) % 200) / 100.0) - 1.0
+            envelope = 0.38 + 0.62 * min(1.0, math.sqrt((index + 1.0) / total))
+            elevation = (
+                vertical_seed * 0.5
+                + math.sin(theta * 0.58 + seed * 0.00031) * 0.18
+            ) * envelope
+            x = anchor_x + math.cos(theta) * math.cos(elevation) * shell_radius
+            y = anchor_y + math.sin(elevation) * shell_radius * 0.78
+            z = (
+                anchor_z
+                + math.sin(theta) * math.cos(elevation) * shell_radius
+                + depth_seed * profile["depth_jitter"] * envelope
+            )
+            node["x"] = round(x, 3)
+            node["y"] = round(y, 3)
+            node["z"] = round(z, 3)
+
+
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(value, maximum))
+
+
+def _formation_stage_level_value(stage: str) -> float:
+    return {
+        "dormant": 0.12,
+        "stable": 0.28,
+        "stirring": 0.56,
+        "condensing": 0.74,
+        "bursting": 1.0,
+    }.get(str(stage or "").strip(), 0.24)
+
+
+def _node_is_tacit(node: dict[str, Any]) -> bool:
+    if str(node.get("node_type") or "") == "insight_proposal":
+        return True
+    return str(node.get("formation_stage") or "").strip() == "condensing"
+
+
+def _node_maturity_estimate(node: dict[str, Any]) -> float:
+    node_type = str(node.get("node_type") or "")
+    if node_type == "query_cluster":
+        return _clamp(float(node.get("maturity_estimate") or node.get("stability") or 0.26), 0.0, 1.0)
+    if node_type == "insight_proposal":
+        return _clamp(float(node.get("maturity_estimate") or node.get("stability") or 0.34), 0.0, 1.0)
+    if node_type == "cluster_anchor":
+        return 1.0
+    return _clamp(float(node.get("maturity_estimate") or node.get("stability") or 0.82), 0.0, 1.0)
+
+
+def _compute_hotspot_score(node: dict[str, Any]) -> float:
+    recentness = _clamp(float(node.get("recentness") or 0.0), 0.0, 1.0)
+    burst_level = _clamp(float(node.get("burst_level") or 0.0), 0.0, 1.0)
+    maturity = _node_maturity_estimate(node)
+    formation_level = _formation_stage_level_value(str(node.get("formation_stage") or "stable"))
+    event_intensity = _clamp(float(node.get("energy") or 0.0), 0.0, 1.0)
+    score = (
+        0.35 * recentness
+        + 0.25 * burst_level
+        + 0.20 * (1.0 - maturity)
+        + 0.10 * formation_level
+        + 0.10 * event_intensity
+    )
+    if str(node.get("node_type") or "") == "insight_proposal" and float(node.get("stability") or 1.0) < 0.3:
+        score += 0.15
+    return round(_clamp(score, 0.0, 1.5), 4)
+
+
+def _hotspot_reason(node: dict[str, Any]) -> tuple[str, str, str]:
+    node_type = str(node.get("node_type") or "")
+    if node_type == "insight_proposal":
+        return ("tacit", "仍在凝聚的隐性知识", "Tacit knowledge still condensing")
+    if float(node.get("recentness") or 0.0) >= 0.55:
+        return ("recent", "最近被点亮", "Recently lit up")
+    if node_type == "query_cluster":
+        return ("cluster", "高活跃问题簇", "High-activity query cluster")
+    if float(node.get("burst_level") or 0.0) >= 0.45:
+        return ("bursting", "形成势能偏高", "Formation energy is elevated")
+    return ("all", "值得再次探索", "Worth exploring again")
+
+
+def rank_hotspots(
+    nodes: Iterable[dict[str, Any]],
+    *,
+    kind: str = "all",
+    limit: int = 24,
+) -> list[dict[str, Any]]:
+    normalized_kind = str(kind or "all").strip() or "all"
+    ranked: list[dict[str, Any]] = []
+    for node in nodes:
+        node_type = str(node.get("node_type") or "")
+        if node_type == "cluster_anchor":
+            continue
+        is_tacit = _node_is_tacit(node)
+        if normalized_kind == "recent" and float(node.get("recentness") or 0.0) < 0.35:
+            continue
+        if normalized_kind == "tacit" and not is_tacit:
+            continue
+        score = _compute_hotspot_score(node)
+        if score <= 0:
+            continue
+        reason_code, reason_label_zh, reason_label_en = _hotspot_reason(node)
+        ranked.append(
+            {
+                "id": str(node.get("id") or ""),
+                "reason_code": reason_code,
+                "reason_label_zh": reason_label_zh,
+                "reason_label_en": reason_label_en,
+                "score": score,
+            }
+        )
+    ranked.sort(key=lambda item: (-float(item["score"]), item["id"]))
+    return ranked[: max(1, min(limit, 24))]
+
+
+def _annotate_graph_payload(
+    payload: dict[str, Any],
+    *,
+    cluster_stats: dict[str, Any],
+    graph_events: list[dict[str, Any]],
+    budget_name: str,
+    total_node_count: int | None = None,
+    total_edge_count: int | None = None,
+) -> dict[str, Any]:
+    clusters = {str(item.get("id") or ""): item for item in cluster_stats.get("clusters") or []}
+    scene_mode = str(payload.get("scene_mode") or "")
+    lock_positions = str(payload.get("graph_kind") or "") == "portal" and scene_mode.startswith("portal-universe")
+    entry_cluster_map: dict[str, list[str]] = defaultdict(list)
+    proposal_cluster_map: dict[str, list[str]] = defaultdict(list)
+    for cluster_id, cluster in clusters.items():
+        for entry in cluster.get("source_entries") or []:
+            entry_cluster_map[str(entry)].append(cluster_id)
+        insight_id = str(cluster.get("insight_id") or "")
+        if insight_id:
+            proposal_cluster_map[insight_id].append(cluster_id)
+
+    node_event_map: dict[str, str] = {}
+    for event in graph_events:
+        refs = {
+            _graph_ref(str(event.get("subject_kind") or ""), str(event.get("subject_id") or "")),
+            *[str(item).strip() for item in event.get("related_ids") or [] if str(item).strip()],
+        }
+        created_at = str(event.get("created_at") or "")
+        for ref in refs:
+            if not ref:
+                continue
+            existing = node_event_map.get(ref, "")
+            if created_at and created_at > existing:
+                node_event_map[ref] = created_at
+
+    nodes = []
+    for original in payload.get("nodes") or []:
+        node = dict(original)
+        _, raw_id = _split_graph_ref(str(node.get("id") or ""))
+        cluster_id = str(node.get("cluster_id") or "")
+        if not cluster_id and str(node.get("node_type") or "") == "query_cluster":
+            cluster_id = raw_id
+        if not cluster_id and str(node.get("node_type") or "") == "canonical_entry":
+            cluster_id = next(iter(entry_cluster_map.get(raw_id) or []), "")
+        if not cluster_id and str(node.get("node_type") or "") == "insight_proposal":
+            cluster_id = next(iter(proposal_cluster_map.get(raw_id) or []), "")
+        node["cluster_id"] = cluster_id
+        if cluster_id and cluster_id in clusters and not node.get("cluster_label"):
+            node["cluster_label"] = (
+                clusters[cluster_id].get("display_query")
+                or clusters[cluster_id].get("normalized_subject")
+                or cluster_id
+            )
+        maturity = _node_maturity_estimate(node)
+        node["maturity_estimate"] = round(maturity, 4)
+        node["hotspot_score"] = _compute_hotspot_score(node)
+        node["last_event_at"] = node_event_map.get(str(node.get("id") or ""), str(node.get("last_event_at") or ""))
+        node["tacit_pulse"] = _node_is_tacit(node)
+        if lock_positions:
+            x = round(float(node.get("x") or 0.0), 3)
+            y = round(float(node.get("y") or 0.0), 3)
+            z = round(float(node.get("z") or 0.0), 3)
+            node["fx"] = x
+            node["fy"] = y
+            node["fz"] = z
+        nodes.append(node)
+
+    payload["nodes"] = nodes
+    stats = dict(payload.get("stats") or {})
+    stats["visible_node_count"] = len(nodes)
+    stats["visible_edge_count"] = len(payload.get("edges") or [])
+    stats["total_node_count"] = total_node_count if total_node_count is not None else len(nodes)
+    stats["total_edge_count"] = total_edge_count if total_edge_count is not None else len(payload.get("edges") or [])
+    payload["stats"] = stats
+    payload["budget"] = budget_name
+    payload["hotspots"] = rank_hotspots(nodes)
+    return payload
+
+
+def _filter_graph_to_neighborhood(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    focus_id: str,
+    depth: int = 2,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    normalized_focus = str(focus_id or "").strip()
+    if not normalized_focus:
+        return nodes, edges
+    related_ids = {normalized_focus}
+    frontier = {normalized_focus}
+    max_depth = max(0, min(int(depth), 4))
+    for _ in range(max_depth):
+        next_frontier: set[str] = set()
+        for edge in edges:
+            if edge["source"] in frontier or edge["target"] in frontier:
+                related_ids.add(edge["source"])
+                related_ids.add(edge["target"])
+                next_frontier.add(edge["source"])
+                next_frontier.add(edge["target"])
+        frontier = next_frontier
+    filtered_nodes = [node for node in nodes if node["id"] in related_ids]
+    filtered_ids = {node["id"] for node in filtered_nodes}
+    filtered_edges = [
+        edge
+        for edge in edges
+        if edge["source"] in filtered_ids and edge["target"] in filtered_ids
+    ]
+    return filtered_nodes, filtered_edges
+
+
+def _graph_degree_map(edges: Iterable[dict[str, Any]]) -> dict[str, int]:
+    degrees: dict[str, int] = defaultdict(int)
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target:
+            continue
+        degrees[source] += 1
+        degrees[target] += 1
+    return dict(degrees)
+
+
+def _node_is_featured_hotspot(node: dict[str, Any]) -> bool:
+    if _node_is_tacit(node):
+        return True
+    if float(node.get("recentness") or 0.0) >= 0.35:
+        return True
+    if float(node.get("burst_level") or 0.0) >= 0.35:
+        return True
+    return str(node.get("formation_stage") or "").strip() in {"stirring", "condensing", "bursting"}
+
+
+def _featured_universe_slice(
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+    *,
+    node_limit: int,
+    edge_limit: int,
+    focus_id: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    node_limit = max(int(node_limit), 6)
+    edge_limit = max(int(edge_limit), 0)
+    node_map = {str(node.get("id") or ""): node for node in nodes}
+    degrees = _graph_degree_map(edges)
+    adjacency: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+    for edge in edges:
+        source = str(edge.get("source") or "")
+        target = str(edge.get("target") or "")
+        if not source or not target:
+            continue
+        adjacency[source].append((target, edge))
+        adjacency[target].append((source, edge))
+
+    candidates = [node for node in nodes if str(node.get("node_type") or "") != "cluster_anchor"]
+    hotspot_candidates = [node for node in candidates if _node_is_featured_hotspot(node)]
+    featured_mode = "hotspot" if hotspot_candidates else "recommended"
+
+    def _hotspot_sort_key(node: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            -float(node.get("hotspot_score") or 0.0),
+            -float(node.get("recentness") or 0.0),
+            -float(node.get("burst_level") or 0.0),
+            -_formation_stage_level_value(str(node.get("formation_stage") or "")),
+            -int(degrees.get(str(node.get("id") or ""), 0)),
+            -float(node.get("energy") or 0.0),
+            str(node.get("id") or ""),
+        )
+
+    def _recommended_sort_key(node: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            -int(degrees.get(str(node.get("id") or ""), 0)),
+            -float(node.get("energy") or 0.0),
+            -float(node.get("hotspot_score") or 0.0),
+            -float(node.get("recentness") or 0.0),
+            str(node.get("id") or ""),
+        )
+
+    ranked_candidates = sorted(
+        hotspot_candidates if hotspot_candidates else candidates,
+        key=_hotspot_sort_key if hotspot_candidates else _recommended_sort_key,
+    )
+
+    selected_ids: list[str] = []
+
+    def _add_node_id(node_id: str) -> None:
+        normalized = str(node_id or "")
+        if not normalized or normalized in selected_ids:
+            return
+        if normalized not in node_map or str(node_map[normalized].get("node_type") or "") == "cluster_anchor":
+            return
+        selected_ids.append(normalized)
+
+    normalized_focus = str(focus_id or "").strip()
+    if normalized_focus and normalized_focus in node_map:
+        _add_node_id(normalized_focus)
+        neighbors = sorted(
+            adjacency.get(normalized_focus, []),
+            key=lambda item: (
+                -float(item[1].get("activation") or 0.0),
+                -float(item[1].get("strength") or 0.0),
+                item[0],
+            ),
+        )
+        for neighbor_id, _edge in neighbors:
+            if len(selected_ids) >= node_limit:
+                break
+            _add_node_id(neighbor_id)
+
+    for node in ranked_candidates:
+        if len(selected_ids) >= node_limit:
+            break
+        _add_node_id(str(node.get("id") or ""))
+
+    anchor_ids = sorted(
+        {
+            str(node_map[node_id].get("anchor_id") or "")
+            for node_id in selected_ids
+            if str(node_map[node_id].get("anchor_id") or "")
+        }
+    )
+    if not anchor_ids:
+        first_anchor = next(
+            (str(node.get("id") or "") for node in nodes if str(node.get("node_type") or "") == "cluster_anchor"),
+            "",
+        )
+        if first_anchor:
+            anchor_ids = [first_anchor]
+
+    ordered_ids = [*anchor_ids, *selected_ids]
+    visible_ids = set(ordered_ids)
+    selected_nodes = [node_map[node_id] for node_id in ordered_ids if node_id in node_map]
+    selected_edges = [
+        edge
+        for edge in sorted(
+            edges,
+            key=lambda item: (
+                -float(item.get("activation") or 0.0),
+                -float(item.get("strength") or 0.0),
+                str(item.get("source") or ""),
+                str(item.get("target") or ""),
+            ),
+        )
+        if str(edge.get("source") or "") in visible_ids and str(edge.get("target") or "") in visible_ids
+    ][:edge_limit]
+    return selected_nodes, selected_edges, featured_mode
+
+
+def _portal_preview_graph_payload(
+    kb_path: str | Path,
+    *,
+    store: PlatformStore | None = None,
+    focus: str | None = None,
+    scene_key: str = "home",
+    budget: str | None = None,
+) -> dict[str, Any]:
+    universe = _build_universe_graph(kb_path, store=store)
+    scene_budget = _graph_scene_budget(scene_key, budget)
+    nodes = _sort_graph_nodes(universe["nodes"])
+    edges = _sort_graph_edges(universe["edges"])
+    total_node_count = len(nodes)
+    total_edge_count = len(edges)
+    focus_id = _resolve_graph_focus_id(nodes, focus)
+    selected_nodes, selected_edges, featured_mode = _featured_universe_slice(
+        nodes,
+        edges,
+        node_limit=int(scene_budget["nodes"]),
+        edge_limit=int(scene_budget["edges"]),
+        focus_id=focus_id if scene_key == "full" else None,
+    )
+    focus_seed = focus_id or next(
+        (node["id"] for node in selected_nodes if node["node_type"] != "cluster_anchor"),
+        selected_nodes[0]["id"] if selected_nodes else "",
+    )
+    lead_node = next(
+        (node for node in selected_nodes if str(node.get("node_type") or "") != "cluster_anchor"),
+        selected_nodes[0] if selected_nodes else None,
+    )
+    story_caption = ""
+    if featured_mode == "hotspot" and universe["selected_events"]:
+        lead_event = universe["selected_events"][0]
+        story_caption = str(
+            (lead_event.get("details") or {}).get("proposed_answer")
+            or lead_event.get("subject_label")
+            or ""
+        ).strip()
+    if not story_caption and lead_node is not None:
+        story_caption = str(lead_node.get("summary") or lead_node.get("label") or "").strip()
+
+    payload = {
+        "graph_version": "insights-v2",
+        "graph_kind": "portal",
+        "scene_mode": scene_budget["scene_mode"],
+        "focus_seed": focus_seed,
+        "story_caption": story_caption,
+        "ambient_seed": hashlib.sha1(
+            f"{kb_path}:{scene_key}:{featured_mode}:{scene_budget['budget_name']}".encode("utf-8")
+        ).hexdigest()[:12],
+        "playback_events": [],
+        "kb_language": universe["data"].get("default_language") or "en",
+        "generated_at": utc_now(),
+        "featured_mode": featured_mode,
+        "stats": {
+            "node_count": len(selected_nodes),
+            "edge_count": len(selected_edges),
+            "formal_entry_count": len(universe["data"]["entries"]),
+            "insight_count": len(universe["data"].get("insights") or []),
+            "query_cluster_count": len(universe["cluster_stats"]["clusters"]),
+            "cluster_coverage": universe["cluster_stats"]["cluster_coverage"],
+            "event_count": len(universe["selected_events"]),
+        },
+        "nodes": selected_nodes,
+        "edges": selected_edges,
+    }
+    return _annotate_graph_payload(
+        payload,
+        cluster_stats=universe["cluster_stats"],
+        graph_events=universe["graph_events"],
+        budget_name=str(scene_budget["budget_name"]),
+        total_node_count=total_node_count,
+        total_edge_count=total_edge_count,
+    )
+
+
 def record_graph_event(
     store: PlatformStore | None,
     *,
@@ -1488,6 +2076,587 @@ def list_insight_proposals(kb_path: str | Path) -> list[dict[str, Any]]:
             ),
             str(item.get("title") or item.get("id") or ""),
         ),
+    )
+
+
+def _build_universe_graph(
+    kb_path: str | Path,
+    *,
+    store: PlatformStore | None = None,
+) -> dict[str, Any]:
+    data = inventory(kb_path)
+    cluster_stats = _query_cluster_stats(kb_path, store)
+    graph_events = (
+        store.list_graph_events(limit=800)
+        if store is not None and hasattr(store, "list_graph_events")
+        else []
+    )
+    clusters_by_id = {
+        str(item.get("id") or ""): item for item in cluster_stats.get("clusters") or []
+    }
+    proposals = list_insight_proposals(kb_path)
+    proposals_by_id = {str(item.get("id") or ""): item for item in proposals}
+    proposal_cluster_map: dict[str, list[str]] = defaultdict(list)
+    for cluster_id, cluster in clusters_by_id.items():
+        insight_id = str(cluster.get("insight_id") or "")
+        if insight_id:
+            proposal_cluster_map[insight_id].append(cluster_id)
+
+    nodes_by_id: dict[str, dict[str, Any]] = {}
+    edges_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    stage_priority = {
+        "dormant": 0,
+        "stable": 1,
+        "stirring": 2,
+        "condensing": 3,
+        "bursting": 4,
+    }
+
+    def ensure_anchor(anchor_id: str) -> None:
+        anchor_specs = _graph_anchor_specs()
+        anchor = anchor_specs.get(anchor_id.replace("anchor::", ""), anchor_specs["stable"])
+        if anchor["id"] in nodes_by_id:
+            return
+        nodes_by_id[anchor["id"]] = {
+            "id": anchor["id"],
+            "label": anchor["label"],
+            "kind": "anchor",
+            "node_type": "cluster_anchor",
+            "entry_type": "anchor",
+            "status": "stable",
+            "state": "stable",
+            "summary": anchor["label"],
+            "visual_role": "knowledge_basin",
+            "event_type": "",
+            "energy": 0.32,
+            "stability": 1.0,
+            "burst_level": 0.08,
+            "formation_stage": "stable",
+            "recentness": 0.12,
+            "weight": 1.0,
+            "maturity_estimate": 1.0,
+            "cluster_id": anchor["id"],
+            "last_event_at": "",
+            "tacit_pulse": False,
+            "x": anchor["x"],
+            "y": anchor["y"],
+            "z": anchor["z"],
+            "fx": anchor["x"],
+            "fy": anchor["y"],
+            "fz": anchor["z"],
+        }
+
+    def add_edge(
+        source: str,
+        target: str,
+        *,
+        edge_type: str,
+        strength: float,
+        activation: float,
+        formation_role: str,
+        pulse_level: float = 0.0,
+    ) -> None:
+        if not source or not target or source == target:
+            return
+        key = tuple(sorted((source, target)) + [edge_type])  # type: ignore[list-item]
+        existing = edges_by_key.get(key)
+        if existing:
+            existing["strength"] = round(max(float(existing.get("strength") or 0.0), strength), 4)
+            existing["activation"] = round(max(float(existing.get("activation") or 0.0), activation), 4)
+            existing["pulse_level"] = round(max(float(existing.get("pulse_level") or 0.0), pulse_level), 4)
+            return
+        edges_by_key[key] = {
+            "source": source,
+            "target": target,
+            "kind": edge_type,
+            "edge_type": edge_type,
+            "strength": round(strength, 4),
+            "activation": round(activation, 4),
+            "formation_role": formation_role,
+            "pulse_level": round(pulse_level, 4),
+        }
+
+    def ensure_node(
+        node: dict[str, Any],
+        *,
+        anchor_id: str,
+        energy: float,
+        stability: float,
+        burst_level: float,
+        formation_stage: str,
+        recentness: float,
+        visual_role: str,
+        event_type: str = "",
+        cluster_id: str = "",
+        last_event_at: str = "",
+    ) -> None:
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            return
+        ensure_anchor(anchor_id)
+        existing = nodes_by_id.get(node_id)
+        target = existing or dict(node)
+        target["anchor_id"] = anchor_id
+        target["visual_role"] = visual_role or target.get("visual_role") or "stable_canonical"
+        target["event_type"] = event_type or target.get("event_type") or ""
+        target["energy"] = round(max(float(target.get("energy") or 0.0), energy), 4)
+        target["stability"] = round(max(float(target.get("stability") or 0.0), stability), 4)
+        target["burst_level"] = round(max(float(target.get("burst_level") or 0.0), burst_level), 4)
+        target["recentness"] = round(max(float(target.get("recentness") or 0.0), recentness), 4)
+        current_stage = str(target.get("formation_stage") or "stable")
+        if stage_priority.get(formation_stage, 0) >= stage_priority.get(current_stage, 0):
+            target["formation_stage"] = formation_stage
+        target["weight"] = round(
+            max(float(target.get("weight") or 1.0), 1.0 + target["energy"] * 1.8 + target["recentness"] * 0.8),
+            4,
+        )
+        if cluster_id and not target.get("cluster_id"):
+            target["cluster_id"] = cluster_id
+        if last_event_at and last_event_at > str(target.get("last_event_at") or ""):
+            target["last_event_at"] = last_event_at
+        if "x" not in target or existing is None:
+            spread = 36.0 if target.get("node_type") == "canonical_entry" else 28.0
+            x, y, z = _position_near_anchor(anchor_id, node_id, spread=spread)
+            target["x"], target["y"], target["z"] = x, y, z
+        nodes_by_id[node_id] = target
+        add_edge(
+            anchor_id,
+            node_id,
+            edge_type="belongs_to_cluster",
+            strength=max(0.22, energy * 0.72),
+            activation=max(0.12, recentness * 0.8),
+            formation_role="knowledge_basin",
+            pulse_level=max(0.06, burst_level * 0.55),
+        )
+
+    def ensure_reference(ref: str) -> str:
+        kind, raw_id = _split_graph_ref(ref)
+        if kind == "entry" and raw_id in data["entries"]:
+            doc = data["docs"][raw_id]
+            ensure_node(
+                {
+                    "id": _graph_ref("canonical_entry", raw_id),
+                    "label": doc.get("title") or raw_id,
+                    "kind": "formal",
+                    "node_type": "canonical_entry",
+                    "entry_type": doc.get("entry_type") or "concept",
+                    "status": doc.get("status") or "fact",
+                    "state": "stable" if doc.get("status") in {"fact", "inferred"} else "soft",
+                    "summary": doc.get("summary") or "",
+                    "details": {
+                        "related_links": list(doc.get("graph_links") or []),
+                        "aliases": list(doc.get("aliases") or []),
+                        "sources": list(doc.get("sources") or []),
+                    },
+                    "entry_target": raw_id,
+                },
+                anchor_id="anchor::stable",
+                energy=_clamp(0.18 + float(doc.get("inbound_count") or 0.0) * 0.08, 0.18, 0.82),
+                stability=0.9 if doc.get("status") in {"fact", "inferred"} else 0.7,
+                burst_level=0.12,
+                formation_stage="stable",
+                recentness=0.14,
+                visual_role="stable_canonical",
+            )
+            return _graph_ref("canonical_entry", raw_id)
+        if kind == "insight" and raw_id in proposals_by_id:
+            proposal = proposals_by_id[raw_id]
+            cluster_id = next(iter(proposal_cluster_map.get(raw_id) or []), "")
+            ensure_node(
+                {
+                    "id": _graph_ref("insight_proposal", raw_id),
+                    "label": proposal.get("title") or raw_id,
+                    "kind": "insight",
+                    "node_type": "insight_proposal",
+                    "entry_type": proposal.get("kind") or "concept",
+                    "status": proposal.get("review_state") or "proposed",
+                    "state": proposal.get("review_state") or "proposed",
+                    "summary": proposal.get("proposed_answer") or proposal.get("hypothesis") or "",
+                    "details": {
+                        "hypothesis": proposal.get("hypothesis") or "",
+                        "proposed_answer": proposal.get("proposed_answer") or "",
+                        "supporting_entries": list(proposal.get("supporting_entries") or []),
+                        "trigger_queries": list(proposal.get("trigger_queries") or []),
+                    },
+                    "entry_target": None,
+                    "cluster_id": cluster_id,
+                },
+                anchor_id="anchor::forming",
+                energy=0.58,
+                stability=0.34,
+                burst_level=0.58,
+                formation_stage="condensing",
+                recentness=0.56,
+                visual_role="forming_insight",
+                cluster_id=cluster_id,
+            )
+            return _graph_ref("insight_proposal", raw_id)
+        if kind == "cluster" and raw_id in clusters_by_id:
+            cluster = clusters_by_id[raw_id]
+            maturity = _clamp(float(cluster.get("maturity_score") or 0.24), 0.0, 1.0)
+            demand = _clamp(float(cluster.get("demand_score") or 0.24), 0.0, 1.0)
+            ensure_node(
+                {
+                    "id": _graph_ref("query_cluster", raw_id),
+                    "label": cluster.get("display_query") or cluster.get("normalized_subject") or raw_id,
+                    "kind": "signal_cluster",
+                    "node_type": "query_cluster",
+                    "entry_type": cluster.get("intent") or "definition",
+                    "status": cluster.get("status") or "captured",
+                    "state": cluster.get("status") or "captured",
+                    "summary": cluster.get("normalized_subject") or "",
+                    "details": {
+                        "intent": cluster.get("intent") or "",
+                        "source_entries": list(cluster.get("source_entries") or []),
+                        "demand_score": demand,
+                        "maturity_score": maturity,
+                    },
+                    "entry_target": None,
+                    "cluster_id": raw_id,
+                    "cluster_label": cluster.get("display_query") or cluster.get("normalized_subject") or raw_id,
+                    "maturity_estimate": maturity,
+                },
+                anchor_id="anchor::fresh" if maturity < 0.45 else "anchor::forming",
+                energy=max(0.22, demand),
+                stability=max(0.12, maturity),
+                burst_level=max(0.16, demand * 0.72),
+                formation_stage="condensing" if maturity >= 0.55 else "stirring",
+                recentness=0.44,
+                visual_role="reinforced_query",
+                cluster_id=raw_id,
+                last_event_at=str(cluster.get("last_seen_at") or ""),
+            )
+            return _graph_ref("query_cluster", raw_id)
+        return ""
+
+    for name in data["entries"]:
+        ensure_reference(_graph_ref("canonical_entry", name))
+
+    for proposal_id in proposals_by_id:
+        ensure_reference(_graph_ref("insight_proposal", proposal_id))
+
+    for cluster_id in clusters_by_id:
+        ensure_reference(_graph_ref("query_cluster", cluster_id))
+
+    for name in data["entries"]:
+        doc = data["docs"][name]
+        source_ref = _graph_ref("canonical_entry", name)
+        for target in doc.get("graph_links") or []:
+            if target in data["entries"]:
+                add_edge(
+                    source_ref,
+                    _graph_ref("canonical_entry", target),
+                    edge_type="weak_affinity",
+                    strength=0.28,
+                    activation=0.18,
+                    formation_role="knowledge_context",
+                    pulse_level=0.08,
+                )
+
+    for cluster_id, cluster in clusters_by_id.items():
+        cluster_ref = _graph_ref("query_cluster", cluster_id)
+        for entry in cluster.get("source_entries") or []:
+            if entry not in data["entries"]:
+                continue
+            add_edge(
+                cluster_ref,
+                _graph_ref("canonical_entry", entry),
+                edge_type="belongs_to_cluster",
+                strength=0.34,
+                activation=max(0.22, float(cluster.get("demand_score") or 0.0)),
+                formation_role="cluster_context",
+                pulse_level=0.12,
+            )
+        insight_id = str(cluster.get("insight_id") or "")
+        if insight_id and insight_id in proposals_by_id:
+            add_edge(
+                cluster_ref,
+                _graph_ref("insight_proposal", insight_id),
+                edge_type="routes_to",
+                strength=0.42,
+                activation=max(0.28, float(cluster.get("maturity_score") or 0.0)),
+                formation_role="cluster_materialization",
+                pulse_level=0.24,
+            )
+
+    for proposal_id, proposal in proposals_by_id.items():
+        proposal_ref = _graph_ref("insight_proposal", proposal_id)
+        for entry in proposal.get("supporting_entries") or []:
+            if entry not in data["entries"]:
+                continue
+            add_edge(
+                proposal_ref,
+                _graph_ref("canonical_entry", entry),
+                edge_type="supports",
+                strength=0.48,
+                activation=0.34,
+                formation_role="proposal_support",
+                pulse_level=0.28,
+            )
+
+    selected_events: list[dict[str, Any]] = []
+    for item in graph_events:
+        score = _graph_event_score(item)
+        if score <= 0.06:
+            continue
+        enriched = dict(item)
+        details = enriched.get("details") or {}
+        age_seconds = max(
+            (datetime.now(timezone.utc) - _event_timestamp(str(enriched.get("created_at") or ""))).total_seconds(),
+            0.0,
+        )
+        half_life_days = float(details.get("half_life_days") or 18.0)
+        half_life_seconds = max(half_life_days, 1.0) * 24 * 60 * 60
+        recentness = math.exp(-age_seconds / half_life_seconds)
+        stability = float(details.get("stability") or 0.0)
+        burst_level = max(
+            0.08,
+            min(
+                1.0,
+                float(details.get("burst_level") or 0.0)
+                or score * 0.72
+                + (0.24 if str(enriched.get("event_type") or "").startswith("ingest") else 0.0)
+                + (0.16 if str(enriched.get("event_type") or "") == "proposal_materialized" else 0.0)
+                - stability * 0.14,
+            ),
+        )
+        formation_stage = str(details.get("formation_stage") or "").strip()
+        if not formation_stage:
+            event_type = str(enriched.get("event_type") or "")
+            if event_type.startswith("ingest") and burst_level >= 0.7:
+                formation_stage = "bursting"
+            elif event_type in {"proposal_materialized", "ask_reinforced"}:
+                formation_stage = "condensing"
+            elif event_type in {"insight_promoted", "insight_merged"}:
+                formation_stage = "stable"
+            else:
+                formation_stage = "stirring"
+        enriched["_score"] = score
+        enriched["_recentness"] = round(recentness, 4)
+        enriched["_burst_level"] = round(burst_level, 4)
+        enriched["_formation_stage"] = formation_stage
+        selected_events.append(enriched)
+
+        subject_ref = ensure_reference(
+            _graph_ref(str(enriched.get("subject_kind") or ""), str(enriched.get("subject_id") or ""))
+        )
+        refs = [subject_ref, *[str(item).strip() for item in enriched.get("related_ids") or [] if str(item).strip()]]
+        for ref in refs:
+            resolved_ref = ensure_reference(ref)
+            if not resolved_ref or resolved_ref not in nodes_by_id:
+                continue
+            node = nodes_by_id[resolved_ref]
+            event_type = str(enriched.get("event_type") or "")
+            visual_role = str((enriched.get("details") or {}).get("visual_role") or "").strip()
+            if not visual_role:
+                if event_type in {"proposal_materialized", "ask_reinforced"}:
+                    visual_role = "forming_context"
+                elif event_type.startswith("ingest"):
+                    visual_role = "fresh_ingest"
+                elif node.get("node_type") == "canonical_entry":
+                    visual_role = "recent_canonical"
+                elif node.get("node_type") == "query_cluster":
+                    visual_role = "reinforced_query"
+                else:
+                    visual_role = "forming_insight"
+            ensure_node(
+                node,
+                anchor_id=str(node.get("anchor_id") or "anchor::stable"),
+                energy=max(float(node.get("energy") or 0.0), float(enriched["_score"])),
+                stability=max(float(node.get("stability") or 0.0), float((enriched.get("details") or {}).get("stability") or 0.0)),
+                burst_level=max(float(node.get("burst_level") or 0.0), float(enriched["_burst_level"])),
+                formation_stage=str(enriched["_formation_stage"]),
+                recentness=max(float(node.get("recentness") or 0.0), float(enriched["_recentness"])),
+                visual_role=visual_role,
+                event_type=event_type,
+                cluster_id=str(node.get("cluster_id") or ""),
+                last_event_at=str(enriched.get("created_at") or ""),
+            )
+        related_refs = [str(item).strip() for item in enriched.get("related_ids") or [] if str(item).strip()]
+        for ref in related_refs:
+            related_ref = ensure_reference(ref)
+            if not subject_ref or not related_ref:
+                continue
+            edge_type = "weak_affinity"
+            formation_role = "story_context"
+            pulse_level = max(0.08, float(enriched["_recentness"]) * 0.42)
+            event_type = str(enriched.get("event_type") or "")
+            if event_type == "ask_reinforced":
+                edge_type = "ask_reinforcement"
+                formation_role = "reinforcement"
+                pulse_level = max(0.42, float(enriched["_burst_level"]))
+            elif event_type == "proposal_materialized":
+                edge_type = "supports"
+                formation_role = "formation_support"
+                pulse_level = max(0.46, float(enriched["_burst_level"]))
+            elif event_type in {"insight_promoted", "insight_merged"} and ref.startswith("insight::"):
+                edge_type = "routes_to"
+                formation_role = "canonicalization"
+                pulse_level = max(0.52, float(enriched["_burst_level"]))
+            add_edge(
+                subject_ref,
+                related_ref,
+                edge_type=edge_type,
+                strength=max(0.22, float(enriched["_score"]) * 0.9),
+                activation=max(0.18, float(enriched["_score"])),
+                formation_role=formation_role,
+                pulse_level=pulse_level,
+            )
+
+    selected_events.sort(
+        key=lambda item: (
+            -float(item.get("_score") or 0.0),
+            -_event_priority(str(item.get("event_type") or "")),
+            str(item.get("created_at") or ""),
+        )
+    )
+
+    _apply_anchor_constellation_layout(nodes_by_id)
+
+    return {
+        "data": data,
+        "cluster_stats": cluster_stats,
+        "graph_events": graph_events,
+        "selected_events": selected_events,
+        "nodes": list(nodes_by_id.values()),
+        "edges": list(edges_by_key.values()),
+    }
+
+
+def _resolve_graph_focus_id(nodes: Iterable[dict[str, Any]], focus: str | None) -> str:
+    normalized = str(focus or "").strip()
+    if not normalized:
+        return ""
+    node_ids = {str(node.get("id") or "") for node in nodes}
+    for candidate in (
+        normalized,
+        _graph_ref("canonical_entry", normalized),
+        _graph_ref("insight_proposal", normalized),
+        _graph_ref("query_cluster", normalized),
+    ):
+        if candidate in node_ids:
+            return candidate
+    return normalized
+
+
+def _sort_graph_nodes(nodes: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        list(nodes),
+        key=lambda item: (
+            0 if item["node_type"] == "cluster_anchor" else 1,
+            -_compute_hotspot_score(item),
+            -float(item.get("energy") or 0.0),
+            item["id"],
+        ),
+    )
+
+
+def _sort_graph_edges(edges: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        list(edges),
+        key=lambda item: (
+            -float(item.get("pulse_level") or 0.0),
+            -float(item.get("activation") or 0.0),
+            -float(item.get("strength") or 0.0),
+            item["source"],
+            item["target"],
+        ),
+    )
+
+
+def _universe_graph_payload(
+    kb_path: str | Path,
+    *,
+    store: PlatformStore | None = None,
+    focus: str | None = None,
+    scene_key: str = "universe",
+    budget: str | None = None,
+) -> dict[str, Any]:
+    universe = _build_universe_graph(kb_path, store=store)
+    scene_budget = _graph_scene_budget(scene_key, budget)
+    nodes = _sort_graph_nodes(universe["nodes"])
+    edges = _sort_graph_edges(universe["edges"])
+    total_node_count = len(nodes)
+    total_edge_count = len(edges)
+    focus_id = _resolve_graph_focus_id(nodes, focus)
+
+    if focus_id:
+        nodes, edges = _filter_graph_to_neighborhood(nodes, edges, focus_id=focus_id, depth=2)
+        nodes = _sort_graph_nodes(nodes)[: int(scene_budget.get("neighborhood_nodes") or scene_budget["nodes"])]
+        visible = {node["id"] for node in nodes}
+        edges = [
+            edge for edge in _sort_graph_edges(edges) if edge["source"] in visible and edge["target"] in visible
+        ][: int(scene_budget["edges"])]
+    else:
+        nodes = nodes[: int(scene_budget["nodes"])]
+        visible = {node["id"] for node in nodes}
+        edges = [
+            edge for edge in edges if edge["source"] in visible and edge["target"] in visible
+        ][: int(scene_budget["edges"])]
+
+    focus_seed = focus_id or next(
+        (node["id"] for node in nodes if node["node_type"] != "cluster_anchor"),
+        nodes[0]["id"] if nodes else "",
+    )
+    story_caption = ""
+    if universe["selected_events"]:
+        lead = universe["selected_events"][0]
+        story_caption = str(
+            (lead.get("details") or {}).get("proposed_answer")
+            or lead.get("subject_label")
+            or ""
+        ).strip()
+    elif nodes:
+        story_caption = str(
+            next((node.get("label") for node in nodes if node["node_type"] != "cluster_anchor"), "")
+            or nodes[0].get("label")
+            or ""
+        ).strip()
+
+    payload = {
+        "graph_version": "insights-v2",
+        "graph_kind": "portal",
+        "scene_mode": scene_budget["scene_mode"],
+        "focus_seed": focus_seed,
+        "story_caption": story_caption,
+        "ambient_seed": hashlib.sha1(
+            f"{kb_path}:{scene_key}:{scene_budget['budget_name']}".encode("utf-8")
+        ).hexdigest()[:12],
+        "playback_events": [
+            {
+                "id": str(item.get("id") or f"event-{index}"),
+                "event_type": str(item.get("event_type") or ""),
+                "subject_ref": _graph_ref(str(item.get("subject_kind") or ""), str(item.get("subject_id") or "")),
+                "related_refs": [str(ref) for ref in item.get("related_ids") or [] if str(ref).strip()],
+                "caption": str(
+                    (item.get("details") or {}).get("proposed_answer")
+                    or item.get("subject_label")
+                    or ""
+                ).strip(),
+            }
+            for index, item in enumerate(universe["selected_events"][:6])
+        ],
+        "kb_language": universe["data"].get("default_language") or "en",
+        "generated_at": utc_now(),
+        "stats": {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "formal_entry_count": len(universe["data"]["entries"]),
+            "insight_count": len(universe["data"].get("insights") or []),
+            "query_cluster_count": len(universe["cluster_stats"]["clusters"]),
+            "cluster_coverage": universe["cluster_stats"]["cluster_coverage"],
+            "event_count": len(universe["selected_events"]),
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+    return _annotate_graph_payload(
+        payload,
+        cluster_stats=universe["cluster_stats"],
+        graph_events=universe["graph_events"],
+        budget_name=str(scene_budget["budget_name"]),
+        total_node_count=total_node_count,
+        total_edge_count=total_edge_count,
     )
 
 
@@ -1921,11 +3090,20 @@ def search_kb_suggestions(
     query: str,
     *,
     limit: int = 8,
+    store: PlatformStore | None = None,
 ) -> list[dict[str, Any]]:
     raw_query = query.strip()
     if not raw_query:
         return []
     data = inventory(kb_path)
+    cluster_stats = _query_cluster_stats(kb_path, store)
+    entry_cluster_map: dict[str, str] = {}
+    for cluster in cluster_stats.get("clusters") or []:
+        cluster_label = str(cluster.get("display_query") or cluster.get("normalized_subject") or "").strip()
+        if not cluster_label:
+            continue
+        for entry in cluster.get("source_entries") or []:
+            entry_cluster_map.setdefault(str(entry), cluster_label)
     terms = [term for term in re.split(r"\s+", raw_query) if term]
     suggestions: list[dict[str, Any]] = []
     for name, doc in data["docs"].items():
@@ -1958,6 +3136,7 @@ def search_kb_suggestions(
                 "entry_type": doc["entry_type"],
                 "status": doc["status"],
                 "summary": doc["summary"],
+                "cluster_label": entry_cluster_map.get(name, ""),
                 "matched_field": matched_field or "summary",
                 "score": score + min(int(doc["inbound_count"]), 5),
             }
@@ -2055,7 +3234,26 @@ def graph_payload(
     graph_kind: str = "portal",
     focus: str | None = None,
     scene: str | None = None,
+    budget: str | None = None,
 ) -> dict[str, Any]:
+    scene_key = _graph_scene_key(graph_kind, scene)
+    if graph_kind == "portal" and scene_key in {"universe", "universe_focus"}:
+        return _universe_graph_payload(
+            kb_path,
+            store=store,
+            focus=focus,
+            scene_key=scene_key,
+            budget=budget,
+        )
+    if graph_kind == "portal" and scene_key in {"home", "full"}:
+        return _portal_preview_graph_payload(
+            kb_path,
+            store=store,
+            focus=focus,
+            scene_key=scene_key,
+            budget=budget,
+        )
+
     data = inventory(kb_path)
     cluster_stats = _query_cluster_stats(kb_path, store)
     proposals_by_id = {
@@ -2064,8 +3262,7 @@ def graph_payload(
     clusters_by_id = {
         str(item["id"]): item for item in cluster_stats["clusters"]
     }
-    scene_key = "admin" if graph_kind == "admin" else ("full" if str(scene or "").strip() == "full" else "home")
-    budget = GRAPH_SCENE_BUDGETS[scene_key]
+    budget_definition = _graph_scene_budget(scene_key, budget)
     anchor_specs = {
         "fresh": {"id": "anchor::fresh", "label": "Fresh knowledge basin", "x": -90, "y": 22, "z": 30},
         "forming": {"id": "anchor::forming", "label": "Forming knowledge basin", "x": 10, "y": 58, "z": -18},
@@ -2125,7 +3322,7 @@ def graph_payload(
             str(item.get("created_at") or ""),
         )
     )
-    selected_events = selected_events[: int(budget["events"])]
+    selected_events = selected_events[: int(budget_definition["events"])]
 
     nodes_by_id: dict[str, dict[str, Any]] = {}
     edges_by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -2640,7 +3837,7 @@ def graph_payload(
                 -float(item.get("weight") or 0.0),
                 item["id"],
             ),
-        )[: int(budget["nodes"])]
+        )[: int(budget_definition["nodes"])]
         visible = {node["id"] for node in nodes}
         edges = [
             edge
@@ -2654,7 +3851,7 @@ def graph_payload(
                 ),
             )
             if edge["source"] in visible and edge["target"] in visible
-        ][: int(budget["edges"])]
+        ][: int(budget_definition["edges"])]
 
     focus_seed = next(
         (node["id"] for node in nodes if node["node_type"] != "cluster_anchor"),
@@ -2675,10 +3872,10 @@ def graph_payload(
             or ""
         ).strip()
 
-    return {
+    payload = {
         "graph_version": "insights-v2",
         "graph_kind": graph_kind,
-        "scene_mode": budget["scene_mode"],
+        "scene_mode": budget_definition["scene_mode"],
         "focus_seed": focus_seed,
         "story_caption": story_caption,
         "ambient_seed": hashlib.sha1(
@@ -2711,6 +3908,149 @@ def graph_payload(
         },
         "nodes": nodes,
         "edges": edges,
+    }
+    return _annotate_graph_payload(
+        payload,
+        cluster_stats=cluster_stats,
+        graph_events=graph_events,
+        budget_name=str(budget_definition["budget_name"]),
+    )
+
+
+def graph_neighborhood_payload(
+    kb_path: str | Path,
+    *,
+    node_id: str,
+    depth: int = 2,
+    store: PlatformStore | None = None,
+    budget: str | None = None,
+) -> dict[str, Any]:
+    scene_budget = _graph_scene_budget("universe_focus", budget)
+    universe = _build_universe_graph(kb_path, store=store)
+    nodes = _sort_graph_nodes(universe["nodes"])
+    edges = _sort_graph_edges(universe["edges"])
+    total_node_count = len(nodes)
+    total_edge_count = len(edges)
+    focus_id = _resolve_graph_focus_id(nodes, node_id)
+    nodes, edges = _filter_graph_to_neighborhood(
+        nodes,
+        edges,
+        focus_id=focus_id,
+        depth=depth,
+    )
+    nodes = nodes[: int(scene_budget.get("neighborhood_nodes") or scene_budget["nodes"])]
+    visible = {node["id"] for node in nodes}
+    edges = [
+        edge for edge in edges if edge["source"] in visible and edge["target"] in visible
+    ][: int(scene_budget["edges"])]
+    payload = {
+        "graph_version": "insights-v2",
+        "graph_kind": "portal",
+        "scene_mode": scene_budget["scene_mode"],
+        "focus_seed": focus_id,
+        "story_caption": "",
+        "ambient_seed": hashlib.sha1(
+            f"{kb_path}:neighborhood:{focus_id}:{depth}:{scene_budget['budget_name']}".encode("utf-8")
+        ).hexdigest()[:12],
+        "playback_events": [],
+        "kb_language": universe["data"].get("default_language") or "en",
+        "generated_at": utc_now(),
+        "stats": {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "formal_entry_count": len(universe["data"]["entries"]),
+            "insight_count": len(universe["data"].get("insights") or []),
+            "query_cluster_count": len(universe["cluster_stats"]["clusters"]),
+            "cluster_coverage": universe["cluster_stats"]["cluster_coverage"],
+            "event_count": len(universe["selected_events"]),
+            "depth": max(0, min(int(depth), 4)),
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+    return _annotate_graph_payload(
+        payload,
+        cluster_stats=universe["cluster_stats"],
+        graph_events=universe["graph_events"],
+        budget_name=str(scene_budget["budget_name"]),
+        total_node_count=total_node_count,
+        total_edge_count=total_edge_count,
+    )
+
+
+def shortest_graph_path(
+    kb_path: str | Path,
+    *,
+    source_id: str,
+    target_id: str,
+    store: PlatformStore | None = None,
+) -> dict[str, Any]:
+    universe = _build_universe_graph(kb_path, store=store)
+    nodes = _sort_graph_nodes(universe["nodes"])
+    edges = _sort_graph_edges(universe["edges"])
+    node_map = {str(node.get("id") or ""): node for node in nodes}
+    source = _resolve_graph_focus_id(nodes, source_id)
+    target = _resolve_graph_focus_id(nodes, target_id)
+    if not source or not target:
+        return {"from": source, "to": target, "found": False, "node_ids": [], "nodes": [], "edges": []}
+    if source == target:
+        return {
+            "from": source,
+            "to": target,
+            "found": True,
+            "node_ids": [source],
+            "nodes": [node_map[source]] if source in node_map else [],
+            "edges": [],
+        }
+
+    node_types = {str(node.get("id") or ""): str(node.get("node_type") or "") for node in nodes}
+    adjacency: dict[str, list[tuple[str, dict[str, Any]]]] = defaultdict(list)
+    for edge in edges:
+        if "cluster_anchor" in {node_types.get(edge["source"], ""), node_types.get(edge["target"], "")}:
+            continue
+        adjacency[edge["source"]].append((edge["target"], edge))
+        adjacency[edge["target"]].append((edge["source"], edge))
+
+    queue: list[str] = [source]
+    parents: dict[str, tuple[str, dict[str, Any]]] = {}
+    visited = {source}
+    while queue:
+        current = queue.pop(0)
+        if current == target:
+            break
+        for neighbor, edge in adjacency.get(current, []):
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            parents[neighbor] = (current, edge)
+            queue.append(neighbor)
+
+    if target not in visited:
+        return {"from": source, "to": target, "found": False, "node_ids": [], "nodes": [], "edges": []}
+
+    node_ids = [target]
+    path_edges: list[dict[str, Any]] = []
+    cursor = target
+    while cursor != source:
+        parent, edge = parents[cursor]
+        path_edges.append(
+            {
+                "source": parent,
+                "target": cursor,
+                "edge_type": edge["edge_type"],
+            }
+        )
+        node_ids.append(parent)
+        cursor = parent
+    node_ids.reverse()
+    path_edges.reverse()
+    return {
+        "from": source,
+        "to": target,
+        "found": True,
+        "node_ids": node_ids,
+        "nodes": [node_map[node_id] for node_id in node_ids if node_id in node_map],
+        "edges": path_edges,
     }
 
 

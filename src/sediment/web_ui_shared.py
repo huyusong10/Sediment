@@ -39,6 +39,26 @@ def json_script_payload(payload: object) -> str:
     return json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c")
 
 
+def shell_data_defaults(locale: str | None) -> dict[str, str]:
+    active_locale = normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    return {
+        "toggleAriaLabel": "切换语言" if is_zh else "Switch language",
+        "themeDarkLabel": "切换到暗色" if is_zh else "Switch to dark mode",
+        "themeDarkIcon": "◐",
+        "themeLightLabel": "切换到明亮" if is_zh else "Switch to light mode",
+        "themeLightIcon": "☀",
+        "fileReadError": "读取文件失败" if is_zh else "Failed to read file.",
+        "unknownError": "未知错误" if is_zh else "Unknown error",
+        "selectedPrefix": "已选择" if is_zh else "Selected",
+        "selectedSuffix": "个文件" if is_zh else "files",
+        "jobTypeLabel": "任务类型" if is_zh else "Job type",
+        "jobChangeCountLabel": "变更文件数" if is_zh else "Changed files",
+        "jobCommitLabel": "提交" if is_zh else "Commit",
+        "jobChangedItemsLabel": "变更条目" if is_zh else "Changed items",
+    }
+
+
 def render_shell_template(
     title: str,
     body: str,

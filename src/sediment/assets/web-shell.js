@@ -11,15 +11,23 @@
 
   const shellData = readJsonScript("sediment-shell-data") || {};
 
+  function shellLabel(name, preferredValue = "") {
+    if (typeof preferredValue === "string" && preferredValue.trim()) {
+      return preferredValue;
+    }
+    const value = shellData[name];
+    return typeof value === "string" ? value : "";
+  }
+
   function nextThemeInfo() {
     return document.documentElement.classList.contains("dark")
       ? {
           icon: shellData.themeLightIcon || "\u2600",
-          label: shellData.themeLightLabel || "Light",
+          label: shellLabel("themeLightLabel"),
         }
       : {
           icon: shellData.themeDarkIcon || "\u25d0",
-          label: shellData.themeDarkLabel || "Dark",
+          label: shellLabel("themeDarkLabel"),
         };
   }
 
@@ -71,9 +79,9 @@
         const langBtn = document.createElement("button");
         langBtn.className = "utility-icon-button";
         langBtn.type = "button";
-        langBtn.innerHTML = `<span aria-hidden="true">${shellData.toggleLabel || "EN"}</span>`;
-        langBtn.title = shellData.toggleAriaLabel || "Switch language";
-        langBtn.setAttribute("aria-label", shellData.toggleAriaLabel || "Switch language");
+        langBtn.innerHTML = `<span aria-hidden="true">${shellLabel("toggleLabel")}</span>`;
+        langBtn.title = shellLabel("toggleAriaLabel");
+        langBtn.setAttribute("aria-label", shellLabel("toggleAriaLabel"));
         langBtn.addEventListener("click", () => {
           const currentUrl = new URL(window.location.href);
           currentUrl.searchParams.set(
@@ -169,7 +177,7 @@
         const result = String(reader.result || "");
         resolve(result.includes(",") ? result.split(",", 2)[1] : result);
       };
-      reader.onerror = () => reject(reader.error || new Error("Failed to read file"));
+      reader.onerror = () => reject(new Error(shellLabel("fileReadError")));
       reader.readAsDataURL(file);
     });
   }
@@ -211,8 +219,8 @@
     if (items.length === 1) {
       return sample;
     }
-    const prefix = statusNode?.dataset.selectedPrefix || "Selected";
-    const suffix = statusNode?.dataset.selectedSuffix || "files";
+    const prefix = shellLabel("selectedPrefix", statusNode?.dataset.selectedPrefix || "");
+    const suffix = shellLabel("selectedSuffix", statusNode?.dataset.selectedSuffix || "");
     const overflow = items.length > 3 ? ` +${items.length - 3}` : "";
     return `${prefix} ${items.length} ${suffix} · ${sample}${overflow}`;
   }
@@ -302,6 +310,7 @@
     readJsonScript,
     renderMarkdown,
     shellData,
+    shellLabel,
     syncFilePickerState,
     writeSessionState,
   };

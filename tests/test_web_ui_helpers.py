@@ -49,3 +49,8 @@ def test_web_ui_shell_shared_shell_uses_shared_template_hooks() -> None:
     assert "window.__compatLoaded = true;" in html
     assert ".page-title" in html
     assert ".utility-icon-button" in html
+    assert '"fileReadError": "读取文件失败"' in html
+    assert '"unknownError": "未知错误"' in html
+    assert '"selectedPrefix": "已选择"' in html
+    assert '"selectedSuffix": "个文件"' in html
+    assert '"jobTypeLabel": "任务类型"' in html

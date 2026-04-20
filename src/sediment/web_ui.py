@@ -15,6 +15,7 @@ from sediment.web_ui_shared import (
     logo_svg,
     normalize_locale,
     render_shell_template,
+    shell_data_defaults,
 )
 
 
@@ -372,9 +373,6 @@ def shared_shell(
 ) -> str:
     active_locale = _normalize_locale(locale)
     toggle_label = "EN" if active_locale == "zh" else "中"
-    toggle_aria_label = "切换语言" if active_locale == "zh" else "Switch language"
-    theme_dark_label = "切换到暗色" if active_locale == "zh" else "Switch to dark mode"
-    theme_light_label = "切换到明亮" if active_locale == "zh" else "Switch to light mode"
     extra_tags = []
     for style_name in page_style_names or []:
         extra_tags.append(f'<link rel="stylesheet" href="{_asset_url(style_name)}" />')
@@ -391,12 +389,8 @@ def shared_shell(
         page_script_tag=page_script_tag,
         shell_variant=shell_variant,
         shell_data={
+            **shell_data_defaults(active_locale),
             "toggleLabel": toggle_label,
-            "toggleAriaLabel": toggle_aria_label,
-            "themeDarkLabel": theme_dark_label,
-            "themeDarkIcon": "◐",
-            "themeLightLabel": theme_light_label,
-            "themeLightIcon": "☀",
         },
     )
 
@@ -1253,6 +1247,20 @@ def admin_html(
                 "stats_blocking": "阻断问题" if is_zh else "Blocking issues",
                 "stats_stale": "陈旧任务" if is_zh else "Stale jobs",
                 "issue_empty": "当前没有需要立即处理的问题。" if is_zh else "No urgent issues right now.",
+                "health_cluster_coverage": "聚类覆盖" if is_zh else "Cluster coverage",
+                "emerging_empty": (
+                    "暂时没有明显成形中的知识簇。"
+                    if is_zh
+                    else "No obvious emerging knowledge clusters right now."
+                ),
+                "emerging_metric_demand": "需求" if is_zh else "Demand",
+                "emerging_metric_maturity": "成熟度" if is_zh else "Maturity",
+                "emerging_intent_default": "定义" if is_zh else "Definition",
+                "stress_empty": (
+                    "暂时没有明显的 canonical 压力点。"
+                    if is_zh
+                    else "No clear canonical stress points right now."
+                ),
                 "issue_scope_label": "建议范围" if is_zh else "Suggested scope",
                 "issue_action_label": "建议动作" if is_zh else "Suggested action",
                 "issue_target_label": "目标" if is_zh else "Target",
@@ -1286,6 +1294,7 @@ def admin_html(
                 "editor_saved": "保存成功" if is_zh else "Saved",
                 "editor_reset": "已恢复到最近一次载入的内容" if is_zh else "Reset to the last loaded content",
                 "editor_reloaded": "已重新载入服务器版本" if is_zh else "Reloaded the latest server version",
+                "editor_reload_target": "重新载入当前文档" if is_zh else "Reload current document",
                 "editor_preview_empty": "预览将在这里显示。" if is_zh else "Preview appears here.",
                 "editor_linked_issues_empty": "当前文档没有关联治理问题。" if is_zh else "No linked governance issues for this document.",
                 "file_dirty": "未保存修改" if is_zh else "Unsaved changes",
@@ -1339,7 +1348,10 @@ def admin_html(
                 "live_error_label": "错误" if is_zh else "Error",
                 "live_result_label": "结果" if is_zh else "Result",
                 "live_done_label": "结束" if is_zh else "Done",
+                "unknown_error": "未知错误" if is_zh else "Unknown error",
+                "admin_ready": "管理台已就绪。" if is_zh else "Admin ready.",
                 "manual_tidy_reason_required": "请填写整理原因。" if is_zh else "Enter a tidy reason.",
+                "explore_question_required": "问题不能为空。" if is_zh else "Question must not be empty.",
                 "ingest_file_required": "请先拖入或选择至少一个文档。" if is_zh else "Drop or choose at least one document first.",
                 "ingest_selection_empty": "还没有选择任何文档。" if is_zh else "No documents selected yet.",
                 "ingest_selected_prefix": "当前已选择" if is_zh else "Selected",
@@ -1350,6 +1362,93 @@ def admin_html(
                 "doc_group_formal": "正式条目" if is_zh else "Formal entries",
                 "doc_group_placeholder": "Placeholders" if not is_zh else "待补全条目",
                 "doc_group_index": "索引" if is_zh else "Indexes",
+                "insight_empty": "暂时还没有 insight proposal。" if is_zh else "No insight proposals yet.",
+                "insight_detail_empty": (
+                    "选择一条 proposal 以查看细节。"
+                    if is_zh
+                    else "Select a proposal to inspect its details."
+                ),
+                "insight_summary_pending": "待审" if is_zh else "Pending",
+                "insight_summary_proposed": "提案中" if is_zh else "Proposed",
+                "insight_summary_observing": "观察中" if is_zh else "Observing",
+                "insight_select_prompt": (
+                    "请先选择一条 proposal。"
+                    if is_zh
+                    else "Select an insight proposal first."
+                ),
+                "insight_job_created": "已创建受管 job。" if is_zh else "Managed job created.",
+                "insight_state_proposed": "提案中" if is_zh else "Proposed",
+                "insight_state_observing": "观察中" if is_zh else "Observing",
+                "insight_state_promoted": "已提升" if is_zh else "Promoted",
+                "insight_state_merged": "已并入" if is_zh else "Merged",
+                "insight_state_rejected": "已拒绝" if is_zh else "Rejected",
+                "insight_state_archived": "已归档" if is_zh else "Archived",
+                "insight_kind_concept": "概念" if is_zh else "Concept",
+                "insight_kind_workflow": "流程" if is_zh else "Workflow",
+                "insight_kind_lesson": "经验" if is_zh else "Lesson",
+                "insight_kind_mapping": "映射" if is_zh else "Mapping",
+                "insight_sources_suffix": "条来源" if is_zh else "sources",
+                "insight_action_promote": "提升为正式条目" if is_zh else "Promote to canonical entry",
+                "insight_action_merge": "并入既有正式条目" if is_zh else "Merge into existing entry",
+                "insight_action_keep_observing": "继续观察" if is_zh else "Keep observing",
+                "insight_hypothesis_title": "假设" if is_zh else "Hypothesis",
+                "insight_proposed_answer_title": "建议答案" if is_zh else "Proposed answer",
+                "insight_supporting_entries_title": "支撑条目" if is_zh else "Supporting entries",
+                "insight_trigger_queries_title": "触发问题" if is_zh else "Trigger queries",
+                "graph_detail_empty": (
+                    "点击图中的节点，查看证据和建议动作。"
+                    if is_zh
+                    else "Select a graph node to inspect evidence and suggested actions."
+                ),
+                "graph_event_ask_reinforced": (
+                    "近期提问正在强化这条路径。"
+                    if is_zh
+                    else "Recent questions are reinforcing this route."
+                ),
+                "graph_event_proposal_materialized": (
+                    "这条隐性知识刚被物化为 proposal。"
+                    if is_zh
+                    else "This latent knowledge was just materialized as a proposal."
+                ),
+                "graph_event_insight_promoted": (
+                    "这条知识最近被提升为 canonical entry。"
+                    if is_zh
+                    else "This knowledge was recently promoted into a canonical entry."
+                ),
+                "graph_event_insight_merged": (
+                    "这条知识最近被并入既有 canonical entry。"
+                    if is_zh
+                    else "This knowledge was recently merged into an existing canonical entry."
+                ),
+                "graph_event_ingest_created": (
+                    "这条知识最近被 ingest 引入图中。"
+                    if is_zh
+                    else "This knowledge was recently introduced by ingest."
+                ),
+                "graph_event_ingest_updated": (
+                    "这条知识最近被 ingest 刷新。"
+                    if is_zh
+                    else "This knowledge was recently refreshed by ingest."
+                ),
+                "graph_event_empty": (
+                    "当前没有明显的形成事件。"
+                    if is_zh
+                    else "There is no dominant formation event right now."
+                ),
+                "graph_metric_energy": "能量" if is_zh else "Energy",
+                "graph_metric_stability": "稳定度" if is_zh else "Stability",
+                "graph_metric_role": "角色" if is_zh else "Role",
+                "graph_metric_state": "状态" if is_zh else "State",
+                "graph_hypothesis_title": "假设" if is_zh else "Hypothesis",
+                "graph_supporting_links_title": "支撑连接" if is_zh else "Supporting links",
+                "graph_trigger_queries_title": "触发问题" if is_zh else "Trigger queries",
+                "graph_open_entry": "打开条目" if is_zh else "Open entry",
+                "graph_stats_nodes_suffix": "节点" if is_zh else "nodes",
+                "graph_stats_edges_suffix": "连线" if is_zh else "edges",
+                "graph_stats_coverage_prefix": "覆盖" if is_zh else "coverage",
+                "graph_renderer_unavailable": "图渲染器尚未就绪。"
+                if is_zh
+                else "Graph renderer is not ready.",
                 "doc_counts_formal": "正式条目" if is_zh else "Formal",
                 "doc_counts_placeholder": "待补全" if is_zh else "Placeholders",
                 "doc_counts_index": "索引" if is_zh else "Indexes",
@@ -1369,6 +1468,21 @@ def admin_html(
                 "settings_loaded": "已从磁盘载入配置。" if is_zh else "Config reloaded from disk.",
                 "settings_saved": "配置已保存。" if is_zh else "Config saved.",
                 "settings_restart_scheduled": "服务重启已安排，页面会自动重新连接。" if is_zh else "Service restart scheduled. The page will reconnect automatically.",
+                "system_auth_label": "鉴权" if is_zh else "Auth",
+                "system_proxy_label": "代理" if is_zh else "Proxy",
+                "system_rate_label": "速率" if is_zh else "Rate",
+                "system_text_label": "文本" if is_zh else "Text",
+                "system_upload_label": "上传" if is_zh else "Upload",
+                "system_retry_label": "重试" if is_zh else "Retry",
+                "system_stale_label": "陈旧阈值" if is_zh else "Stale",
+                "system_state_enabled": "启用" if is_zh else "enabled",
+                "system_state_disabled": "关闭" if is_zh else "disabled",
+                "action_run_tidy": "KB 级 tidy" if is_zh else "KB-level tidy",
+                "action_edit_entry": "在线编辑" if is_zh else "Inline edit",
+                "action_promote_placeholder": (
+                    "补全并提升 placeholder" if is_zh else "Promote placeholder"
+                ),
+                "action_review_entry": "人工复核" if is_zh else "Manual review",
                 "triaged": "标记已归类" if is_zh else "Mark triaged",
                 "reject": "拒绝提交" if is_zh else "Reject",
                 "run_ingest": "执行导入" if is_zh else "Run ingest",
@@ -1421,6 +1535,7 @@ def admin_html(
                 "disable_user": "停用" if is_zh else "Disable",
                 "user_created": "用户已创建：" if is_zh else "Created user: ",
                 "user_disabled": "用户已停用：" if is_zh else "Disabled user: ",
+                "users_empty": "暂无用户。" if is_zh else "No users.",
                 "current_session": "当前会话" if is_zh else "Current session",
                 "user_disabled_label": "已停用" if is_zh else "Disabled",
                 "role_owner": "所有者" if is_zh else "owner",

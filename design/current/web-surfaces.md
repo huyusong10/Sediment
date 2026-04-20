@@ -143,6 +143,7 @@ Web 层维持两个共享同一实例配置、但职责明确分离的界面：
   - 增加 `emerging clusters`、`cluster coverage` 与 `canonical stress points`
   - 治理焦点列表和最近活动列表都设置较大的最大高度并启用滚动，避免后台首屏被超长队列无限拉长
   - 两列信息卡片使用 top-aligned 布局，不把短列强行拉伸成与长列等高
+  - 桌面端总览卡片按列独立向下堆栈，不再按行配对；移动端收敛为单列时恢复 `queue -> health -> issues -> activity -> emerging -> stress` 的原始信息顺序
 - `/admin/kb`
   - 显示名称为“知识库管理”
   - 模块职责：作为知识运营中枢，在同一工作台里完成导入、治理触发、隐性知识审阅、治理图诊断与 Live 轨迹，而不是承载文件编辑流程

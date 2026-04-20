@@ -3,8 +3,15 @@
   const pageData = shell.readJsonScript("sediment-page-data") || {};
   const UI = pageData.ui || {};
   const ROUTES = pageData.routes || {};
-  const { collectUploads, escapeHtml, fetchJson, readSessionState, renderMarkdown, writeSessionState } = shell;
-  const isZh = document.documentElement.dataset.locale === "zh";
+  const {
+    collectUploads,
+    escapeHtml,
+    fetchJson,
+    readSessionState,
+    renderMarkdown,
+    shellLabel,
+    writeSessionState,
+  } = shell;
   const locale = document.documentElement.dataset.locale || "en";
   const PORTAL_PAGE_SESSION_KEY = `sediment-portal-ui:${locale}:${String(pageData.pageKind || "unknown")}`;
   const MAX_PERSISTED_TEXT_CHARS = 120000;
@@ -309,7 +316,7 @@
   async function loadHome() {
     const payload = await fetchJson("/api/portal/home");
     renderPortalStats(payload);
-    setPortalMessage(UI.home_ready || (isZh ? "知识库已就绪。" : "Knowledge base ready."));
+    setPortalMessage(UI.home_ready || "");
   }
 
   async function loadSuggestions(query) {
@@ -434,7 +441,8 @@
   }
 
   function showPortalError(error) {
-    const message = error && error.message ? error.message : (UI.unknown_error || "Unknown error");
+    const message =
+      error && error.message ? error.message : shellLabel("unknownError", UI.unknown_error || "");
     setPortalMessage(message);
     setSearchStatus(message);
     setSuggestionVisibility(false);

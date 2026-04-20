@@ -1,45 +1,49 @@
-<section class="admin-overview-grid admin-overview-layout" data-testid="admin-overview-layout">
-  <div class="panel" data-testid="admin-overview-queue-panel">
-    <div class="row spread">
-      <h2>__QUEUE_TITLE__</h2>
-      <span class="tabs-note">__QUEUE_NOTE__</span>
+<section class="workbench-layout admin-overview-grid admin-overview-layout section-gap-sm" data-testid="admin-overview-layout">
+  <div class="workbench-column admin-overview-column" data-testid="admin-overview-primary-column">
+    <div class="panel admin-overview-panel" style="--overview-order: 1;" data-testid="admin-overview-queue-panel">
+      <div class="row spread">
+        <h2>__QUEUE_TITLE__</h2>
+        <span class="tabs-note">__QUEUE_NOTE__</span>
+      </div>
+      <div class="stats" id="admin-stats" data-testid="admin-stats"></div>
     </div>
-    <div class="stats" id="admin-stats" data-testid="admin-stats"></div>
+    <div class="panel admin-overview-panel" style="--overview-order: 3;" data-testid="admin-overview-issue-panel">
+      <div class="row spread">
+        <h2>__ISSUE_TITLE__</h2>
+        <span class="tabs-note">__ISSUE_NOTE__</span>
+      </div>
+      <div class="list scroll-list overview-issue-list" id="issue-list" data-testid="admin-issue-list"></div>
+    </div>
+    <div class="panel admin-overview-panel" style="--overview-order: 5;" data-testid="admin-overview-emerging-panel">
+      <div class="row spread">
+        <h2>__EMERGING_TITLE__</h2>
+        <span class="tabs-note">__EMERGING_NOTE__</span>
+      </div>
+      <div class="list scroll-list overview-issue-list" id="emerging-clusters-list" data-testid="admin-emerging-clusters-list"></div>
+    </div>
   </div>
-  <div class="panel" data-testid="admin-overview-health-panel">
-    <div class="row spread">
-      <h2>__HEALTH_TITLE__</h2>
-      <span class="tabs-note">__HEALTH_NOTE__</span>
+  <div class="workbench-column admin-overview-column" data-testid="admin-overview-secondary-column">
+    <div class="panel admin-overview-panel" style="--overview-order: 2;" data-testid="admin-overview-health-panel">
+      <div class="row spread">
+        <h2>__HEALTH_TITLE__</h2>
+        <span class="tabs-note">__HEALTH_NOTE__</span>
+      </div>
+      <div class="subtle" id="admin-health-summary-note" data-testid="admin-health-summary-note"></div>
+      <div class="severity-bar" id="severity-bars" data-testid="admin-severity"></div>
     </div>
-    <div class="subtle" id="admin-health-summary-note" data-testid="admin-health-summary-note"></div>
-    <div class="severity-bar" id="severity-bars" data-testid="admin-severity"></div>
-  </div>
-  <div class="panel" data-testid="admin-overview-issue-panel">
-    <div class="row spread">
-      <h2>__ISSUE_TITLE__</h2>
-      <span class="tabs-note">__ISSUE_NOTE__</span>
+    <div class="panel admin-overview-panel" style="--overview-order: 4;" data-testid="admin-overview-activity-panel">
+      <div class="row spread">
+        <h2>__ACTIVITY_TITLE__</h2>
+        <span class="tabs-note">__ACTIVITY_NOTE__</span>
+      </div>
+      <div class="list scroll-list overview-activity-list" id="audit-log-list" data-testid="admin-audit-log-list"></div>
     </div>
-    <div class="list scroll-list overview-issue-list" id="issue-list" data-testid="admin-issue-list"></div>
-  </div>
-  <div class="panel" data-testid="admin-overview-activity-panel">
-    <div class="row spread">
-      <h2>__ACTIVITY_TITLE__</h2>
-      <span class="tabs-note">__ACTIVITY_NOTE__</span>
+    <div class="panel admin-overview-panel" style="--overview-order: 6;" data-testid="admin-overview-stress-panel">
+      <div class="row spread">
+        <h2>__STRESS_TITLE__</h2>
+        <span class="tabs-note">__STRESS_NOTE__</span>
+      </div>
+      <div class="list scroll-list overview-issue-list" id="stress-points-list" data-testid="admin-stress-points-list"></div>
     </div>
-    <div class="list scroll-list overview-activity-list" id="audit-log-list" data-testid="admin-audit-log-list"></div>
-  </div>
-  <div class="panel" data-testid="admin-overview-emerging-panel">
-    <div class="row spread">
-      <h2>__EMERGING_TITLE__</h2>
-      <span class="tabs-note">__EMERGING_NOTE__</span>
-    </div>
-    <div class="list scroll-list overview-issue-list" id="emerging-clusters-list" data-testid="admin-emerging-clusters-list"></div>
-  </div>
-  <div class="panel" data-testid="admin-overview-stress-panel">
-    <div class="row spread">
-      <h2>__STRESS_TITLE__</h2>
-      <span class="tabs-note">__STRESS_NOTE__</span>
-    </div>
-    <div class="list scroll-list overview-issue-list" id="stress-points-list" data-testid="admin-stress-points-list"></div>
   </div>
 </section>

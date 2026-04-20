@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from pathlib import Path
 
@@ -11,6 +12,20 @@ import yaml
 from tests.support.platform_harness import build_platform_project, configure_server
 
 pytestmark = pytest.mark.integration
+
+
+def _extract_page_data(page_html: str) -> dict[str, object]:
+    match = re.search(
+        r'<script id="sediment-page-data" type="application/json">(.*?)</script>',
+        page_html,
+        re.S,
+    )
+    assert match, "Missing sediment-page-data payload."
+    return json.loads(match.group(1))
+
+
+def _extract_ui_keys(asset_text: str) -> set[str]:
+    return set(re.findall(r"UI\.([A-Za-z0-9_]+)", asset_text))
 
 
 def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch) -> None:
@@ -106,6 +121,8 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert search_page.status_code == 200
     assert 'data-testid="portal-page-title"' in search_page.text
     assert 'data-testid="portal-search-results"' in search_page.text
+    assert 'class="list section-gap-md"' in search_page.text
+    assert 'style="margin-top:18px;"' not in search_page.text
     assert 'aria-haspopup="listbox"' in search_page.text
     assert "<title>Full-text search | Test Knowledge Base</title>" in search_page.text
 
@@ -116,11 +133,93 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     assert "nav-active-indicator" not in shell_asset.text
     assert "readSessionState" in shell_asset.text
     assert "writeSessionState" in shell_asset.text
+    assert "shellLabel" in shell_asset.text
+    assert 'new Error("Failed to read file")' not in shell_asset.text
+    assert '|| "Selected"' not in shell_asset.text
+    assert '|| "Switch language"' not in shell_asset.text
 
     portal_asset = client.get("/ui-assets/portal.js")
     assert portal_asset.status_code == 200
     assert "PORTAL_PAGE_SESSION_KEY" in portal_asset.text
     assert "loadHome" in portal_asset.text
+    assert 'shellLabel("unknownError"' in portal_asset.text
+    assert "isZh" not in portal_asset.text
+    assert '|| "Unknown error"' not in portal_asset.text
+    assert "Knowledge base ready." not in portal_asset.text
+
+    admin_asset = client.get("/ui-assets/admin.js")
+    assert admin_asset.status_code == 200
+    assert "ADMIN_PAGE_SESSION_KEY" in admin_asset.text
+    assert 'shellLabel("jobTypeLabel"' in admin_asset.text
+    assert 'shellLabel("selectedPrefix"' in admin_asset.text
+    assert 'class="action-row"' in admin_asset.text
+    assert "UI.action_run_tidy" in admin_asset.text
+    assert "UI.explore_question_required" in admin_asset.text
+    assert "UI.admin_ready" in admin_asset.text
+    assert "UI.graph_event_ask_reinforced" in admin_asset.text
+    assert "UI.graph_renderer_unavailable" in admin_asset.text
+    assert "UI.insight_job_created" in admin_asset.text
+    assert "UI.insight_summary_pending" in admin_asset.text
+    assert "UI.insight_hypothesis_title" in admin_asset.text
+    assert "UI.health_cluster_coverage" in admin_asset.text
+    assert "UI.live_ready" in admin_asset.text
+    assert "UI.review_summary" in admin_asset.text
+    assert "UI.version_repo_root" in admin_asset.text
+    assert "UI.token_show" in admin_asset.text
+    assert "UI.current_session" in admin_asset.text
+    assert "UI.inbox_select_ready_required" in admin_asset.text
+    assert "UI.file_index_direct_docs" in admin_asset.text
+    assert "UI.doc_path_label" in admin_asset.text
+    assert "UI.doc_kind_label" in admin_asset.text
+    assert "UI.doc_status_label" in admin_asset.text
+    assert "UI.doc_issues_label" in admin_asset.text
+    assert "UI.doc_indexes_label" in admin_asset.text
+    assert "UI.doc_aliases_label" in admin_asset.text
+    assert "UI.doc_links_label" in admin_asset.text
+    assert "UI.doc_updated_label" in admin_asset.text
+    assert "UI.emerging_metric_demand" in admin_asset.text
+    assert "UI.system_auth_label" in admin_asset.text
+    assert "UI.users_empty" in admin_asset.text
+    assert '|| "Changed files"' not in admin_asset.text
+    assert '|| "Unknown error"' not in admin_asset.text
+    assert '|| "Path"' not in admin_asset.text
+    assert '|| "Kind"' not in admin_asset.text
+    assert '|| "Status"' not in admin_asset.text
+    assert '|| "Issues"' not in admin_asset.text
+    assert '|| "Indexes"' not in admin_asset.text
+    assert '|| "Aliases"' not in admin_asset.text
+    assert '|| "Links"' not in admin_asset.text
+    assert '|| "Updated"' not in admin_asset.text
+    assert 'row actions' not in admin_asset.text
+    assert 'style="margin-top:10px;"' not in admin_asset.text
+    assert "isZh" not in admin_asset.text
+    assert "isZh ?" not in admin_asset.text
+    assert 'isZh ? "鉴权" : "Auth"' not in admin_asset.text
+    assert 'isZh ? "暂无用户。" : "No users."' not in admin_asset.text
+    assert "KB-level tidy" not in admin_asset.text
+    assert "Question must not be empty." not in admin_asset.text
+    assert "Admin ready." not in admin_asset.text
+    assert "Cluster coverage " not in admin_asset.text
+    assert "Pending " not in admin_asset.text
+    assert "Hypothesis" not in admin_asset.text
+    assert "Proposed Answer" not in admin_asset.text
+    assert "LIVE READY" not in admin_asset.text
+    assert "Patch summary" not in admin_asset.text
+    assert "Repo root" not in admin_asset.text
+    assert "Current session" not in admin_asset.text
+    assert "Hide token" not in admin_asset.text
+    assert "Select a review first." not in admin_asset.text
+    assert "Select at least one ready document." not in admin_asset.text
+    assert "Direct documents" not in admin_asset.text
+    assert "Child indexes" not in admin_asset.text
+    assert "Documents outside all indexes" not in admin_asset.text
+    assert "Explore completed." not in admin_asset.text
+    assert "Timed out while waiting for the job result." not in admin_asset.text
+    assert "Agent command started with internal prompt details redacted." not in admin_asset.text
+    assert "Recent questions are reinforcing this route." not in admin_asset.text
+    assert 'Graph renderer is not ready.' not in admin_asset.text
+    assert 'Managed job created.' not in admin_asset.text
+    assert 'No obvious emerging knowledge clusters right now.' not in admin_asset.text
 
     graph_js = client.get("/ui-assets/graph.bundle.js")
     assert graph_js.status_code == 200
@@ -192,6 +291,39 @@ def test_portal_default_language_prefers_english_without_zh_signal(tmp_path: Pat
     assert "知识库概览" in zh_page.text
 
 
+def test_page_data_covers_frontend_ui_keys_for_portal_and_admin(tmp_path: Path, monkeypatch) -> None:
+    project_root, kb_path = build_platform_project(tmp_path)
+    state_dir = tmp_path / "state"
+    client, server_module, _worker_module = configure_server(
+        monkeypatch,
+        project_root,
+        kb_path,
+        state_dir,
+        admin_token="top-secret",
+    )
+
+    portal_page = client.get("/submit", headers={"accept-language": "en-US"})
+    assert portal_page.status_code == 200
+    portal_ui = _extract_page_data(portal_page.text)["ui"]
+    assert isinstance(portal_ui, dict)
+    portal_asset = client.get("/ui-assets/portal.js")
+    assert portal_asset.status_code == 200
+    missing_portal_keys = sorted(_extract_ui_keys(portal_asset.text) - set(portal_ui))
+    assert missing_portal_keys == []
+
+    login = client.post("/api/admin/session", json={"token": "top-secret"})
+    assert login.status_code == 200
+    assert client.cookies.get(server_module.ADMIN_SESSION_COOKIE_NAME)
+    admin_page = client.get("/admin/kb", headers={"accept-language": "en-US"})
+    assert admin_page.status_code == 200
+    admin_ui = _extract_page_data(admin_page.text)["ui"]
+    assert isinstance(admin_ui, dict)
+    admin_asset = client.get("/ui-assets/admin.js")
+    assert admin_asset.status_code == 200
+    missing_admin_keys = sorted(_extract_ui_keys(admin_asset.text) - set(admin_ui))
+    assert missing_admin_keys == []
+
+
 def test_portal_graph_page_uses_new_window_launcher_when_quartz_site_exists(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -235,6 +367,8 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-page-title"' in login_page.text
     assert 'data-testid="admin-login-token"' in login_page.text
     assert 'data-testid="admin-login-button"' in login_page.text
+    assert 'class="panel panel-narrow section-gap-lg"' in login_page.text
+    assert 'style="margin-top:20px; max-width:560px;"' not in login_page.text
     assert 'src="/ui-assets/admin-login.js"' in login_page.text
     assert "<title>Admin sign in | Test Knowledge Base</title>" in login_page.text
 
@@ -249,6 +383,22 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-message"' in admin_page.text
     assert 'data-testid="admin-stats"' in admin_page.text
     assert 'data-testid="admin-refresh-button"' not in admin_page.text
+    assert 'data-testid="admin-overview-primary-column"' in admin_page.text
+    assert 'data-testid="admin-overview-secondary-column"' in admin_page.text
+    assert 'data-testid="admin-overview-queue-panel"' in admin_page.text
+    assert 'data-testid="admin-overview-health-panel"' in admin_page.text
+    assert 'data-testid="admin-overview-issue-panel"' in admin_page.text
+    assert 'data-testid="admin-overview-activity-panel"' in admin_page.text
+    assert 'data-testid="admin-overview-emerging-panel"' in admin_page.text
+    assert 'data-testid="admin-overview-stress-panel"' in admin_page.text
+    assert '"admin_ready": "Admin ready."' in admin_page.text
+    assert '"action_run_tidy": "KB-level tidy"' in admin_page.text
+    assert '"health_cluster_coverage": "Cluster coverage"' in admin_page.text
+    assert '"emerging_metric_demand": "Demand"' in admin_page.text
+    assert '"emerging_metric_maturity": "Maturity"' in admin_page.text
+    assert '"stress_empty": "No clear canonical stress points right now."' in admin_page.text
+    assert '--overview-order: 1;' in admin_page.text
+    assert '--overview-order: 6;' in admin_page.text
     assert 'src="/ui-assets/admin.js"' in admin_page.text
     assert "<title>Overview | Test Knowledge Base</title>" in admin_page.text
 
@@ -266,6 +416,26 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-runtime-console"' in kb_page.text
     assert 'data-testid="admin-kb-result"' in kb_page.text
     assert 'data-testid="admin-kb-live-log"' in kb_page.text
+    assert '"insight_empty": "No insight proposals yet."' in kb_page.text
+    assert '"insight_detail_empty": "Select a proposal to inspect its details."' in kb_page.text
+    assert '"graph_detail_empty": "Select a graph node to inspect evidence and suggested actions."' in kb_page.text
+    assert '"insight_select_prompt": "Select an insight proposal first."' in kb_page.text
+    assert '"insight_job_created": "Managed job created."' in kb_page.text
+    assert '"insight_summary_pending": "Pending"' in kb_page.text
+    assert '"insight_summary_proposed": "Proposed"' in kb_page.text
+    assert '"insight_summary_observing": "Observing"' in kb_page.text
+    assert '"insight_kind_concept": "Concept"' in kb_page.text
+    assert '"insight_sources_suffix": "sources"' in kb_page.text
+    assert '"insight_hypothesis_title": "Hypothesis"' in kb_page.text
+    assert '"insight_proposed_answer_title": "Proposed answer"' in kb_page.text
+    assert '"explore_question_required": "Question must not be empty."' in kb_page.text
+    assert '"graph_event_ask_reinforced": "Recent questions are reinforcing this route."' in kb_page.text
+    assert '"graph_metric_energy": "Energy"' in kb_page.text
+    assert '"graph_open_entry": "Open entry"' in kb_page.text
+    assert '"graph_renderer_unavailable": "Graph renderer is not ready."' in kb_page.text
+    assert '"editor_reload_target": "Reload current document"' in kb_page.text
+    assert 'class="action-row"' in kb_page.text
+    assert 'row actions' not in kb_page.text
     assert 'src="/ui-assets/graph.bundle.js"' in kb_page.text
     assert 'href="/ui-assets/graph.bundle.css"' in kb_page.text
     assert 'data-testid="admin-doc-browser"' not in kb_page.text
@@ -275,17 +445,42 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert "No files selected" in kb_page.text
     assert "No folder selected" in kb_page.text
 
+    kb_page_zh = client.get("/admin/kb", headers={"accept-language": "zh-CN"})
+    assert kb_page_zh.status_code == 200
+    assert '"insight_empty": "暂时还没有 insight proposal。"' in kb_page_zh.text
+    assert '"insight_detail_empty": "选择一条 proposal 以查看细节。"' in kb_page_zh.text
+    assert '"graph_detail_empty": "点击图中的节点，查看证据和建议动作。"' in kb_page_zh.text
+    assert '"insight_select_prompt": "请先选择一条 proposal。"' in kb_page_zh.text
+    assert '"insight_job_created": "已创建受管 job。"' in kb_page_zh.text
+    assert '"insight_summary_pending": "待审"' in kb_page_zh.text
+    assert '"insight_summary_proposed": "提案中"' in kb_page_zh.text
+    assert '"insight_summary_observing": "观察中"' in kb_page_zh.text
+    assert '"insight_kind_concept": "概念"' in kb_page_zh.text
+    assert '"insight_sources_suffix": "条来源"' in kb_page_zh.text
+    assert '"insight_hypothesis_title": "假设"' in kb_page_zh.text
+    assert '"insight_proposed_answer_title": "建议答案"' in kb_page_zh.text
+    assert '"explore_question_required": "问题不能为空。"' in kb_page_zh.text
+    assert '"graph_event_ask_reinforced": "近期提问正在强化这条路径。"' in kb_page_zh.text
+    assert '"graph_metric_energy": "能量"' in kb_page_zh.text
+    assert '"graph_open_entry": "打开条目"' in kb_page_zh.text
+    assert '"graph_renderer_unavailable": "图渲染器尚未就绪。"' in kb_page_zh.text
+    assert '"editor_reload_target": "重新载入当前文档"' in kb_page_zh.text
+
     inbox_page = client.get("/admin/inbox", headers={"accept-language": "en-US"})
     assert inbox_page.status_code == 200
     assert 'data-testid="admin-inbox-layout"' in inbox_page.text
     assert 'data-testid="admin-inbox-open-feedback-list"' in inbox_page.text
     assert 'data-testid="admin-inbox-ready-documents-list"' in inbox_page.text
+    assert 'class="action-row"' in inbox_page.text
+    assert 'row actions' not in inbox_page.text
 
     version_page = client.get("/admin/version-control", headers={"accept-language": "en-US"})
     assert version_page.status_code == 200
     assert 'data-testid="admin-version-control-layout"' in version_page.text
     assert 'data-testid="admin-version-commit-reason"' in version_page.text
     assert 'data-testid="admin-version-commits-list"' in version_page.text
+    assert 'class="action-row"' in version_page.text
+    assert 'row actions' not in version_page.text
 
     files_page = client.get("/admin/files", headers={"accept-language": "en-US"})
     assert files_page.status_code == 200
@@ -320,13 +515,24 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert 'data-testid="admin-user-list"' in users_page.text
     assert 'data-testid="admin-user-token-view"' not in users_page.text
     assert 'id="user-role"' not in users_page.text
+    assert '"users_empty": "No users."' in users_page.text
 
     system_page = client.get("/admin/system", headers={"accept-language": "en-US"})
     assert system_page.status_code == 200
     assert 'data-testid="admin-system-status"' in system_page.text
     assert 'data-testid="admin-settings-raw-text"' in system_page.text
     assert 'data-testid="admin-settings-restart-button"' in system_page.text
+    assert '"system_auth_label": "Auth"' in system_page.text
+    assert '"system_state_enabled": "enabled"' in system_page.text
     assert "<title>Settings | Test Knowledge Base</title>" in system_page.text
+
+    overview_page_zh = client.get("/admin/overview", headers={"accept-language": "zh-CN"})
+    assert overview_page_zh.status_code == 200
+    assert '"admin_ready": "管理台已就绪。"' in overview_page_zh.text
+    assert '"action_run_tidy": "KB 级 tidy"' in overview_page_zh.text
+    assert '"emerging_metric_demand": "需求"' in overview_page_zh.text
+    assert '"emerging_metric_maturity": "成熟度"' in overview_page_zh.text
+    assert '"stress_empty": "暂时没有明显的 canonical 压力点。"' in overview_page_zh.text
 
     kb_page_zh = client.get("/admin/kb", headers={"accept-language": "zh-CN"})
     assert kb_page_zh.status_code == 200
@@ -358,6 +564,15 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
     assert ">重新载入<" in files_page_zh.text
     assert ">关联问题<" in files_page_zh.text
     assert ">元数据<" in files_page_zh.text
+
+    users_page_zh = client.get("/admin/users", headers={"accept-language": "zh-CN"})
+    assert users_page_zh.status_code == 200
+    assert '"users_empty": "暂无用户。"' in users_page_zh.text
+
+    system_page_zh = client.get("/admin/system", headers={"accept-language": "zh-CN"})
+    assert system_page_zh.status_code == 200
+    assert '"system_auth_label": "鉴权"' in system_page_zh.text
+    assert '"system_state_enabled": "启用"' in system_page_zh.text
 
     with client.stream("POST", "/api/admin/explore/live", json={"question": "什么是热备份？"}) as explore_live:
         assert explore_live.status_code == 200

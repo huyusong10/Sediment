@@ -10,10 +10,10 @@
     fetchJson,
     readSessionState,
     renderMarkdown,
+    shellLabel,
     syncFilePickerState,
     writeSessionState,
   } = shell;
-  const isZh = document.documentElement.dataset.locale === "zh";
   const locale = document.documentElement.dataset.locale || "en";
   const WORKBENCH_STATUS_IDS = {
     ingest: "admin-ingest-status",
@@ -318,7 +318,7 @@
         ) {
           const separatorIndex = line.indexOf(":");
           const prefix = separatorIndex >= 0 ? line.slice(0, separatorIndex + 1) : "";
-          return `${prefix} ${UI.live_command_redacted || "Agent command started with internal prompt details redacted."}`.trim();
+          return `${prefix} ${UI.live_command_redacted || ""}`.trim();
         }
         return line;
       })
@@ -333,11 +333,11 @@
     const node = liveLogNode();
     const text = String(message || "").trim();
     if (!node || !text) return;
-    const readyText = String(UI.live_ready || "LIVE READY").trim();
+    const readyText = String(UI.live_ready || "").trim();
     const existing = String(node.value || "").trim();
-    const prefix = String(label || UI.live_status_label || "Status");
+    const prefix = String(label || UI.live_status_label || "").trim();
     const line = `[${formatLiveTimestamp()}] ${prefix}: ${text}`;
-    node.value = !existing || existing === readyText || existing === "LIVE READY"
+    node.value = !existing || existing === readyText
       ? line
       : `${node.value}\n${line}`;
     node.scrollTop = node.scrollHeight;
@@ -347,7 +347,7 @@
   function clearLiveLog() {
     const node = liveLogNode();
     if (!node) return;
-    node.value = UI.live_ready || "LIVE READY";
+    node.value = UI.live_ready || "";
     setLiveStatus(UI.live_ready || "");
     setAdminMessage(UI.live_cleared || "");
     queuePersistAdminPageState();
@@ -381,7 +381,10 @@
   }
 
   function showAdminError(error, options = {}) {
-    const message = error instanceof Error ? error.message : String(error || "Unknown error");
+    const message =
+      error instanceof Error && error.message
+        ? error.message
+        : shellLabel("unknownError", UI.unknown_error || "");
     const statusIds = Array.isArray(options.statusIds)
       ? options.statusIds.map((value) => String(value || "")).filter(Boolean)
       : [];
@@ -390,7 +393,7 @@
       if (diffNode) diffNode.textContent = message;
     }
     if (options.live && options.appendLive !== false) {
-      appendLiveLog(UI.live_error_label || "Error", message);
+      appendLiveLog(UI.live_error_label || "", message);
     }
     if (options.live) {
       setLiveStatus(message);
@@ -413,14 +416,14 @@
   }
 
   function logWorkbenchRequest(section, message, options = {}) {
-    appendLiveLog(UI.live_request_label || "Request", message);
+    appendLiveLog(UI.live_request_label || "", message);
     if (options.liveStatus) setLiveStatus(options.liveStatus);
     if (options.sectionStatus) setWorkbenchStatus(section, options.sectionStatus);
   }
 
   function completeWorkbenchAction(section, message, options = {}) {
     if (options.logResponse !== false) {
-      appendLiveLog(UI.live_response_label || "Response", message);
+      appendLiveLog(UI.live_response_label || "", message);
     }
     setWorkbenchStatus(section, options.sectionStatus || message);
     setLiveStatus(options.liveStatus || message);
@@ -465,13 +468,13 @@
           <strong>${escapeHtml(summary)}</strong>
           <span class="tag">${escapeHtml(jobStateLabel(job))}</span>
         </div>
-        <div class="subtle">${escapeHtml(UI.job_type_label || "Job type")}: ${escapeHtml(String(job?.job_type || "-"))}</div>
-        <div class="subtle">${escapeHtml(UI.job_change_count_label || "Changed files")}: ${escapeHtml(String(operations.length || 0))}</div>
-        ${commitSha ? `<div class="subtle">${escapeHtml(UI.job_commit_label || "Commit")}: <span class="mono">${escapeHtml(commitSha)}</span></div>` : ""}
+        <div class="subtle">${escapeHtml(shellLabel("jobTypeLabel", UI.job_type_label || ""))}: ${escapeHtml(String(job?.job_type || "-"))}</div>
+        <div class="subtle">${escapeHtml(shellLabel("jobChangeCountLabel", UI.job_change_count_label || ""))}: ${escapeHtml(String(operations.length || 0))}</div>
+        ${commitSha ? `<div class="subtle">${escapeHtml(shellLabel("jobCommitLabel", UI.job_commit_label || ""))}: <span class="mono">${escapeHtml(commitSha)}</span></div>` : ""}
         ${
           changedItems.length
             ? `
-              <div class="subtle">${escapeHtml(UI.job_changed_items_label || "Changed items")}:</div>
+              <div class="subtle">${escapeHtml(shellLabel("jobChangedItemsLabel", UI.job_changed_items_label || ""))}:</div>
               <ul class="job-change-list">
                 ${changedItems.map((item) => `
                   <li>
@@ -487,7 +490,7 @@
         ${isFailure ? `<div class="subtle">${escapeHtml(String(job?.error_message || ""))}</div>` : ""}
         ${
           commitSha && ["ingest", "tidy"].includes(String(job?.job_type || ""))
-            ? `<div class="row actions"><button type="button" data-action="revert-job-commit" data-commit-sha="${escapeHtml(commitSha)}">${escapeHtml(UI.version_revert || "Revert")}</button></div>`
+            ? `<div class="action-row"><button type="button" data-action="revert-job-commit" data-commit-sha="${escapeHtml(commitSha)}">${escapeHtml(UI.version_revert || "")}</button></div>`
             : ""
         }
       </div>
@@ -498,7 +501,7 @@
   async function waitForManagedJob(jobId, section) {
     const normalizedId = String(jobId || "").trim();
     if (!normalizedId) {
-      throw new Error(UI.job_monitor_missing || "Job id is required.");
+      throw new Error(UI.job_monitor_missing || "");
     }
     const deadline = Date.now() + 30000;
     let lastStatus = "";
@@ -507,7 +510,7 @@
       const status = String(job.status || "").trim();
       if (status && status !== lastStatus) {
         lastStatus = status;
-        appendLiveLog(UI.live_status_label || "Status", `${normalizedId.slice(0, 8)} · ${status}`);
+        appendLiveLog(UI.live_status_label || "", `${normalizedId.slice(0, 8)} · ${status}`);
         setWorkbenchStatus(section, `${UI.job_running_prefix || ""}${status}`);
       }
       if (["succeeded", "failed", "cancelled"].includes(status)) {
@@ -521,20 +524,20 @@
       }
       await sleep(500);
     }
-    throw new Error(UI.job_monitor_timeout || "Timed out while waiting for the job result.");
+    throw new Error(UI.job_monitor_timeout || "");
   }
 
   function roleLabel(role) {
-    if (role === "owner") return UI.role_owner || "owner";
-    if (role === "committer") return UI.role_committer || "committer";
+    if (role === "owner") return UI.role_owner || "";
+    if (role === "committer") return UI.role_committer || "";
     return role || "-";
   }
 
   function scopeLabel(scope) {
-    if (scope === "full") return UI.scope_full || "Full KB";
-    if (scope === "graph") return UI.scope_graph || "Graph";
-    if (scope === "indexes") return UI.scope_indexes || "Indexes";
-    if (scope === "health_blocking") return UI.scope_health_blocking || "Blocking issues";
+    if (scope === "full") return UI.scope_full || "";
+    if (scope === "graph") return UI.scope_graph || "";
+    if (scope === "indexes") return UI.scope_indexes || "";
+    if (scope === "health_blocking") return UI.scope_health_blocking || "";
     return scope || "-";
   }
 
@@ -550,17 +553,45 @@
   }
 
   function actionLabel(action) {
-    if (action === "run_tidy") return isZh ? "KB 级 tidy" : "KB-level tidy";
-    if (action === "edit_entry") return isZh ? "在线编辑" : "Inline edit";
-    if (action === "promote_placeholder") return isZh ? "补全并提升 placeholder" : "Promote placeholder";
-    if (action === "review_entry") return isZh ? "人工复核" : "Manual review";
+    if (action === "run_tidy") return UI.action_run_tidy || "";
+    if (action === "edit_entry") return UI.action_edit_entry || "";
+    if (action === "promote_placeholder") return UI.action_promote_placeholder || "";
+    if (action === "review_entry") return UI.action_review_entry || "";
     return action || "-";
   }
 
+  function insightStateLabel(reviewState) {
+    const normalized = String(reviewState || "").trim();
+    if (normalized === "proposed") return UI.insight_state_proposed || normalized;
+    if (normalized === "observing") return UI.insight_state_observing || normalized;
+    if (normalized === "promoted") return UI.insight_state_promoted || normalized;
+    if (normalized === "merged") return UI.insight_state_merged || normalized;
+    if (normalized === "rejected") return UI.insight_state_rejected || normalized;
+    if (normalized === "archived") return UI.insight_state_archived || normalized;
+    return normalized || "-";
+  }
+
+  function insightKindLabel(kind) {
+    const normalized = String(kind || "").trim();
+    if (normalized === "concept") return UI.insight_kind_concept || normalized;
+    if (normalized === "workflow") return UI.insight_kind_workflow || normalized;
+    if (normalized === "lesson") return UI.insight_kind_lesson || normalized;
+    if (normalized === "mapping") return UI.insight_kind_mapping || normalized;
+    return normalized || "-";
+  }
+
+  function insightRecommendedActionLabel(action) {
+    const normalized = String(action || "").trim();
+    if (normalized === "promote") return UI.insight_action_promote || normalized;
+    if (normalized === "merge") return UI.insight_action_merge || normalized;
+    if (normalized === "keep_observing") return UI.insight_action_keep_observing || normalized;
+    return normalized || "-";
+  }
+
   function docGroupLabel(group) {
-    if (group === "formal") return UI.doc_group_formal || "Formal entries";
-    if (group === "placeholder") return UI.doc_group_placeholder || "Placeholders";
-    if (group === "index") return UI.doc_group_index || "Indexes";
+    if (group === "formal") return UI.doc_group_formal || "";
+    if (group === "placeholder") return UI.doc_group_placeholder || "";
+    if (group === "index") return UI.doc_group_index || "";
     return group || "-";
   }
 
@@ -659,13 +690,13 @@
     const linkedIssues = currentDocumentIssues();
     const tags = [
       detail?.structured?.kind || record?.kind
-        ? `${UI.doc_kind_label || "Kind"}: ${detail?.structured?.kind || record?.kind || "-"}`
+        ? `${UI.doc_kind_label || ""}: ${detail?.structured?.kind || record?.kind || "-"}`
         : "",
       detail?.structured?.status || record?.status
-        ? `${UI.doc_status_label || "Status"}: ${detail?.structured?.status || record?.status || "-"}`
+        ? `${UI.doc_status_label || ""}: ${detail?.structured?.status || record?.status || "-"}`
         : "",
       linkedIssues.length
-        ? `${linkedIssues.length} ${UI.doc_issues_label || "Issues"}`
+        ? `${linkedIssues.length} ${UI.doc_issues_label || ""}`
         : "",
     ].filter(Boolean);
     tagsNode.innerHTML = tags.map((item) => renderTagMarkup(item)).join("");
@@ -681,7 +712,7 @@
       record?.title ||
       state.selectedDocumentName ||
       UI.doc_select_prompt ||
-      (isZh ? "请先选择文档。" : "Select a document first.");
+      "";
   }
 
   function hasSelectedDocument() {
@@ -698,9 +729,7 @@
       } else {
         dirtyNode.hidden = false;
         dirtyNode.className = `tag ${state.fileDirty ? "warn" : "ok"}`;
-        dirtyNode.textContent = state.fileDirty
-          ? (UI.file_dirty || (isZh ? "未保存修改" : "Unsaved changes"))
-          : (UI.file_clean || (isZh ? "已保存" : "Saved"));
+        dirtyNode.textContent = state.fileDirty ? UI.file_dirty || "" : UI.file_clean || "";
       }
     }
     if (resetButton) resetButton.disabled = !hasSelectedDocument() || !state.fileDirty;
@@ -727,11 +756,11 @@
     if (!node) return;
     const counts = state.documents?.counts || {};
     const stats = [
-      [UI.file_counts_formal || "Formal", counts.formal || 0],
-      [UI.file_counts_placeholder || "Placeholders", counts.placeholder || 0],
-      [UI.file_counts_index || "Indexes", counts.index || 0],
-      [UI.file_counts_indexed || "Indexed", counts.indexed || 0],
-      [UI.file_counts_unindexed || "Unindexed", counts.unindexed || 0],
+      [UI.file_counts_formal || "", counts.formal || 0],
+      [UI.file_counts_placeholder || "", counts.placeholder || 0],
+      [UI.file_counts_index || "", counts.index || 0],
+      [UI.file_counts_indexed || "", counts.indexed || 0],
+      [UI.file_counts_unindexed || "", counts.unindexed || 0],
     ];
     node.innerHTML = stats
       .map(
@@ -751,7 +780,7 @@
       record?.title ||
       state.selectedDocumentName ||
       UI.doc_select_prompt ||
-      (isZh ? "请先选择文档。" : "Select a document first.");
+      "";
     syncPreviewDocumentLabel();
   }
 
@@ -777,7 +806,7 @@
     if (!hasSelection) {
       closeFilePreviewModal();
       updateEditorPreview("");
-      setSectionStatus("editor-status", UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+      setSectionStatus("editor-status", UI.doc_select_prompt || "");
     }
     setCurrentDocumentLabel();
     renderEditorHeaderSummary();
@@ -823,9 +852,7 @@
     const healthNode = document.getElementById("admin-health-summary-note");
     if (healthNode && overview.health_summary?.cluster_coverage != null) {
       const coverage = Math.round(Number(overview.health_summary.cluster_coverage || 0) * 100);
-      healthNode.textContent = isZh
-        ? `聚类覆盖 ${coverage}%`
-        : `Cluster coverage ${coverage}%`;
+      healthNode.textContent = `${UI.health_cluster_coverage || ""} ${coverage}%`.trim();
     }
   }
 
@@ -835,9 +862,11 @@
     if (summaryNode) {
       const counts = payload.summary?.counts || {};
       const pending = payload.summary?.pending || 0;
-      summaryNode.textContent = isZh
-        ? `待审 ${pending} · proposal ${counts.proposed || 0} · observing ${counts.observing || 0}`
-        : `Pending ${pending} · proposed ${counts.proposed || 0} · observing ${counts.observing || 0}`;
+      summaryNode.textContent = [
+        `${UI.insight_summary_pending || ""} ${pending}`.trim(),
+        `${UI.insight_summary_proposed || ""} ${counts.proposed || 0}`.trim(),
+        `${UI.insight_summary_observing || ""} ${counts.observing || 0}`.trim(),
+      ].join(" · ");
     }
     if (!node) return;
     const items = Array.isArray(payload.items) ? payload.items : [];
@@ -848,20 +877,20 @@
             <button type="button" class="card insight-list-item" data-action="select-insight" data-insight-id="${escapeHtml(item.id || "")}">
               <div class="row spread">
                 <strong>${escapeHtml(item.title || item.id || "")}</strong>
-                <span class="tag">${escapeHtml(item.review_state || "proposed")}</span>
+                <span class="tag">${escapeHtml(insightStateLabel(item.review_state))}</span>
               </div>
-              <div class="subtle">${escapeHtml(item.kind || "concept")} · ${escapeHtml((item.supporting_entries || []).length)} sources</div>
+              <div class="subtle">${escapeHtml(insightKindLabel(item.kind))} · ${escapeHtml((item.supporting_entries || []).length)} ${escapeHtml(UI.insight_sources_suffix || "")}</div>
             </button>
           `)
           .join("")
-      : `<div class="empty">${escapeHtml(UI.insight_empty || (isZh ? "暂时还没有 insight proposal。" : "No insight proposals yet."))}</div>`;
+      : `<div class="empty">${escapeHtml(UI.insight_empty || "")}</div>`;
   }
 
   function renderInsightDetail(payload) {
     const node = document.getElementById("admin-insight-detail");
     if (!node) return;
     if (!payload?.proposal) {
-      node.innerHTML = `<div class="empty">${escapeHtml(UI.insight_detail_empty || (isZh ? "选择一条 proposal 以查看细节。" : "Select a proposal to inspect its details."))}</div>`;
+      node.innerHTML = `<div class="empty">${escapeHtml(UI.insight_detail_empty || "")}</div>`;
       return;
     }
     const proposal = payload.proposal;
@@ -871,10 +900,10 @@
       <div class="card">
         <div class="row spread">
           <strong>${escapeHtml(proposal.title || proposal.id || "")}</strong>
-          <span class="tag">${escapeHtml(proposal.review_state || "proposed")}</span>
+          <span class="tag">${escapeHtml(insightStateLabel(proposal.review_state))}</span>
         </div>
-        <div class="subtle">${escapeHtml(proposal.kind || "concept")} · ${escapeHtml(payload.recommended_action || "-")}</div>
-        <div class="markdown">${renderMarkdown(`## Hypothesis\n${proposal.hypothesis || "-"}\n\n## Proposed Answer\n${proposal.proposed_answer || "-"}\n\n## Supporting Entries\n${entries.map((item) => `- ${item}`).join("\n") || "-"}\n\n## Trigger Queries\n${triggerQueries.map((item) => `- ${item}`).join("\n") || "-"}`)}</div>
+        <div class="subtle">${escapeHtml(insightKindLabel(proposal.kind))} · ${escapeHtml(insightRecommendedActionLabel(payload.recommended_action))}</div>
+        <div class="markdown">${renderMarkdown(`## ${UI.insight_hypothesis_title || ""}\n${proposal.hypothesis || "-"}\n\n## ${UI.insight_proposed_answer_title || ""}\n${proposal.proposed_answer || "-"}\n\n## ${UI.insight_supporting_entries_title || ""}\n${entries.map((item) => `- ${item}`).join("\n") || "-"}\n\n## ${UI.insight_trigger_queries_title || ""}\n${triggerQueries.map((item) => `- ${item}`).join("\n") || "-"}`)}</div>
       </div>
     `;
     setNodeValue("admin-insight-target", entries[0] || "");
@@ -917,7 +946,7 @@
     const detailNode = document.getElementById("admin-graph-detail");
     if (!detailNode) return;
     if (!node) {
-      detailNode.innerHTML = `<div class="empty">${escapeHtml(UI.graph_detail_empty || (isZh ? "点击图中的节点，查看证据和建议动作。" : "Select a graph node to inspect evidence and suggested actions."))}</div>`;
+      detailNode.innerHTML = `<div class="empty">${escapeHtml(UI.graph_detail_empty || "")}</div>`;
       return;
     }
     const details = node.details || {};
@@ -931,20 +960,20 @@
     const triggerQueries = Array.isArray(details.trigger_queries) ? details.trigger_queries : [];
     const eventLabel = (() => {
       const labels = {
-        ask_reinforced: isZh ? "近期提问正在强化这条路径。" : "Recent questions are reinforcing this route.",
-        proposal_materialized: isZh ? "这条隐性知识刚被物化为 proposal。" : "This latent knowledge was just materialized as a proposal.",
-        insight_promoted: isZh ? "这条知识最近被提升为 canonical entry。" : "This knowledge was recently promoted into a canonical entry.",
-        insight_merged: isZh ? "这条知识最近被并入既有 canonical entry。" : "This knowledge was recently merged into an existing canonical entry.",
-        ingest_created: isZh ? "这条知识最近被 ingest 引入图中。" : "This knowledge was recently introduced by ingest.",
-        ingest_updated: isZh ? "这条知识最近被 ingest 刷新。" : "This knowledge was recently refreshed by ingest.",
+        ask_reinforced: UI.graph_event_ask_reinforced || "",
+        proposal_materialized: UI.graph_event_proposal_materialized || "",
+        insight_promoted: UI.graph_event_insight_promoted || "",
+        insight_merged: UI.graph_event_insight_merged || "",
+        ingest_created: UI.graph_event_ingest_created || "",
+        ingest_updated: UI.graph_event_ingest_updated || "",
       };
-      return labels[String(node.event_type || "")] || (isZh ? "当前没有明显的形成事件。" : "There is no dominant formation event right now.");
+      return labels[String(node.event_type || "")] || (UI.graph_event_empty || "");
     })();
     const metrics = [
-      [isZh ? "能量" : "Energy", Number(node.energy || 0).toFixed(2)],
-      [isZh ? "稳定度" : "Stability", Number(node.stability || 0).toFixed(2)],
-      [isZh ? "角色" : "Role", node.visual_role || node.node_type || "-"],
-      [isZh ? "状态" : "State", node.status || node.state || "-"],
+      [UI.graph_metric_energy || "", Number(node.energy || 0).toFixed(2)],
+      [UI.graph_metric_stability || "", Number(node.stability || 0).toFixed(2)],
+      [UI.graph_metric_role || "", node.visual_role || node.node_type || "-"],
+      [UI.graph_metric_state || "", node.status || node.state || "-"],
     ];
     detailNode.innerHTML = `
       <div class="card">
@@ -968,22 +997,22 @@
         <div class="markdown">${renderMarkdown(node.summary || details.proposed_answer || details.hypothesis || "")}</div>
         ${
           details.hypothesis
-            ? `<div><strong>${escapeHtml(isZh ? "假设" : "Hypothesis")}</strong><div class="subtle">${escapeHtml(details.hypothesis)}</div></div>`
+            ? `<div><strong>${escapeHtml(UI.graph_hypothesis_title || "")}</strong><div class="subtle">${escapeHtml(details.hypothesis)}</div></div>`
             : ""
         }
         ${
           relatedItems.length
-            ? `<div><strong>${escapeHtml(isZh ? "支撑连接" : "Supporting links")}</strong><ul class="graph-list">${relatedItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+            ? `<div><strong>${escapeHtml(UI.graph_supporting_links_title || "")}</strong><ul class="graph-list">${relatedItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
             : ""
         }
         ${
           triggerQueries.length
-            ? `<div><strong>${escapeHtml(isZh ? "触发问题" : "Trigger queries")}</strong><ul class="graph-list">${triggerQueries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+            ? `<div><strong>${escapeHtml(UI.graph_trigger_queries_title || "")}</strong><ul class="graph-list">${triggerQueries.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
             : ""
         }
         ${
           node.entry_target
-            ? `<div class="graph-chip-row"><a class="button" href="/entries/${encodeURIComponent(node.entry_target)}?lang=${encodeURIComponent(locale)}" target="_blank" rel="noopener noreferrer">${escapeHtml(isZh ? "打开条目" : "Open entry")}</a></div>`
+            ? `<div class="graph-chip-row"><a class="button" href="/entries/${encodeURIComponent(node.entry_target)}?lang=${encodeURIComponent(locale)}" target="_blank" rel="noopener noreferrer">${escapeHtml(UI.graph_open_entry || "")}</a></div>`
             : ""
         }
       </div>
@@ -999,9 +1028,7 @@
     if (statsNode) {
       const stats = payload.stats || {};
       const coverage = Math.round(Number(stats.cluster_coverage || 0) * 100);
-      statsNode.textContent = isZh
-        ? `${stats.node_count || 0} 节点 · ${stats.edge_count || 0} 连线 · 覆盖 ${coverage}%`
-        : `${stats.node_count || 0} nodes · ${stats.edge_count || 0} edges · ${coverage}% coverage`;
+      statsNode.textContent = `${stats.node_count || 0} ${UI.graph_stats_nodes_suffix || ""} · ${stats.edge_count || 0} ${UI.graph_stats_edges_suffix || ""} · ${UI.graph_stats_coverage_prefix || ""} ${coverage}%`;
     }
     if (window.SedimentGraph?.mountAdminGraph) {
       state.adminGraphController = window.SedimentGraph.mountAdminGraph(graphNode, payload, {
@@ -1020,14 +1047,14 @@
         });
       }
     } else {
-      graphNode.textContent = isZh ? "图渲染器尚未就绪。" : "Graph renderer is not ready.";
+      graphNode.textContent = UI.graph_renderer_unavailable || "";
     }
     renderAdminGraphDetail(null);
   }
 
   async function reviewInsight(action) {
     if (!state.selectedInsightId) {
-      throw new Error(UI.insight_select_prompt || (isZh ? "请先选择一条 proposal。" : "Select an insight proposal first."));
+      throw new Error(UI.insight_select_prompt || "");
     }
     const payload = await fetchAdmin(`/api/admin/insights/${encodeURIComponent(state.selectedInsightId)}/review`, {
       method: "POST",
@@ -1039,7 +1066,7 @@
         note: nodeValue("admin-insight-note"),
       }),
     });
-    setSectionStatus("admin-insight-status", isZh ? "已创建受管 job。" : "Managed job created.");
+    setSectionStatus("admin-insight-status", UI.insight_job_created || "");
     setAdminMessage(`${action} · ${(payload.job?.id || "").slice(0, 8)}`);
     if (payload.job?.id) {
       await waitForManagedJob(payload.job.id, "tidy");
@@ -1066,11 +1093,11 @@
               </div>
               <div class="subtle">${escapeHtml(item.summary || "")}</div>
               <div class="issue-card-meta">
-                <span class="tag">${escapeHtml(UI.issue_target_label || "Target")}: ${escapeHtml(item.target || "-")}</span>
-                <span class="tag">${escapeHtml(UI.issue_action_label || "Suggested action")}: ${escapeHtml(actionLabel(item.suggested_action || ""))}</span>
+                <span class="tag">${escapeHtml(UI.issue_target_label || "")}: ${escapeHtml(item.target || "-")}</span>
+                <span class="tag">${escapeHtml(UI.issue_action_label || "")}: ${escapeHtml(actionLabel(item.suggested_action || ""))}</span>
                 ${
                   item.suggested_action === "run_tidy"
-                    ? `<span class="tag">${escapeHtml(UI.issue_scope_label || "Suggested scope")}: ${escapeHtml(scopeLabel(scopeForIssue(item)))}</span>`
+                    ? `<span class="tag">${escapeHtml(UI.issue_scope_label || "")}: ${escapeHtml(scopeLabel(scopeForIssue(item)))}</span>`
                     : ""
                 }
               </div>
@@ -1092,11 +1119,11 @@
                 <strong>${escapeHtml(item.display_query || item.normalized_subject || "")}</strong>
                 <span class="tag">${escapeHtml(item.status || "")}</span>
               </div>
-              <div class="subtle">${escapeHtml(item.intent || "definition")} · demand ${escapeHtml(item.demand_score || 0)} · maturity ${escapeHtml(item.maturity_score || 0)}</div>
+              <div class="subtle">${escapeHtml(item.intent || UI.emerging_intent_default || "-")} · ${escapeHtml(UI.emerging_metric_demand || "")} ${escapeHtml(item.demand_score || 0)} · ${escapeHtml(UI.emerging_metric_maturity || "")} ${escapeHtml(item.maturity_score || 0)}</div>
             </div>
           `)
           .join("")
-      : `<div class="empty">${escapeHtml(isZh ? "暂时没有明显成形中的知识簇。" : "No obvious emerging knowledge clusters right now.")}</div>`;
+      : `<div class="empty">${escapeHtml(UI.emerging_empty || "")}</div>`;
   }
 
   function renderStressPoints(items) {
@@ -1115,7 +1142,7 @@
             </div>
           `)
           .join("")
-      : `<div class="empty">${escapeHtml(isZh ? "暂时没有明显的 canonical 压力点。" : "No clear canonical stress points right now.")}</div>`;
+      : `<div class="empty">${escapeHtml(UI.stress_empty || "")}</div>`;
   }
 
   function renderAuditLogs(logs) {
@@ -1159,7 +1186,7 @@
             </div>
             <div class="subtle">${escapeHtml(item.submitter_name || "")} · ${escapeHtml(item.submission_type || "")} · ${escapeHtml(formatDateTime(item.created_at))}</div>
             ${renderSubmissionAnalysis(item.analysis)}
-            <div class="row" style="margin-top:10px;">
+            <div class="action-row">
               <button data-action="triage-submission" data-submission-id="${escapeHtml(item.id || "")}" data-status="triaged">${escapeHtml(UI.triaged)}</button>
               <button data-action="triage-submission" data-submission-id="${escapeHtml(item.id || "")}" data-status="rejected">${escapeHtml(UI.reject)}</button>
               <button class="primary" data-action="run-ingest" data-submission-id="${escapeHtml(item.id || "")}">${escapeHtml(UI.run_ingest)}</button>
@@ -1195,9 +1222,9 @@
               <div class="subtle">${escapeHtml(item.job?.job_type || "")} · ${escapeHtml((item.job?.id || "").slice(0, 8))}</div>
               <div class="subtle">${escapeHtml(item.job?.result_payload?.summary || "")}</div>
               <div class="issue-card-meta">
-                ${item.submission?.status ? `<span class="tag">${escapeHtml(UI.review_submission_status || "Submission status")}: ${escapeHtml(item.submission.status)}</span>` : ""}
-                <span class="tag">${escapeHtml(UI.review_patch_count || "Operations")}: ${escapeHtml((item.job?.result_payload?.operations || []).length || 0)}</span>
-                <span class="tag">${escapeHtml(UI.review_created_at || "Created")}: ${escapeHtml(formatDateTime(item.created_at || item.job?.created_at || ""))}</span>
+                ${item.submission?.status ? `<span class="tag">${escapeHtml(UI.review_submission_status || "")}: ${escapeHtml(item.submission.status)}</span>` : ""}
+                <span class="tag">${escapeHtml(UI.review_patch_count || "")}: ${escapeHtml((item.job?.result_payload?.operations || []).length || 0)}</span>
+                <span class="tag">${escapeHtml(UI.review_created_at || "")}: ${escapeHtml(formatDateTime(item.created_at || item.job?.created_at || ""))}</span>
               </div>
             </button>
           `;
@@ -1223,38 +1250,38 @@
     metaNode.innerHTML = `
       <div class="detail-meta-grid">
         <div class="detail-block">
-          <strong>${escapeHtml(UI.review_summary || "Patch summary")}</strong>
+          <strong>${escapeHtml(UI.review_summary || "")}</strong>
           <p>${escapeHtml(payload.job?.result_payload?.summary || "-")}</p>
         </div>
         <div class="detail-block">
-          <strong>${escapeHtml(UI.review_job_type || "Job type")}</strong>
+          <strong>${escapeHtml(UI.review_job_type || "")}</strong>
           <p>${escapeHtml(payload.job?.job_type || "-")} · ${escapeHtml((payload.job?.id || "").slice(0, 8))}</p>
         </div>
         <div class="detail-block">
-          <strong>${escapeHtml(UI.review_decision || "Current state")}</strong>
+          <strong>${escapeHtml(UI.review_decision || "")}</strong>
           <p>${escapeHtml(payload.review?.decision || "-")}</p>
         </div>
         <div class="detail-block">
-          <strong>${escapeHtml(UI.review_patch_count || "Operations")}</strong>
+          <strong>${escapeHtml(UI.review_patch_count || "")}</strong>
           <p>${escapeHtml(operations.length || 0)}</p>
         </div>
         <div class="detail-block">
-          <strong>${escapeHtml(UI.review_created_at || "Created")}</strong>
+          <strong>${escapeHtml(UI.review_created_at || "")}</strong>
           <p>${escapeHtml(formatDateTime(payload.review?.created_at || payload.job?.created_at || ""))}</p>
         </div>
         ${
           submission
             ? `
               <div class="detail-block">
-                <strong>${escapeHtml(UI.review_source_submission || "Source submission")}</strong>
+                <strong>${escapeHtml(UI.review_source_submission || "")}</strong>
                 <p>${escapeHtml(submission.title || submission.id || "-")}</p>
               </div>
               <div class="detail-block">
-                <strong>${escapeHtml(UI.review_submission_author || "Submitter")}</strong>
+                <strong>${escapeHtml(UI.review_submission_author || "")}</strong>
                 <p>${escapeHtml(submission.submitter_name || "-")}</p>
               </div>
               <div class="detail-block">
-                <strong>${escapeHtml(UI.review_submission_status || "Submission status")}</strong>
+                <strong>${escapeHtml(UI.review_submission_status || "")}</strong>
                 <p>${escapeHtml(submission.status || "-")}</p>
               </div>
             `
@@ -1281,7 +1308,7 @@
             </div>
             <div class="subtle">${escapeHtml(item.error_message || item.result_payload?.summary || "")}</div>
             <div class="subtle">${escapeHtml(item.attempt_count || 0)} / ${escapeHtml(item.max_attempts || 0)}</div>
-            <div class="row" style="margin-top:10px;">
+            <div class="action-row">
               ${
                 ["failed", "cancelled"].includes(item.status)
                   ? `<button data-action="retry-job" data-job-id="${escapeHtml(item.id || "")}">${escapeHtml(UI.retry)}</button>`
@@ -1324,16 +1351,18 @@
     const node = document.getElementById("system-status");
     if (!node) return;
     const bytesMb = Number(payload.limits?.max_upload_bytes || 0) / (1024 * 1024);
+    const stateLabel = (value) =>
+      value ? (UI.system_state_enabled || "") : (UI.system_state_disabled || "");
     node.innerHTML = `
       <div class="card">
         <div class="row spread"><strong>${escapeHtml(payload.instance?.name || "")}</strong><span class="tag">${escapeHtml(payload.worker_mode || "")}</span></div>
-        <div class="subtle">${escapeHtml(isZh ? "鉴权" : "Auth")}: ${escapeHtml(payload.auth_required ? (isZh ? "启用" : "enabled") : (isZh ? "关闭" : "disabled"))}</div>
-        <div class="subtle">${escapeHtml(isZh ? "代理" : "Proxy")}: ${escapeHtml(payload.proxy?.trust_proxy_headers ? (isZh ? "启用" : "enabled") : (isZh ? "关闭" : "disabled"))}</div>
-        <div class="subtle">${escapeHtml(isZh ? "速率" : "Rate")}: ${escapeHtml(payload.limits?.submission_rate_limit_count || 0)} / ${escapeHtml(payload.limits?.submission_rate_limit_window_seconds || 0)}s</div>
-        <div class="subtle">${escapeHtml(isZh ? "文本" : "Text")}: ${escapeHtml(payload.limits?.max_text_submission_chars || 0)}</div>
-        <div class="subtle">${escapeHtml(isZh ? "上传" : "Upload")}: ${escapeHtml(bytesMb.toFixed(1))} MiB</div>
-        <div class="subtle">${escapeHtml(isZh ? "重试" : "Retry")}: ${escapeHtml(payload.limits?.job_max_attempts || 0)}</div>
-        <div class="subtle">${escapeHtml(isZh ? "陈旧阈值" : "Stale")}: ${escapeHtml(payload.limits?.job_stale_after_seconds || 0)}s</div>
+        <div class="subtle">${escapeHtml(UI.system_auth_label || "")}: ${escapeHtml(stateLabel(payload.auth_required))}</div>
+        <div class="subtle">${escapeHtml(UI.system_proxy_label || "")}: ${escapeHtml(stateLabel(payload.proxy?.trust_proxy_headers))}</div>
+        <div class="subtle">${escapeHtml(UI.system_rate_label || "")}: ${escapeHtml(payload.limits?.submission_rate_limit_count || 0)} / ${escapeHtml(payload.limits?.submission_rate_limit_window_seconds || 0)}s</div>
+        <div class="subtle">${escapeHtml(UI.system_text_label || "")}: ${escapeHtml(payload.limits?.max_text_submission_chars || 0)}</div>
+        <div class="subtle">${escapeHtml(UI.system_upload_label || "")}: ${escapeHtml(bytesMb.toFixed(1))} MiB</div>
+        <div class="subtle">${escapeHtml(UI.system_retry_label || "")}: ${escapeHtml(payload.limits?.job_max_attempts || 0)}</div>
+        <div class="subtle">${escapeHtml(UI.system_stale_label || "")}: ${escapeHtml(payload.limits?.job_stale_after_seconds || 0)}s</div>
         <div class="subtle"><a href="${escapeHtml(payload.urls?.portal || "/")}" target="_blank" rel="noreferrer">${escapeHtml(payload.urls?.portal || "/")}</a></div>
         <div class="subtle"><a href="${escapeHtml(payload.urls?.mcp_sse || "/")}" target="_blank" rel="noreferrer">${escapeHtml(payload.urls?.mcp_sse || "/")}</a></div>
       </div>
@@ -1349,27 +1378,27 @@
           const userId = String(user.id || "");
           const token = state.revealedTokens[userId];
           const isCurrent = String(UI.user?.id || "") === userId;
-          const tokenActionLabel = token ? UI.token_hide || "Hide token" : UI.token_show || "Show token";
+          const tokenActionLabel = token ? (UI.token_hide || "") : (UI.token_show || "");
           return `
             <div class="card">
               <div class="row spread">
                 <strong>${escapeHtml(user.name || user.id || "")}</strong>
-                <span class="tag ${user.disabled ? "warn" : "ok"}">${escapeHtml(roleLabel(user.role || ""))}${user.disabled ? ` · ${escapeHtml(UI.user_disabled_label || (isZh ? "已停用" : "disabled"))}` : ""}</span>
+                <span class="tag ${user.disabled ? "warn" : "ok"}">${escapeHtml(roleLabel(user.role || ""))}${user.disabled ? ` · ${escapeHtml(UI.user_disabled_label || "")}` : ""}</span>
               </div>
               <div class="subtle">${escapeHtml(user.id || "")} · ${escapeHtml(user.token_fingerprint || "")}</div>
               <div class="subtle">${escapeHtml(formatDateTime(user.created_at))}</div>
               <div class="user-card-meta">
-                ${isCurrent ? `<span class="tag">${escapeHtml(UI.current_session || "Current session")}</span>` : ""}
+                ${isCurrent ? `<span class="tag">${escapeHtml(UI.current_session || "")}</span>` : ""}
               </div>
-              <div class="row" style="margin-top:10px;">
+              <div class="action-row">
                 <button data-action="show-token" data-user-id="${escapeHtml(userId)}">${escapeHtml(tokenActionLabel)}</button>
-                ${user.disabled ? "" : `<button data-action="disable-user" data-user-id="${escapeHtml(userId)}">${escapeHtml(UI.disable_user || (isZh ? "停用" : "Disable"))}</button>`}
+                ${user.disabled ? "" : `<button data-action="disable-user" data-user-id="${escapeHtml(userId)}">${escapeHtml(UI.disable_user || "")}</button>`}
               </div>
               ${
                 token
                   ? `
                     <div class="inline-token">
-                      <strong>${escapeHtml(UI.token_label || "Token")}</strong>
+                      <strong>${escapeHtml(UI.token_label || "")}</strong>
                       <div class="mono">${escapeHtml(token)}</div>
                     </div>
                   `
@@ -1378,7 +1407,7 @@
             </div>
           `;
         }).join("")
-      : `<div class="empty">${escapeHtml(isZh ? "暂无用户。" : "No users.")}</div>`;
+      : `<div class="empty">${escapeHtml(UI.users_empty || "")}</div>`;
   }
 
   function renderDocumentButton(doc) {
@@ -1399,7 +1428,7 @@
           </span>
           <span class="doc-button-meta">
             ${escapeHtml(doc.relative_path || "-")}
-            ${doc.issue_count ? ` · ${escapeHtml(doc.issue_count)} ${escapeHtml(UI.doc_issues_label || "Issues")}` : ""}
+            ${doc.issue_count ? ` · ${escapeHtml(doc.issue_count)} ${escapeHtml(UI.doc_issues_label || "")}` : ""}
           </span>
         </span>
       </button>
@@ -1421,7 +1450,7 @@
     const containsSelectedChild = childResults.some((child) => child.containsSelection);
     const containsSelection = isSelectedIndex || containsSelectedDirectDoc || containsSelectedChild;
     const issueTag = Number(node.issue_count || 0)
-      ? renderTagMarkup(`${node.issue_count} ${UI.doc_issues_label || "Issues"}`, "warn")
+      ? renderTagMarkup(`${node.issue_count} ${UI.doc_issues_label || ""}`, "warn")
       : "";
     return {
       containsSelection,
@@ -1438,8 +1467,8 @@
             </span>
             <span class="doc-button-meta">
               ${escapeHtml(node.name || "")}
-              · ${escapeHtml(itemCount)} ${escapeHtml(UI.file_counts_indexed || "Indexed")}
-              · ${escapeHtml(tokenCount)} ${escapeHtml(UI.file_tokens_label || "tokens")}
+              · ${escapeHtml(itemCount)} ${escapeHtml(UI.file_counts_indexed || "")}
+              · ${escapeHtml(tokenCount)} ${escapeHtml(UI.file_tokens_label || "")}
             </span>
           </span>
         </summary>
@@ -1448,7 +1477,7 @@
             childMarkup
               ? `
                 <div class="stack">
-                  <div class="tabs-note">${escapeHtml(UI.file_index_child_indexes || "Child indexes")}</div>
+                  <div class="tabs-note">${escapeHtml(UI.file_index_child_indexes || "")}</div>
                   ${childMarkup}
                 </div>
               `
@@ -1458,7 +1487,7 @@
             directDocMarkup
               ? `
                 <div class="stack">
-                  <div class="tabs-note">${escapeHtml(UI.file_index_direct_docs || "Direct documents")}</div>
+                  <div class="tabs-note">${escapeHtml(UI.file_index_direct_docs || "")}</div>
                   <div class="doc-tree-list">${directDocMarkup}</div>
                 </div>
               `
@@ -1483,7 +1512,7 @@
           <summary>
             <span class="doc-tree-summary">
               <span class="doc-tree-heading">
-                <strong>${escapeHtml(UI.file_unindexed_group || "Documents outside all indexes")}</strong>
+                <strong>${escapeHtml(UI.file_unindexed_group || "")}</strong>
                 <span class="doc-tree-tags">${renderTagMarkup(String(unindexed.length))}</span>
               </span>
             </span>
@@ -1516,14 +1545,14 @@
     const indexes = doc?.indexes || [];
     const linkedIssues = currentDocumentIssues();
     const blocks = [
-      [UI.doc_path_label || "Path", doc?.relative_path || detail?.path || "-"],
-      [UI.doc_kind_label || "Kind", detail?.structured?.kind || doc?.kind || "-"],
-      [UI.doc_status_label || "Status", detail?.structured?.status || doc?.status || "-"],
-      [UI.doc_issues_label || "Issues", linkedIssues.length || 0],
-      [UI.doc_indexes_label || "Indexes", indexes.length ? indexes.join(" · ") : "-"],
-      [UI.doc_aliases_label || "Aliases", aliases.length ? aliases.join(" · ") : "-"],
-      [UI.doc_links_label || "Links", links.length ? links.join(" · ") : "-"],
-      [UI.doc_updated_label || "Updated", doc?.updated_at ? formatDateTime(doc.updated_at) : "-"],
+      [UI.doc_path_label || "", doc?.relative_path || detail?.path || "-"],
+      [UI.doc_kind_label || "", detail?.structured?.kind || doc?.kind || "-"],
+      [UI.doc_status_label || "", detail?.structured?.status || doc?.status || "-"],
+      [UI.doc_issues_label || "", linkedIssues.length || 0],
+      [UI.doc_indexes_label || "", indexes.length ? indexes.join(" · ") : "-"],
+      [UI.doc_aliases_label || "", aliases.length ? aliases.join(" · ") : "-"],
+      [UI.doc_links_label || "", links.length ? links.join(" · ") : "-"],
+      [UI.doc_updated_label || "", doc?.updated_at ? formatDateTime(doc.updated_at) : "-"],
     ];
     node.innerHTML = blocks
       .map(
@@ -1602,7 +1631,7 @@
                 <div class="subtle">${escapeHtml(item.relative_path || "-")}</div>
                 <div class="subtle">${escapeHtml(firstIssue.summary || "")}</div>
                 <div class="issue-card-meta">
-                  ${renderTagMarkup(`${item.issues.length} ${UI.doc_issues_label || "Issues"}`)}
+                  ${renderTagMarkup(`${item.issues.length} ${UI.doc_issues_label || ""}`)}
                   ${typeSummary ? renderTagMarkup(typeSummary) : ""}
                 </div>
               </div>
@@ -1696,8 +1725,8 @@
           </div>
           <div class="subtle">${escapeHtml(item.submitter_name || "")}</div>
           <p>${escapeHtml(item.body_text || "")}</p>
-          <div class="row actions">
-            ${inboxActionButton("resolve-feedback", item.id, item.version, UI.inbox_resolve || "Resolve")}
+          <div class="action-row">
+            ${inboxActionButton("resolve-feedback", item.id, item.version, UI.inbox_resolve || "")}
           </div>
         </div>
       `,
@@ -1713,10 +1742,10 @@
             <span class="tag">${escapeHtml(item.mime_type || "")}</span>
           </div>
           <div class="subtle">${escapeHtml(item.original_filename || "")}</div>
-          <div class="row actions">
-            ${inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "Download")}
-            ${inboxActionButton("mark-ready", item.id, item.version, UI.inbox_mark_ready || "Move to ready")}
-            ${inboxActionButton("remove-document", item.id, item.version, UI.inbox_remove || "Remove")}
+          <div class="action-row">
+            ${inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "")}
+            ${inboxActionButton("mark-ready", item.id, item.version, UI.inbox_mark_ready || "")}
+            ${inboxActionButton("remove-document", item.id, item.version, UI.inbox_remove || "")}
           </div>
         </div>
       `,
@@ -1737,9 +1766,9 @@
             />
           </div>
           <div class="subtle">${escapeHtml(item.original_filename || "")}</div>
-          <div class="row actions">
-            ${inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "Download")}
-            ${inboxActionButton("move-to-staged", item.id, item.version, UI.inbox_move_to_staged || "Back to staged")}
+          <div class="action-row">
+            ${inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "")}
+            ${inboxActionButton("move-to-staged", item.id, item.version, UI.inbox_move_to_staged || "")}
           </div>
         </label>
       `,
@@ -1770,12 +1799,12 @@
             <span class="tag">${escapeHtml(item.status || "")}</span>
           </div>
           <div class="subtle">${escapeHtml(formatDateTime(item.updated_at || item.created_at || ""))}</div>
-          <div class="row actions">
+          <div class="action-row">
             ${item.item_type === "text_feedback"
-              ? inboxActionButton("reopen-feedback", item.id, item.version, UI.inbox_reopen || "Reopen")
+              ? inboxActionButton("reopen-feedback", item.id, item.version, UI.inbox_reopen || "")
               : ""}
             ${item.item_type === "uploaded_document"
-              ? inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "Download")
+              ? inboxActionButton("download-document", item.id, item.version, UI.inbox_download || "")
               : ""}
           </div>
         </div>
@@ -1790,20 +1819,20 @@
     if (summaryNode) {
       summaryNode.innerHTML = `
         <div class="card">
-          <strong>${escapeHtml(UI.version_repo_root || "Repo root")}</strong>
+          <strong>${escapeHtml(UI.version_repo_root || "")}</strong>
           <div class="subtle">${escapeHtml(payload.repo_root || "")}</div>
         </div>
         <div class="card">
-          <strong>${escapeHtml(UI.version_branch || "Branch")}</strong>
+          <strong>${escapeHtml(UI.version_branch || "")}</strong>
           <div class="subtle">${escapeHtml(payload.current_branch || "-")}</div>
         </div>
         <div class="card">
-          <strong>${escapeHtml(UI.version_upstream || "Upstream")}</strong>
-          <div class="subtle">${payload.has_upstream ? escapeHtml(UI.version_upstream_ready || "Configured") : escapeHtml(UI.version_upstream_missing || "Not configured")}</div>
+          <strong>${escapeHtml(UI.version_upstream || "")}</strong>
+          <div class="subtle">${payload.has_upstream ? escapeHtml(UI.version_upstream_ready || "") : escapeHtml(UI.version_upstream_missing || "")}</div>
         </div>
         <div class="card">
-          <strong>${escapeHtml(UI.version_repo_lock || "Repo lock")}</strong>
-          <div class="subtle">${payload.repo_lock ? escapeHtml(payload.repo_lock.owner_name || "") : escapeHtml(UI.version_repo_lock_free || "Idle")}</div>
+          <strong>${escapeHtml(UI.version_repo_lock || "")}</strong>
+          <div class="subtle">${payload.repo_lock ? escapeHtml(payload.repo_lock.owner_name || "") : escapeHtml(UI.version_repo_lock_free || "")}</div>
         </div>
       `;
     }
@@ -1832,9 +1861,9 @@
                 <span class="tag">${escapeHtml(String(item.sha || "").slice(0, 8))}</span>
               </div>
               <div class="subtle">${escapeHtml(item.author_name || "")} · ${escapeHtml(formatDateTime(item.authored_at || ""))}</div>
-              <div class="row actions">
+              <div class="action-row">
                 ${item.revertible
-                  ? `<button type="button" data-action="revert-commit" data-commit-sha="${escapeHtml(item.sha || "")}">${escapeHtml(UI.version_revert || "Revert")}</button>`
+                  ? `<button type="button" data-action="revert-commit" data-commit-sha="${escapeHtml(item.sha || "")}">${escapeHtml(UI.version_revert || "")}</button>`
                   : ""}
               </div>
             </div>
@@ -1973,7 +2002,7 @@
     }
     setSectionStatus(
       "admin-file-search-status",
-      `${state.fileSuggestions.length} ${UI.file_search_matches || "matches"}`
+      `${state.fileSuggestions.length} ${UI.file_search_matches || ""}`
     );
   }
 
@@ -2113,8 +2142,8 @@
     node.innerHTML = `
       <div class="card">
         <div class="row spread">
-          <strong>${escapeHtml(UI.explore_failed || "Explore failed")}</strong>
-          <span class="tag danger">${escapeHtml(UI.live_error_label || "Error")}</span>
+          <strong>${escapeHtml(UI.explore_failed || "")}</strong>
+          <span class="tag danger">${escapeHtml(UI.live_error_label || "")}</span>
         </div>
         <div class="subtle">${escapeHtml(safeMessage || "")}</div>
         <div class="subtle">${escapeHtml(UI.explore_failed_hint || "")}</div>
@@ -2135,14 +2164,14 @@
   }
 
   function liveLabelForExploreEvent(event) {
-    if (event.type === "command") return UI.live_command_label || "Command";
-    if (event.type === "cli-output" && event.stream === "stderr") return UI.live_stderr_label || "Stderr";
-    if (event.type === "cli-output") return UI.live_stdout_label || "Stdout";
-    if (event.type === "retry") return UI.live_retry_label || "Retry";
-    if (event.type === "error") return UI.live_error_label || "Error";
-    if (event.type === "result") return UI.live_result_label || "Result";
-    if (event.type === "done") return UI.live_done_label || "Done";
-    return UI.live_status_label || "Status";
+    if (event.type === "command") return UI.live_command_label || "";
+    if (event.type === "cli-output" && event.stream === "stderr") return UI.live_stderr_label || "";
+    if (event.type === "cli-output") return UI.live_stdout_label || "";
+    if (event.type === "retry") return UI.live_retry_label || "";
+    if (event.type === "error") return UI.live_error_label || "";
+    if (event.type === "result") return UI.live_result_label || "";
+    if (event.type === "done") return UI.live_done_label || "";
+    return UI.live_status_label || "";
   }
 
   function liveMessageForExploreEvent(event) {
@@ -2163,7 +2192,7 @@
       const sources = Array.isArray(payload.sources) && payload.sources.length
         ? payload.sources.join(", ")
         : "-";
-      return `${UI.explore_completed || "Explore completed."} sources=${sources}`;
+      return `${UI.explore_completed || ""} sources=${sources}`;
     }
     if (excerpt) {
       const safeExcerpt = looksLikeRuntimeLeak(excerpt)
@@ -2206,7 +2235,7 @@
 
   async function runExplore() {
     const question = (document.getElementById("admin-explore-input")?.value || "").trim();
-    if (!question) throw new Error(isZh ? "问题不能为空。" : "Question must not be empty.");
+    if (!question) throw new Error(UI.explore_question_required || "");
     resetRuntimeResult(UI.result_running || UI.explore_running || "");
     setRuntimeResultStatus(UI.result_running || UI.explore_running || "");
     setExploreStatus(UI.explore_running || "");
@@ -2244,7 +2273,7 @@
         return;
       }
       if (event.type === "error") {
-        finalError = event.message || UI.explore_failed || "Explore failed";
+        finalError = event.message || UI.explore_failed || "";
         renderExploreFailure(finalError);
         showAdminError(finalError, { ...workbenchErrorOptions("explore"), appendLive: false });
         return;
@@ -2255,7 +2284,7 @@
     });
 
     if (!finalPayload && !finalError) {
-      finalError = UI.explore_no_result || "The explore run finished without a result.";
+      finalError = UI.explore_no_result || "";
       renderExploreFailure(finalError);
       showAdminError(finalError, workbenchErrorOptions("explore"));
     }
@@ -2384,7 +2413,7 @@
       version: Number(input.dataset.version || 0),
     })).filter((item) => item.id);
     if (!selections.length) {
-      throw new Error(UI.inbox_select_ready_required || "Select at least one ready document.");
+      throw new Error(UI.inbox_select_ready_required || "");
     }
     const payload = await fetchAdmin("/api/admin/inbox/ingest-batches", {
       method: "POST",
@@ -2527,7 +2556,7 @@
   async function performOpenDocument(nameOverride, options = {}) {
     const name = String(nameOverride || "").trim();
     if (!name) {
-      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+      throw new Error(UI.doc_select_prompt || "");
     }
     const payload = await fetchAdmin(`/api/admin/entries/${encodeURIComponent(name)}`);
     state.selectedDocumentName = payload.name || name;
@@ -2546,9 +2575,7 @@
     renderDocumentMeta();
     renderLinkedIssues();
     syncFileEditorState();
-    const statusLabel = options.reload
-      ? (UI.editor_reloaded || (isZh ? "已重新载入服务器版本" : "Reloaded the latest server version"))
-      : UI.editor_loaded;
+    const statusLabel = options.reload ? UI.editor_reloaded || "" : UI.editor_loaded;
     document.getElementById("editor-status").textContent = `${statusLabel} ${payload.name} · hash=${String(payload.content_hash || "").slice(0, 12)}`;
     if (options.announce !== false) {
       setAdminMessage(
@@ -2569,7 +2596,7 @@
   async function requestOpenDocument(nameOverride, options = {}) {
     const name = String(nameOverride || "").trim();
     if (!name) {
-      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+      throw new Error(UI.doc_select_prompt || "");
     }
     if (name === state.selectedDocumentName) {
       if (options.entryTab) setActiveFileEntryTab(options.entryTab);
@@ -2590,7 +2617,7 @@
   async function saveEntry() {
     const name = String(state.selectedDocumentName || "").trim();
     if (!name) {
-      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+      throw new Error(UI.doc_select_prompt || "");
     }
     const content = document.getElementById("editor-content")?.value || "";
     const expectedHash = document.getElementById("editor-content")?.dataset.hash || null;
@@ -2618,15 +2645,15 @@
   function resetEntry() {
     const name = String(state.selectedDocumentName || "").trim();
     if (!name) {
-      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+      throw new Error(UI.doc_select_prompt || "");
     }
     const editor = document.getElementById("editor-content");
     if (!editor) return;
     editor.value = state.fileLoadedContent || "";
     updateEditorPreview(editor.value || "");
     updateFileDirtyState({ persist: false });
-    setSectionStatus("editor-status", UI.editor_reset || (isZh ? "已恢复到最近一次载入的内容" : "Reset to the last loaded content"));
-    setAdminMessage(`${UI.editor_reset || (isZh ? "已恢复到最近一次载入的内容" : "Reset to the last loaded content")} · ${name}`);
+    setSectionStatus("editor-status", UI.editor_reset || "");
+    setAdminMessage(`${UI.editor_reset || ""} · ${name}`);
     editor.focus();
     queuePersistAdminPageState();
   }
@@ -2634,13 +2661,13 @@
   async function reloadEntry() {
     const name = String(state.selectedDocumentName || "").trim();
     if (!name) {
-      throw new Error(UI.doc_select_prompt || (isZh ? "请先选择文档。" : "Select a document first."));
+      throw new Error(UI.doc_select_prompt || "");
     }
     if (state.fileDirty) {
       openFileSwitchModal(name, {
         reload: true,
         scrollEditor: false,
-        targetLabel: UI.editor_reload_target || (isZh ? "重新载入当前文档" : "Reload current document"),
+        targetLabel: UI.editor_reload_target || "",
       });
       return;
     }
@@ -2659,13 +2686,13 @@
     const node = document.getElementById("admin-ingest-selection");
     if (!node) return;
     if (!files.length) {
-      node.textContent = UI.ingest_selection_empty || (isZh ? "还没有选择任何文档。" : "No documents selected yet.");
+      node.textContent = UI.ingest_selection_empty || "";
       queuePersistAdminPageState();
       return;
     }
     const sample = files.slice(0, 3).map((file) => file.webkitRelativePath || file.name).join(" · ");
     const suffix = files.length > 3 ? ` +${files.length - 3}` : "";
-    node.textContent = `${UI.ingest_selected_prefix || "Selected"} ${files.length} ${UI.ingest_selected_suffix || "files"} · ${sample}${suffix}`;
+    node.textContent = `${shellLabel("selectedPrefix", UI.ingest_selected_prefix || "")} ${files.length} ${shellLabel("selectedSuffix", UI.ingest_selected_suffix || "")} · ${sample}${suffix}`;
     queuePersistAdminPageState();
   }
 
@@ -2688,7 +2715,7 @@
     const uploadedItem = payload.item || payload.submission || null;
     completeWorkbenchAction(
       "ingest",
-      `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)} · ${UI.ingest_item_prefix || UI.ingest_submission_prefix || "item"} ${(uploadedItem?.id || "").slice(0, 8)}`,
+      `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)} · ${UI.ingest_item_prefix || UI.ingest_submission_prefix || ""} ${(uploadedItem?.id || "").slice(0, 8)}`,
       {
         liveStatus: UI.ingest_uploaded,
         adminMessage: `${UI.ingest_uploaded}${(payload.job?.id || "").slice(0, 8)}`,
@@ -2976,13 +3003,13 @@
   );
   document.getElementById("approve-review-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("approve-review-button"), UI.busy_approve, async () => {
-      if (!state.selectedReviewId) throw new Error(UI.review_select_prompt || "Select a review first.");
+      if (!state.selectedReviewId) throw new Error(UI.review_select_prompt || "");
       await approveReview(state.selectedReviewId);
     }).catch(showAdminError)
   );
   document.getElementById("reject-review-button")?.addEventListener("click", () =>
     withBusyButton(document.getElementById("reject-review-button"), UI.busy_reject, async () => {
-      if (!state.selectedReviewId) throw new Error(UI.review_select_prompt || "Select a review first.");
+      if (!state.selectedReviewId) throw new Error(UI.review_select_prompt || "");
       await rejectReview(state.selectedReviewId);
     }).catch(showAdminError)
   );
@@ -3154,7 +3181,7 @@
       syncFileEditorState();
       updateEditorPreview(document.getElementById("editor-content")?.value || "");
       if (!restored) {
-        setAdminMessage(isZh ? "管理台已就绪。" : "Admin ready.");
+        setAdminMessage(UI.admin_ready || "");
       } else {
         queuePersistAdminPageState();
       }

@@ -291,13 +291,18 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             health_box = page.get_by_test_id("admin-overview-health-panel").bounding_box()
             issue_box = page.get_by_test_id("admin-overview-issue-panel").bounding_box()
             activity_box = page.get_by_test_id("admin-overview-activity-panel").bounding_box()
+            emerging_box = page.get_by_test_id("admin-overview-emerging-panel").bounding_box()
+            stress_box = page.get_by_test_id("admin-overview-stress-panel").bounding_box()
             assert queue_box is not None and issue_box is not None and health_box is not None and activity_box is not None
+            assert emerging_box is not None and stress_box is not None
             assert health_box["x"] > queue_box["x"]
             assert abs(queue_box["y"] - health_box["y"]) < 2
-            assert abs(issue_box["y"] - activity_box["y"]) < 2
+            assert abs(issue_box["x"] - queue_box["x"]) < 2
+            assert abs(activity_box["x"] - health_box["x"]) < 2
             assert issue_box["y"] > queue_box["y"]
-            assert abs(queue_box["height"] - health_box["height"]) < 2
-            assert abs(issue_box["height"] - activity_box["height"]) < 2
+            assert activity_box["y"] > health_box["y"]
+            assert emerging_box["y"] > issue_box["y"]
+            assert stress_box["y"] > activity_box["y"]
 
             page.goto(f"{live['base_url']}/admin/system", wait_until="networkidle")
             expect(page.get_by_test_id("admin-page-title")).to_have_text("设置")

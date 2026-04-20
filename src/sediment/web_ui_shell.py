@@ -8,6 +8,7 @@ from sediment.web_ui_shared import (
     logo_mark_svg as _shared_logo_mark_svg,
     normalize_locale as _shared_normalize_locale,
     render_shell_template as _shared_render_shell_template,
+    shell_data_defaults as _shared_shell_data_defaults,
 )
 
 
@@ -50,11 +51,7 @@ def shared_shell(title: str, body: str, script: str, *, locale: str) -> str:
         locale=active_locale,
         page_script_tag=page_script_tag,
         shell_data={
+            **_shared_shell_data_defaults(active_locale),
             "toggleLabel": toggle_label,
-            "toggleAriaLabel": "切换语言" if active_locale == "zh" else "Switch language",
-            "themeDarkLabel": "切换到暗色" if active_locale == "zh" else "Switch to dark mode",
-            "themeDarkIcon": "◐",
-            "themeLightLabel": "切换到明亮" if active_locale == "zh" else "Switch to light mode",
-            "themeLightIcon": "☀",
         },
     )

@@ -109,6 +109,7 @@ def test_portal_graph_templates_reuse_shared_action_row() -> None:
 def test_templates_reuse_shared_spacing_classes_instead_of_inline_offsets() -> None:
     portal_search = read_asset_text("portal-search-body.html")
     portal_legacy = read_asset_text("portal-body.html")
+    portal_universe = read_asset_text("portal-universe-body.html")
     admin_login = read_asset_text("admin-login-body.html")
     tutorial = read_asset_text("portal-tutorial-body.html")
     entry = read_asset_text("portal-entry-body.html")
@@ -122,6 +123,20 @@ def test_templates_reuse_shared_spacing_classes_instead_of_inline_offsets() -> N
     assert 'style="margin-top:18px;"' not in portal_search
     assert 'class="list section-gap-sm"' in portal_legacy
     assert 'style="margin-top:14px;"' not in portal_legacy
+    assert 'class="universe-panel universe-panel-guide universe-overlay-panel universe-overlay-panel-center"' in portal_universe
+    assert 'class="universe-panel universe-panel-system universe-overlay-panel universe-overlay-panel-center"' in portal_universe
+    assert 'class="universe-guide-layout"' in portal_universe
+    assert 'class="universe-reader-grid"' in portal_universe
+    assert 'class="universe-control-button universe-control-button-primary"' in portal_universe
+    assert 'class="universe-guide-stack"' in portal_universe
+    assert 'class="universe-file-picker"' in portal_universe
+    assert 'class="universe-utilities"' in portal_universe
+    assert 'class="universe-panel universe-panel-survey universe-overlay-panel universe-overlay-panel-left"' in portal_universe
+    assert 'class="universe-system-layout"' in portal_universe
+    assert 'class="button "' not in portal_universe
+    assert 'class="panel' not in portal_universe
+    assert 'class="card' not in portal_universe
+    assert 'style="margin-top:' not in portal_universe
     assert 'class="panel panel-narrow section-gap-lg"' in admin_login
     assert 'style="margin-top:20px; max-width:560px;"' not in admin_login
     assert 'class="detail-block section-gap-sm"' in tutorial

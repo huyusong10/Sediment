@@ -59,7 +59,8 @@
 行为约束：
 
 - 工具只创建收件箱记录
-- 返回 `item_id`
+- 返回稳定主键 `id`
+- 为兼容旧调用方，REST 层可同时附带 `item_id = id`
 - 不直接写入知识库
 - 文本意见不自动分析
 - 上传原件不自动抽取文本，不自动运行 ingest
@@ -104,7 +105,8 @@ MCP 治理工具写入契约：
 
 - 文本意见只创建 `text_feedback` 收件箱项
 - 上传文件只创建 `uploaded_document` 收件箱项并保存原件
-- 成功响应只返回 `item` 与当前 `status`
+- 成功响应返回 `id`、当前 `status` 与完整 `item`
+- 若需要兼容旧前端，可额外返回 `item_id`，但前台新实现必须以 `id` 为唯一读取源
 - 不返回 `analysis`
 - 不依赖 `submission_type`
 - 请求体必须是顶层 JSON object；malformed / non-object body 必须返回 `400`，且不得创建任何收件箱项

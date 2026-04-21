@@ -2178,6 +2178,14 @@ def graph_payload(
             "entry_target": name,
         }
 
+    def _entry_stability(doc: dict[str, Any]) -> float:
+        status = str(doc.get("status") or "").strip().lower()
+        if status in {"fact", "stable"}:
+            return 0.94
+        if status in {"inferred", "draft"}:
+            return 0.76
+        return 0.66
+
     def _proposal_node(proposal_id: str) -> dict[str, Any]:
         proposal = proposals_by_id.get(proposal_id) or {}
         return {
@@ -2231,6 +2239,285 @@ def graph_payload(
             "details": {"segment": doc.get("segment") or "", "links": list(doc.get("links") or [])},
             "entry_target": None,
         }
+
+    def _ensure_focus_context(focus_ref: str) -> str:
+        focus_kind, focus_raw_id = _split_graph_ref(focus_ref)
+        resolved_focus_ref = str(focus_ref or "").strip()
+        if not resolved_focus_ref:
+            return ""
+
+        if focus_kind in {"", "entry"} and focus_raw_id in data["docs"]:
+            doc = data["docs"][focus_raw_id]
+            resolved_focus_ref = _graph_ref("canonical_entry", focus_raw_id)
+            ensure_node(
+                _canonical_node(focus_raw_id),
+                event_type="focus_context",
+                visual_role="stable_canonical",
+                energy=max(0.46, 0.18 + float(doc.get("inbound_count") or 0.0) * 0.07),
+                stability=_entry_stability(doc),
+                anchor_id="anchor::stable",
+                burst_level=0.14,
+                formation_stage="stable",
+                recentness=0.3,
+            )
+            add_edge(
+                "anchor::stable",
+                resolved_focus_ref,
+                edge_type="belongs_to_cluster",
+                strength=0.4,
+                activation=0.28,
+                formation_role="knowledge_basin",
+                pulse_level=0.12,
+            )
+
+            neighbor_names: list[str] = []
+            seen_names = {focus_raw_id}
+            for name in doc.get("graph_links") or []:
+                if name in data["docs"] and name not in seen_names:
+                    seen_names.add(name)
+                    neighbor_names.append(name)
+            inbound = sorted(
+                (
+                    name
+                    for name, source_doc in data["docs"].items()
+                    if name != focus_raw_id and focus_raw_id in (source_doc.get("graph_links") or [])
+                ),
+                key=lambda name: (
+                    -int(data["docs"][name].get("inbound_count") or 0),
+                    name,
+                ),
+            )
+            for name in inbound:
+                if name not in seen_names:
+                    seen_names.add(name)
+                    neighbor_names.append(name)
+                if len(neighbor_names) >= 8:
+                    break
+            for name in neighbor_names[:8]:
+                neighbor_doc = data["docs"].get(name) or {}
+                neighbor_ref = _graph_ref("canonical_entry", name)
+                ensure_node(
+                    _canonical_node(name),
+                    event_type="focus_context",
+                    visual_role="supporting_entry",
+                    energy=max(0.24, 0.12 + float(neighbor_doc.get("inbound_count") or 0.0) * 0.05),
+                    stability=_entry_stability(neighbor_doc),
+                    anchor_id="anchor::stable",
+                    burst_level=0.12,
+                    formation_stage="stable",
+                    recentness=0.24,
+                )
+                add_edge(
+                    resolved_focus_ref,
+                    neighbor_ref,
+                    edge_type="weak_affinity",
+                    strength=0.32,
+                    activation=0.24,
+                    formation_role="focus_neighborhood",
+                    pulse_level=0.1,
+                )
+
+            proposal_candidates = sorted(
+                (
+                    (proposal_id, proposal)
+                    for proposal_id, proposal in proposals_by_id.items()
+                    if focus_raw_id in (proposal.get("supporting_entries") or [])
+                ),
+                key=lambda item: (
+                    0 if str(item[1].get("review_state") or "").strip().lower() == "proposed" else 1,
+                    str(item[0]),
+                ),
+            )[:2]
+            for proposal_id, proposal in proposal_candidates:
+                proposal_ref = _graph_ref("insight_proposal", proposal_id)
+                ensure_node(
+                    _proposal_node(proposal_id),
+                    event_type="focus_context",
+                    visual_role="forming_insight",
+                    energy=0.34,
+                    stability=0.42,
+                    anchor_id="anchor::forming",
+                    burst_level=0.46,
+                    formation_stage="condensing",
+                    recentness=0.38,
+                )
+                add_edge(
+                    resolved_focus_ref,
+                    proposal_ref,
+                    edge_type="supports",
+                    strength=0.36,
+                    activation=0.3,
+                    formation_role="focus_support",
+                    pulse_level=0.3,
+                )
+
+            cluster_candidates = sorted(
+                (
+                    (cluster_id, cluster)
+                    for cluster_id, cluster in clusters_by_id.items()
+                    if focus_raw_id in (cluster.get("source_entries") or [])
+                ),
+                key=lambda item: (
+                    -float(item[1].get("demand_score") or 0.0),
+                    -float(item[1].get("maturity_score") or 0.0),
+                    str(item[0]),
+                ),
+            )[:2]
+            for cluster_id, cluster in cluster_candidates:
+                cluster_ref = _graph_ref("query_cluster", cluster_id)
+                ensure_node(
+                    _cluster_node(cluster_id),
+                    event_type="focus_context",
+                    visual_role="reinforced_query",
+                    energy=max(0.28, float(cluster.get("demand_score") or 0.0)),
+                    stability=max(0.22, float(cluster.get("maturity_score") or 0.0)),
+                    anchor_id="anchor::forming",
+                    burst_level=0.4,
+                    formation_stage="stirring",
+                    recentness=0.34,
+                )
+                add_edge(
+                    resolved_focus_ref,
+                    cluster_ref,
+                    edge_type="ask_reinforcement",
+                    strength=0.34,
+                    activation=0.32,
+                    formation_role="question_context",
+                    pulse_level=0.28,
+                )
+
+            index_candidates = [
+                (name, index_doc)
+                for name, index_doc in data["index_docs"].items()
+                if not index_doc.get("is_root") and focus_raw_id in (index_doc.get("links") or [])
+            ][:2]
+            for name, index_doc in index_candidates:
+                index_ref = _graph_ref("index_segment", name)
+                ensure_node(
+                    _index_node(name, index_doc),
+                    event_type="focus_context",
+                    visual_role="segment_context",
+                    energy=0.24,
+                    stability=0.9,
+                    anchor_id="anchor::stable",
+                    burst_level=0.12,
+                    formation_stage="stable",
+                    recentness=0.22,
+                )
+                add_edge(
+                    index_ref,
+                    resolved_focus_ref,
+                    edge_type="belongs_to_cluster",
+                    strength=0.3,
+                    activation=0.24,
+                    formation_role="navigation_context",
+                    pulse_level=0.08,
+                )
+            return resolved_focus_ref
+
+        if focus_kind == "insight" and focus_raw_id in proposals_by_id:
+            resolved_focus_ref = _graph_ref("insight_proposal", focus_raw_id)
+            proposal = proposals_by_id[focus_raw_id]
+            ensure_node(
+                _proposal_node(focus_raw_id),
+                event_type="focus_context",
+                visual_role="forming_insight",
+                energy=0.4,
+                stability=0.42,
+                anchor_id="anchor::forming",
+                burst_level=0.5,
+                formation_stage="condensing",
+                recentness=0.42,
+            )
+            for entry_name in list(proposal.get("supporting_entries") or [])[:4]:
+                entry_ref = ensure_reference(
+                    _graph_ref("canonical_entry", entry_name),
+                    energy=0.26,
+                    anchor_id="anchor::stable",
+                    event_type="focus_context",
+                    visual_role="supporting_entry",
+                )
+                if entry_ref:
+                    add_edge(
+                        resolved_focus_ref,
+                        entry_ref,
+                        edge_type="supports",
+                        strength=0.34,
+                        activation=0.28,
+                        formation_role="focus_support",
+                        pulse_level=0.22,
+                    )
+            return resolved_focus_ref
+
+        if focus_kind == "cluster" and focus_raw_id in clusters_by_id:
+            resolved_focus_ref = _graph_ref("query_cluster", focus_raw_id)
+            cluster = clusters_by_id[focus_raw_id]
+            ensure_node(
+                _cluster_node(focus_raw_id),
+                event_type="focus_context",
+                visual_role="reinforced_query",
+                energy=max(0.32, float(cluster.get("demand_score") or 0.0)),
+                stability=max(0.22, float(cluster.get("maturity_score") or 0.0)),
+                anchor_id="anchor::forming",
+                burst_level=0.42,
+                formation_stage="stirring",
+                recentness=0.4,
+            )
+            for entry_name in list(cluster.get("source_entries") or [])[:4]:
+                entry_ref = ensure_reference(
+                    _graph_ref("canonical_entry", entry_name),
+                    energy=0.24,
+                    anchor_id="anchor::stable",
+                    event_type="focus_context",
+                    visual_role="supporting_entry",
+                )
+                if entry_ref:
+                    add_edge(
+                        resolved_focus_ref,
+                        entry_ref,
+                        edge_type="ask_reinforcement",
+                        strength=0.32,
+                        activation=0.28,
+                        formation_role="question_context",
+                        pulse_level=0.24,
+                    )
+            return resolved_focus_ref
+
+        if focus_kind == "index" and focus_raw_id in data["index_docs"]:
+            resolved_focus_ref = _graph_ref("index_segment", focus_raw_id)
+            index_doc = data["index_docs"][focus_raw_id]
+            ensure_node(
+                _index_node(focus_raw_id, index_doc),
+                event_type="focus_context",
+                visual_role="segment_context",
+                energy=0.28,
+                stability=0.92,
+                anchor_id="anchor::stable",
+                burst_level=0.14,
+                formation_stage="stable",
+                recentness=0.3,
+            )
+            for entry_name in list(index_doc.get("links") or [])[:4]:
+                entry_ref = ensure_reference(
+                    _graph_ref("canonical_entry", entry_name),
+                    energy=0.22,
+                    anchor_id="anchor::stable",
+                    event_type="focus_context",
+                    visual_role="supporting_entry",
+                )
+                if entry_ref:
+                    add_edge(
+                        resolved_focus_ref,
+                        entry_ref,
+                        edge_type="belongs_to_cluster",
+                        strength=0.28,
+                        activation=0.24,
+                        formation_role="navigation_context",
+                        pulse_level=0.08,
+                    )
+            return resolved_focus_ref
+
+        return resolved_focus_ref
 
     def ensure_anchor(anchor_id: str) -> None:
         anchor = anchor_specs.get(anchor_id.replace("anchor::", ""), anchor_specs["stable"])
@@ -2546,9 +2833,131 @@ def graph_payload(
                         edge_type="weak_affinity",
                         strength=0.26,
                         activation=0.16,
-                        formation_role="stable_context",
-                        pulse_level=0.06,
+                    formation_role="stable_context",
+                    pulse_level=0.06,
                     )
+
+        proposal_candidates = sorted(
+            proposals_by_id.items(),
+            key=lambda item: (
+                0 if str(item[1].get("review_state") or "").strip().lower() == "proposed" else 1,
+                str(item[0]),
+            ),
+        )[:2]
+        for proposal_id, _proposal in proposal_candidates:
+            proposal_ref = _graph_ref("insight_proposal", proposal_id)
+            ensure_node(
+                _proposal_node(proposal_id),
+                event_type="home_context",
+                visual_role="forming_insight",
+                energy=0.28,
+                stability=0.42,
+                anchor_id="anchor::forming",
+                burst_level=0.42,
+                formation_stage="condensing",
+                recentness=0.32,
+            )
+            for entry_name in list((_proposal.get("supporting_entries") or []))[:2]:
+                if entry_name not in data["docs"]:
+                    continue
+                entry_ref = _graph_ref("canonical_entry", entry_name)
+                ensure_node(
+                    _canonical_node(entry_name),
+                    event_type="home_context",
+                    visual_role="supporting_entry",
+                    energy=0.22,
+                    stability=_entry_stability(data["docs"][entry_name]),
+                    anchor_id="anchor::stable",
+                    burst_level=0.12,
+                    formation_stage="stable",
+                    recentness=0.2,
+                )
+                add_edge(
+                    proposal_ref,
+                    entry_ref,
+                    edge_type="supports",
+                    strength=0.3,
+                    activation=0.24,
+                    formation_role="formation_support",
+                    pulse_level=0.22,
+                )
+
+        cluster_candidates = sorted(
+            clusters_by_id.items(),
+            key=lambda item: (
+                -float(item[1].get("demand_score") or 0.0),
+                -float(item[1].get("maturity_score") or 0.0),
+                str(item[0]),
+            ),
+        )[:2]
+        for cluster_id, cluster in cluster_candidates:
+            cluster_ref = _graph_ref("query_cluster", cluster_id)
+            ensure_node(
+                _cluster_node(cluster_id),
+                event_type="home_context",
+                visual_role="reinforced_query",
+                energy=max(0.24, float(cluster.get("demand_score") or 0.0)),
+                stability=max(0.2, float(cluster.get("maturity_score") or 0.0)),
+                anchor_id="anchor::forming",
+                burst_level=0.36,
+                formation_stage="stirring",
+                recentness=0.28,
+            )
+            for entry_name in list(cluster.get("source_entries") or [])[:2]:
+                if entry_name not in data["docs"]:
+                    continue
+                entry_ref = _graph_ref("canonical_entry", entry_name)
+                ensure_node(
+                    _canonical_node(entry_name),
+                    event_type="home_context",
+                    visual_role="supporting_entry",
+                    energy=0.2,
+                    stability=_entry_stability(data["docs"][entry_name]),
+                    anchor_id="anchor::stable",
+                    burst_level=0.1,
+                    formation_stage="stable",
+                    recentness=0.18,
+                )
+                add_edge(
+                    cluster_ref,
+                    entry_ref,
+                    edge_type="ask_reinforcement",
+                    strength=0.28,
+                    activation=0.22,
+                    formation_role="question_context",
+                    pulse_level=0.18,
+                )
+
+        index_candidates = [
+            (name, doc)
+            for name, doc in data["index_docs"].items()
+            if not doc.get("is_root")
+        ][:1]
+        for name, doc in index_candidates:
+            index_ref = _graph_ref("index_segment", name)
+            ensure_node(
+                _index_node(name, doc),
+                event_type="home_context",
+                visual_role="segment_context",
+                energy=0.22,
+                stability=0.9,
+                anchor_id="anchor::stable",
+                burst_level=0.12,
+                formation_stage="stable",
+                recentness=0.18,
+            )
+            for entry_name in list(doc.get("links") or [])[:2]:
+                if entry_name not in data["docs"]:
+                    continue
+                add_edge(
+                    index_ref,
+                    _graph_ref("canonical_entry", entry_name),
+                    edge_type="belongs_to_cluster",
+                    strength=0.28,
+                    activation=0.2,
+                    formation_role="navigation_context",
+                    pulse_level=0.08,
+                )
 
     if not selected_events:
         _fill_stable_context()
@@ -2602,16 +3011,19 @@ def graph_payload(
                         pulse_level=0.08,
                     )
 
+    if focus:
+        focus_id = _ensure_focus_context(focus)
     nodes = list(nodes_by_id.values())
     edges = list(edges_by_key.values())
 
     if focus:
-        focus_id = focus
         for candidate in (
+            focus_id,
             focus,
             _graph_ref("canonical_entry", focus),
             _graph_ref("insight_proposal", focus),
             _graph_ref("query_cluster", focus),
+            _graph_ref("index_segment", focus),
         ):
             if any(node["id"] == candidate for node in nodes):
                 focus_id = candidate

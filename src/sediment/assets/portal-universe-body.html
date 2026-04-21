@@ -1,0 +1,474 @@
+<div
+  class="universe-page"
+  data-testid="portal-universe-page"
+  data-page-kind="__PAGE_KIND__"
+  data-page-preset="__PAGE_PRESET__"
+>
+  <h1 class="universe-page-title sr-only" data-testid="portal-page-title">__PAGE_TITLE__</h1>
+
+  <div class="universe-scene">
+    <div class="universe-stage-shell">
+      <div
+        class="universe-stage"
+        id="portal-insights-graph"
+        data-testid="portal-universe-stage"
+      ></div>
+      <div class="universe-stage-glow" aria-hidden="true"></div>
+      <div class="universe-stage-grain" aria-hidden="true"></div>
+    </div>
+
+    <div class="universe-cinematic-bars" id="portal-cinematic-bars" hidden>
+      <div class="universe-cinematic-bar"></div>
+      <div class="universe-cinematic-bar"></div>
+    </div>
+
+    <header class="universe-topbar" data-testid="portal-topbar">
+      <a class="universe-brand" href="/">
+        <span class="universe-brand-mark" aria-hidden="true">__LOGO_MARK__</span>
+        <span class="universe-brand-copy">
+          <strong>__KNOWLEDGE_NAME__</strong>
+          <span>__UNIVERSE_TITLE__</span>
+        </span>
+      </a>
+      <div class="universe-utilities">
+        <button
+          type="button"
+          class="universe-utility-button"
+          id="portal-system-toggle"
+          data-testid="portal-system-toggle"
+          aria-label="__UTILITY_SYSTEM_LABEL__"
+        >__UTILITY_SYSTEM_TOGGLE__</button>
+        <button
+          type="button"
+          class="universe-utility-button universe-sound-toggle"
+          id="portal-sound-toggle"
+          data-testid="portal-sound-toggle"
+          aria-pressed="false"
+        >__SOUND_UNMUTE_LABEL__</button>
+      </div>
+    </header>
+
+    <section
+      class="universe-intro"
+      id="portal-universe-intro"
+      data-testid="portal-universe-intro"
+      data-phase="void"
+    >
+      <div class="universe-intro-copy">
+        <div class="universe-intro-label" id="portal-intro-label">__INTRO_LABEL__</div>
+        <p class="universe-intro-line" id="portal-intro-line">__INTRO_HINT__</p>
+      </div>
+      <div class="universe-intro-target" data-testid="portal-intro-target">
+        <span class="universe-panel-kicker" id="portal-intro-phase-copy">__INTRO_PHASE_VOID__</span>
+        <strong id="portal-intro-target-title"></strong>
+        <p id="portal-intro-target-summary"></p>
+      </div>
+      <button
+        type="button"
+        class="universe-control-button universe-control-button-quiet universe-intro-replay"
+        id="portal-intro-replay-button"
+      >__INTRO_REPLAY_LABEL__</button>
+    </section>
+
+    <header class="universe-hud" id="portal-hud" data-testid="portal-hud" data-expanded="false">
+      <div class="universe-hud-rail">
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet universe-hud-toggle"
+          id="portal-hud-toggle"
+          data-testid="portal-hud-toggle"
+        >__HUD_TOGGLE_LABEL__</button>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-primary"
+          id="portal-hud-search"
+          data-testid="portal-hud-search"
+        >__HUD_SEARCH_LABEL__</button>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet"
+          id="portal-hud-clear"
+          data-testid="portal-hud-clear"
+        >__HUD_CLEAR_LABEL__</button>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet"
+          id="portal-hud-cruise"
+          data-testid="portal-hud-cruise"
+        >__HUD_CRUISE_LABEL__</button>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet"
+          id="portal-hud-submit"
+          data-testid="portal-hud-submit"
+        >__HUD_SUBMIT_LABEL__</button>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet"
+          id="portal-hud-tutorial"
+          data-testid="portal-hud-tutorial"
+        >__HUD_TUTORIAL_LABEL__</button>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet"
+          id="portal-hud-system"
+          data-testid="portal-hud-system"
+        >__HUD_SYSTEM_LABEL__</button>
+        <div class="universe-hud-link" data-testid="portal-quartz-link">__OPEN_QUARTZ_LINK__</div>
+      </div>
+    </header>
+
+    <div class="universe-status" id="portal-message" data-testid="portal-message" role="status" aria-live="polite">__ATTRIBUTION__</div>
+
+    <section
+      class="universe-panel universe-panel-survey universe-overlay-panel universe-overlay-panel-left"
+      id="portal-survey"
+      data-testid="portal-survey"
+      hidden
+    >
+      <div class="universe-panel-header">
+        <div class="universe-panel-heading">
+          <div class="universe-panel-kicker">__SURVEY_TITLE__</div>
+          <h2>__SURVEY_TITLE__</h2>
+          <p class="universe-panel-description">__SURVEY_HINT__</p>
+        </div>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-quiet"
+          id="portal-survey-close"
+          data-testid="portal-survey-close"
+        >__SURVEY_CLOSE_LABEL__</button>
+      </div>
+      <div class="universe-survey-toolbar">
+        <div class="universe-search-field">
+          <input
+            id="search-input"
+            class="universe-search-input"
+            data-testid="portal-search-input"
+            aria-haspopup="listbox"
+            autocomplete="off"
+            placeholder="__SEARCH_PLACEHOLDER__"
+          />
+          <div
+            id="search-suggestions"
+            class="universe-search-suggestions"
+            data-testid="portal-search-suggestions"
+            role="listbox"
+            hidden
+          ></div>
+        </div>
+        <button
+          type="button"
+          class="universe-control-button universe-control-button-primary"
+          id="search-button"
+          data-testid="portal-search-button"
+        >__SEARCH_BUTTON_LABEL__</button>
+      </div>
+      <div id="search-status" class="universe-search-status" role="status" aria-live="polite"></div>
+      <div id="search-results" class="universe-search-results" data-testid="portal-search-results"></div>
+    </section>
+
+    <aside class="universe-spatial-card" id="portal-spatial-card" data-testid="portal-spatial-card" hidden data-side="right">
+      <div class="universe-spatial-card-backdrop" data-action="close-spatial-card"></div>
+      <section class="universe-spatial-card-body" aria-labelledby="portal-spatial-card-title" data-testid="portal-spatial-card-body">
+        <div class="universe-spatial-card-header">
+          <div class="universe-spatial-card-heading">
+            <div class="universe-panel-kicker">__SPATIAL_CARD_LABEL__</div>
+            <h2 id="portal-spatial-card-title"></h2>
+            <div class="universe-copy-muted" id="portal-spatial-card-subtitle"></div>
+          </div>
+          <div class="universe-inline-actions">
+            <button type="button" class="universe-control-button universe-control-button-primary" id="portal-spatial-card-expand" data-testid="portal-spatial-card-expand">__SPATIAL_CARD_EXPAND_LABEL__</button>
+            <button type="button" class="universe-control-button universe-control-button-quiet" data-action="close-spatial-card" data-testid="portal-spatial-card-close">__SPATIAL_CARD_CLOSE_LABEL__</button>
+          </div>
+        </div>
+        <div class="universe-spatial-card-compact" id="portal-spatial-card-compact"></div>
+        <section class="universe-reader-panel" id="portal-spatial-card-reader-panel" data-testid="portal-entry-reader-panel" hidden>
+          <div class="universe-reader-header">
+            <h3>__ENTRY_BODY_TITLE__</h3>
+            <button
+              type="button"
+              class="universe-control-button universe-control-button-quiet"
+              id="portal-spatial-card-collapse"
+            >__SPATIAL_CARD_COLLAPSE_LABEL__</button>
+          </div>
+          <div class="universe-reader-grid">
+            <section class="universe-reader-column universe-reader-column-primary" data-testid="portal-entry-sections-panel">
+              <h3>__ENTRY_SECTIONS_TITLE__</h3>
+              <div class="universe-reader-stack" id="portal-entry-sections" data-testid="portal-entry-sections"></div>
+            </section>
+            <section class="universe-reader-column universe-reader-column-secondary" data-testid="portal-entry-signals-panel">
+              <h3>__ENTRY_SIGNALS_TITLE__</h3>
+              <div class="universe-reader-stack" id="portal-entry-signals" data-testid="portal-entry-signals"></div>
+            </section>
+          </div>
+          <div id="portal-entry-view" data-testid="portal-entry-view" class="universe-markdown universe-reader-markdown"></div>
+        </section>
+      </section>
+    </aside>
+
+    <section class="universe-panel universe-panel-submit universe-overlay-panel universe-overlay-panel-center" id="portal-submit-panel" data-testid="portal-submit-panel" hidden>
+      <div class="universe-panel-header">
+        <div class="universe-panel-heading">
+          <div class="universe-panel-kicker">__SUBMIT_PANEL_TITLE__</div>
+          <h2>__SUBMIT_PANEL_TITLE__</h2>
+          <p class="universe-panel-description">__TEXT_SUBMISSION_NOTE__</p>
+        </div>
+        <button type="button" class="universe-control-button universe-control-button-quiet" data-action="close-submit-panel">__SUBMIT_PANEL_CLOSE__</button>
+      </div>
+      <div class="universe-submit-grid">
+        <section class="universe-surface">
+          <h3>__TEXT_SUBMISSION_TITLE__</h3>
+          <div class="universe-form-stack">
+            <label class="universe-field">
+              <span class="universe-field-label">__SUBMITTER_NAME_LABEL__</span>
+              <input id="submit-name" class="universe-field-input" data-testid="portal-submit-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" />
+            </label>
+            <label class="universe-field">
+              <span class="universe-field-label">__SUBMISSION_TITLE_LABEL__</span>
+              <input id="submit-title" class="universe-field-input" data-testid="portal-submit-title" placeholder="__SUBMISSION_TITLE_PLACEHOLDER__" />
+            </label>
+            <label class="universe-field">
+              <span class="universe-field-label">__SUBMISSION_CONTENT_LABEL__</span>
+              <textarea id="submit-content" class="universe-field-input universe-field-textarea" data-testid="portal-submit-content"></textarea>
+            </label>
+          </div>
+          <div class="universe-form-actions">
+            <button class="universe-control-button universe-control-button-primary" id="submit-text-button" data-testid="portal-submit-text-button">__SUBMIT_TEXT_BUTTON__</button>
+          </div>
+          <div id="submit-text-status" class="universe-copy-muted universe-status-copy" role="status" aria-live="polite"></div>
+          <div class="universe-inline-actions universe-submit-followup" id="submit-text-followup" hidden>
+            <button type="button" class="universe-control-button universe-control-button-primary" data-action="submit-return-universe">__SUBMIT_ACTION_RETURN__</button>
+            <button type="button" class="universe-control-button universe-control-button-quiet" data-action="submit-continue-editing">__SUBMIT_ACTION_CONTINUE__</button>
+            <button type="button" class="universe-control-button universe-control-button-quiet" id="submit-text-focus" data-action="submit-focus-related" hidden>__SUBMIT_ACTION_FOCUS__</button>
+          </div>
+        </section>
+
+        <section class="universe-surface">
+          <h3>__DOCUMENT_UPLOAD_TITLE__</h3>
+          <div class="universe-form-stack">
+            <label class="universe-field">
+              <span class="universe-field-label">__SUBMITTER_NAME_LABEL__</span>
+              <input id="upload-name" class="universe-field-input" data-testid="portal-upload-name" placeholder="__SUBMITTER_NAME_PLACEHOLDER__" />
+            </label>
+            <div class="universe-upload-grid">
+              <div class="universe-file-field">
+                <label class="universe-field-label" for="upload-file">__UPLOAD_FILES_LABEL__</label>
+                <div class="universe-file-picker" data-file-picker data-testid="portal-upload-file-picker">
+                  <input
+                    class="universe-file-input"
+                    id="upload-file"
+                    data-testid="portal-upload-file"
+                    type="file"
+                    multiple
+                    accept=".txt,.md,.docx,.pptx,.zip"
+                    aria-describedby="upload-file-selection"
+                  />
+                  <span class="universe-control-button universe-control-button-quiet universe-file-picker-button" aria-hidden="true">__UPLOAD_FILE_BUTTON__</span>
+                  <span
+                    class="universe-file-picker-status"
+                    id="upload-file-selection"
+                    data-file-picker-status
+                    data-empty-label="__UPLOAD_FILE_EMPTY__"
+                    data-selected-prefix="__FILE_PICKER_SELECTED_PREFIX__"
+                    data-selected-suffix="__FILE_PICKER_SELECTED_SUFFIX__"
+                    data-testid="portal-upload-file-selection"
+                  >__UPLOAD_FILE_EMPTY__</span>
+                </div>
+              </div>
+              <div class="universe-file-field">
+                <label class="universe-field-label" for="upload-folder">__UPLOAD_FOLDER_LABEL__</label>
+                <div class="universe-file-picker" data-file-picker data-testid="portal-upload-folder-picker">
+                  <input
+                    class="universe-file-input"
+                    id="upload-folder"
+                    data-testid="portal-upload-folder"
+                    type="file"
+                    webkitdirectory
+                    directory
+                    multiple
+                    aria-describedby="upload-folder-selection"
+                  />
+                  <span class="universe-control-button universe-control-button-quiet universe-file-picker-button" aria-hidden="true">__UPLOAD_FOLDER_BUTTON__</span>
+                  <span
+                    class="universe-file-picker-status"
+                    id="upload-folder-selection"
+                    data-file-picker-status
+                    data-empty-label="__UPLOAD_FOLDER_EMPTY__"
+                    data-selected-prefix="__FILE_PICKER_SELECTED_PREFIX__"
+                    data-selected-suffix="__FILE_PICKER_SELECTED_SUFFIX__"
+                    data-testid="portal-upload-folder-selection"
+                  >__UPLOAD_FOLDER_EMPTY__</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="universe-form-actions">
+            <button class="universe-control-button universe-control-button-primary" id="submit-file-button" data-testid="portal-submit-file-button">__SUBMIT_FILE_BUTTON__</button>
+          </div>
+          <div id="submit-file-status" class="universe-copy-muted universe-status-copy" role="status" aria-live="polite"></div>
+          <div class="universe-inline-actions universe-submit-followup" id="submit-file-followup" hidden>
+            <button type="button" class="universe-control-button universe-control-button-primary" data-action="submit-return-universe">__SUBMIT_ACTION_RETURN__</button>
+            <button type="button" class="universe-control-button universe-control-button-quiet" data-action="submit-continue-editing">__SUBMIT_ACTION_CONTINUE__</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="universe-panel universe-panel-guide universe-overlay-panel universe-overlay-panel-center" id="portal-tutorial-panel" data-testid="portal-tutorial-panel" hidden>
+      <div class="universe-panel-header">
+        <div class="universe-panel-heading">
+          <div class="universe-panel-kicker">__TUTORIAL_PANEL_TITLE__</div>
+          <h2>__TUTORIAL_PANEL_TITLE__</h2>
+          <div class="universe-endpoint-line">__MCP_ENDPOINT__</div>
+        </div>
+        <button type="button" class="universe-control-button universe-control-button-quiet" data-action="close-tutorial-panel">__TUTORIAL_PANEL_CLOSE__</button>
+      </div>
+      <div class="universe-guide-layout">
+        <div class="universe-guide-main">
+          <section class="universe-surface" data-testid="tutorial-mcp-panel">
+            <div class="universe-guide-intro" data-testid="tutorial-mcp-intro">__MCP_INTRO__</div>
+            <div class="universe-guide-section">
+              <div class="universe-section-heading">
+                <div class="universe-panel-kicker">__MCP_TITLE__</div>
+                <h3>__MCP_TITLE__</h3>
+              </div>
+              <div class="universe-guide-stack" data-testid="tutorial-tool-cards">__TUTORIAL_TOOL_CARDS__</div>
+            </div>
+            <div class="universe-guide-section">
+              <div class="universe-section-heading">
+                <div class="universe-panel-kicker">__MCP_EXAMPLES_TITLE__</div>
+                <h3>__MCP_EXAMPLES_TITLE__</h3>
+              </div>
+              <div class="universe-guide-intro" data-testid="tutorial-agent-guides-intro">__MCP_EXAMPLES_INTRO__</div>
+              <div class="universe-guide-stack" data-testid="tutorial-agent-guides">__TUTORIAL_AGENT_GUIDES__</div>
+            </div>
+          </section>
+        </div>
+        <div class="universe-guide-side">
+          <div class="universe-guide-side-stack">
+            <section class="universe-surface" data-testid="tutorial-decision-panel">
+              <div class="universe-section-heading">
+                <div class="universe-panel-kicker">__DECISION_TITLE__</div>
+                <h3>__DECISION_TITLE__</h3>
+              </div>
+              <div class="universe-guide-intro" data-testid="tutorial-decision-intro">__DECISION_INTRO__</div>
+              <div class="universe-guide-stack" data-testid="tutorial-decision-cards">__TUTORIAL_DECISION_CARDS__</div>
+            </section>
+            <section class="universe-surface" data-testid="tutorial-skill-panel">
+              <div class="universe-section-heading">
+                <div class="universe-panel-kicker">__SKILL_TITLE__</div>
+                <h3>__SKILL_TITLE__</h3>
+              </div>
+              <div class="universe-guide-intro" data-testid="tutorial-skill-intro">__SKILL_INTRO__</div>
+              <div class="universe-guide-stack" data-testid="tutorial-skill-downloads">__TUTORIAL_DOWNLOADS__</div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="universe-panel universe-panel-system universe-overlay-panel universe-overlay-panel-center" id="portal-system-panel" data-testid="portal-system-panel" hidden>
+      <div class="universe-panel-header">
+        <div class="universe-panel-heading">
+          <div class="universe-panel-kicker">__SYSTEM_PANEL_TITLE__</div>
+          <h2>__SYSTEM_PANEL_TITLE__</h2>
+          <p class="universe-panel-description">__SYSTEM_PANEL_HINT__</p>
+        </div>
+        <button type="button" class="universe-control-button universe-control-button-quiet" data-action="close-system-panel">__SYSTEM_PANEL_CLOSE__</button>
+      </div>
+      <div class="universe-system-layout">
+        <section class="universe-surface universe-system-settings" data-testid="portal-system-controls">
+          <div class="universe-section-heading">
+            <div class="universe-panel-kicker">__SYSTEM_SETTINGS_TITLE__</div>
+            <h3>__SYSTEM_SETTINGS_TITLE__</h3>
+          </div>
+          <div class="universe-system-row">
+            <div>
+              <strong>__SYSTEM_LANGUAGE_LABEL__</strong>
+              <p class="universe-copy-muted">__SYSTEM_LANGUAGE_HINT__</p>
+            </div>
+            <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-locale" data-testid="portal-system-locale">__UTILITY_LOCALE_TOGGLE__</button>
+          </div>
+          <div class="universe-system-row">
+            <div>
+              <strong>__SYSTEM_THEME_LABEL__</strong>
+              <p class="universe-copy-muted">__SYSTEM_THEME_HINT__</p>
+            </div>
+            <div class="universe-inline-actions" data-testid="portal-system-theme-group">
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-theme-midnight">__UTILITY_THEME_DARK__</button>
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-theme-dawn">__UTILITY_THEME_LIGHT__</button>
+            </div>
+          </div>
+          <div class="universe-system-row">
+            <div>
+              <strong>__SYSTEM_MOTION_LABEL__</strong>
+              <p class="universe-copy-muted">__SYSTEM_MOTION_HINT__</p>
+            </div>
+            <div class="universe-inline-actions" data-testid="portal-system-motion-group">
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-motion-full">__SYSTEM_MOTION_FULL__</button>
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-motion-reduced">__SYSTEM_MOTION_REDUCED__</button>
+            </div>
+          </div>
+          <div class="universe-system-row">
+            <div>
+              <strong>__SYSTEM_BUDGET_LABEL__</strong>
+              <p class="universe-copy-muted">__SYSTEM_BUDGET_HINT__</p>
+            </div>
+            <div class="universe-inline-actions" data-testid="portal-system-budget-group">
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-budget-safe">__SYSTEM_BUDGET_SAFE__</button>
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-budget-standard">__SYSTEM_BUDGET_STANDARD__</button>
+              <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-system-budget-immersive">__SYSTEM_BUDGET_IMMERSIVE__</button>
+            </div>
+          </div>
+        </section>
+        <section class="universe-surface" data-testid="portal-system-runtime">
+          <div class="universe-section-heading">
+            <div class="universe-panel-kicker">__SYSTEM_RUNTIME_TITLE__</div>
+            <h3>__SYSTEM_RUNTIME_TITLE__</h3>
+          </div>
+          <article class="universe-detail-block">
+            <strong>__SYSTEM_RUNTIME_MODE_LABEL__</strong>
+            <span id="portal-system-runtime-mode"></span>
+          </article>
+          <div class="universe-guide-stack" id="portal-system-capabilities" data-testid="portal-system-capabilities"></div>
+        </section>
+        <section class="universe-surface" data-testid="portal-system-shortcuts">
+          <div class="universe-section-heading">
+            <div class="universe-panel-kicker">__SYSTEM_SHORTCUTS_TITLE__</div>
+            <h3>__SYSTEM_SHORTCUTS_TITLE__</h3>
+          </div>
+          <div class="universe-guide-stack">__SYSTEM_SHORTCUTS__</div>
+        </section>
+        <section class="universe-surface" data-testid="portal-system-help">
+          <div class="universe-section-heading">
+            <div class="universe-panel-kicker">__SYSTEM_HELP_TITLE__</div>
+            <h3>__SYSTEM_HELP_TITLE__</h3>
+          </div>
+          <div class="universe-guide-stack">__HELP_SECTIONS__</div>
+        </section>
+      </div>
+    </section>
+
+    <div class="universe-sound-prompt" id="portal-sound-prompt" hidden>__SOUND_PROMPT__</div>
+
+    <section class="universe-cruise-summary" id="portal-cruise-summary" data-testid="portal-cruise-summary" hidden data-anchor="right-bottom">
+      <div class="universe-panel-kicker">__CRUISE_SUMMARY_KICKER__</div>
+      <h2 id="portal-cruise-title"></h2>
+      <p id="portal-cruise-summary-text"></p>
+      <div class="universe-inline-actions">
+        <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-cruise-pause">__CRUISE_ACTION_PAUSE__</button>
+        <button type="button" class="universe-control-button universe-control-button-quiet" id="portal-cruise-next">__CRUISE_ACTION_NEXT__</button>
+        <button type="button" class="universe-control-button universe-control-button-primary" id="portal-cruise-exit">__CRUISE_ACTION_EXIT__</button>
+      </div>
+    </section>
+
+    <div class="universe-unsupported-overlay" id="portal-unsupported-overlay" hidden>
+      <section class="universe-unsupported-card">
+        <div class="universe-panel-kicker">Universe OS</div>
+        <h2>__DESKTOP_ONLY_TITLE__</h2>
+        <p>__DESKTOP_ONLY_BODY__</p>
+      </section>
+    </div>
+  </div>
+</div>

@@ -40,41 +40,46 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     page = client.get("/", headers={"accept-language": "en-US"})
     assert page.status_code == 200
     assert page.headers.get("x-request-id")
-    assert 'data-testid="portal-search-input"' in page.text
-    assert 'data-testid="portal-submit-text-button"' not in page.text
-    assert 'href="/tutorial?lang=en"' in page.text
+    page_data = _extract_page_data(page.text)
+    assert page_data["pageKind"] == "universe"
+    assert page_data["routeKind"] == "home"
+    assert page_data["pagePreset"] == "default"
+    assert page_data["initialIntent"] == "roaming"
+    assert 'data-testid="portal-universe-page"' in page.text
+    assert 'data-testid="portal-universe-stage"' in page.text
+    assert 'data-testid="portal-universe-intro"' in page.text
+    assert 'data-testid="portal-hud"' in page.text
+    assert 'data-testid="portal-survey"' in page.text
+    assert 'data-testid="portal-submit-panel"' in page.text
+    assert 'data-testid="portal-tutorial-panel"' in page.text
+    assert 'data-testid="portal-system-panel"' in page.text
+    assert 'data-testid="portal-spatial-card"' in page.text
+    assert 'data-testid="portal-cruise-summary"' in page.text
     assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in page.text
     assert 'href="/admin' not in page.text
     assert 'data-testid="portal-message"' in page.text
     assert 'data-testid="portal-page-title"' in page.text
-    assert 'class="page-title sr-only"' in page.text
-    assert 'class="brand-lockup"' in page.text
-    assert 'data-shell-header-actions' in page.text
-    assert 'data-shell-utility' in page.text
-    assert 'data-shell-nav-link="true"' in page.text
-    assert 'aria-current="page"' in page.text
-    assert 'class="button nav-link primary"' in page.text
-    assert 'class="button utility-action"' not in page.text
-    assert 'class="stats stats-inline"' in page.text
-    assert 'class="subtle search-status-line"' in page.text
-    assert 'data-testid="portal-home-graph-layout"' in page.text
-    assert 'data-testid="portal-home-graph"' in page.text
-    assert 'data-testid="portal-universe-strip"' in page.text
-    assert 'data-testid="portal-recent-updates"' not in page.text
-    assert page.text.count('href="/submit?lang=en"') == 1
-    assert 'href="/portal/graph-view?lang=en"' in page.text
-    assert "Open universe" in page.text
-    assert 'class="search-suggestions-popover"' in page.text
-    assert 'src="/ui-assets/web-shell.js"' in page.text
+    assert 'class="universe-page-title sr-only"' in page.text
+    assert 'data-testid="portal-topbar"' in page.text
+    assert 'data-testid="portal-system-toggle"' in page.text
+    assert 'data-testid="portal-sound-toggle"' in page.text
+    assert 'class="universe-search-status"' in page.text
+    assert 'class="universe-search-suggestions"' in page.text
+    assert '<body class="universe-document"' in page.text
+    assert 'src="/ui-assets/web-shell.js"' not in page.text
     assert 'src="/ui-assets/portal.js"' in page.text
     assert 'src="/ui-assets/graph.bundle.js"' in page.text
     assert 'href="/ui-assets/graph.bundle.css"' in page.text
     assert "const UI =" not in page.text
-    assert "Browsing stays public and anonymous." not in page.text
     assert "<title>Knowledge base overview | Test Knowledge Base</title>" in page.text
 
     tutorial_page = client.get("/tutorial", headers={"accept-language": "en-US"})
     assert tutorial_page.status_code == 200
+    tutorial_data = _extract_page_data(tutorial_page.text)
+    assert tutorial_data["pageKind"] == "universe"
+    assert tutorial_data["routeKind"] == "tutorial"
+    assert tutorial_data["initialIntent"] == "tutorial"
+    assert 'data-testid="portal-tutorial-panel"' in tutorial_page.text
     assert 'data-testid="tutorial-skill-downloads"' in tutorial_page.text
     assert 'data-testid="tutorial-tool-cards"' in tutorial_page.text
     assert 'data-testid="tutorial-decision-cards"' in tutorial_page.text
@@ -100,7 +105,11 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     submit_page = client.get("/submit", headers={"accept-language": "en-US"})
     assert submit_page.status_code == 200
-    assert 'data-testid="portal-page-title"' in submit_page.text
+    submit_data = _extract_page_data(submit_page.text)
+    assert submit_data["pageKind"] == "universe"
+    assert submit_data["routeKind"] == "submit"
+    assert submit_data["initialIntent"] == "submit"
+    assert 'data-testid="portal-submit-panel"' in submit_page.text
     assert 'data-testid="portal-submit-text-button"' in submit_page.text
     assert 'data-testid="portal-submit-name"' in submit_page.text
     assert 'data-testid="portal-submit-title"' in submit_page.text
@@ -119,10 +128,13 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     search_page = client.get("/search?q=%E7%83%AD%E5%A4%87%E4%BB%BD", headers={"accept-language": "en-US"})
     assert search_page.status_code == 200
-    assert 'data-testid="portal-page-title"' in search_page.text
+    search_data = _extract_page_data(search_page.text)
+    assert search_data["pageKind"] == "universe"
+    assert search_data["routeKind"] == "search"
+    assert search_data["initialIntent"] == "survey"
+    assert search_data["initialQuery"] == "热备份"
+    assert 'data-testid="portal-survey"' in search_page.text
     assert 'data-testid="portal-search-results"' in search_page.text
-    assert 'class="list section-gap-md"' in search_page.text
-    assert 'style="margin-top:18px;"' not in search_page.text
     assert 'aria-haspopup="listbox"' in search_page.text
     assert "<title>Full-text search | Test Knowledge Base</title>" in search_page.text
 
@@ -140,12 +152,13 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     portal_asset = client.get("/ui-assets/portal.js")
     assert portal_asset.status_code == 200
-    assert "PORTAL_PAGE_SESSION_KEY" in portal_asset.text
-    assert "loadHome" in portal_asset.text
-    assert 'shellLabel("unknownError"' in portal_asset.text
+    assert "sediment-universe-submit" in portal_asset.text
+    assert "playIntro" in portal_asset.text
+    assert "openSurvey" in portal_asset.text
+    assert "openSystemPanel" in portal_asset.text
+    assert "loadFocusedGraph" in portal_asset.text
     assert "isZh" not in portal_asset.text
     assert '|| "Unknown error"' not in portal_asset.text
-    assert "Knowledge base ready." not in portal_asset.text
 
     admin_asset = client.get("/ui-assets/admin.js")
     assert admin_asset.status_code == 200
@@ -251,6 +264,7 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
     )
     assert created.status_code == 201
     assert created.headers.get("x-request-id")
+    assert created.json()["id"] == created.json()["item_id"]
     assert created.json()["status"] == "open"
     assert created.json()["item"]["item_type"] == "text_feedback"
 
@@ -259,14 +273,41 @@ def test_portal_page_e2e_surface_and_submission_flow(tmp_path: Path, monkeypatch
 
     quartz_page = client.get("/portal/graph-view", headers={"accept-language": "en-US"})
     assert quartz_page.status_code == 200
-    assert 'data-testid="portal-insights-graph"' in quartz_page.text
-    assert 'data-testid="portal-graph-focus"' in quartz_page.text
-    assert 'data-testid="portal-graph-hint"' in quartz_page.text
-    assert 'data-testid="portal-graph-layout"' not in quartz_page.text
+    quartz_data = _extract_page_data(quartz_page.text)
+    assert quartz_data["pageKind"] == "universe"
+    assert quartz_data["routeKind"] == "graph"
+    assert quartz_data["pagePreset"] == "immersive"
+    assert 'data-testid="portal-universe-page"' in quartz_page.text
+    assert 'data-page-preset="immersive"' in quartz_page.text
+    assert 'data-testid="portal-universe-stage"' in quartz_page.text
+    assert 'data-testid="portal-spatial-card"' in quartz_page.text
     assert 'src="/ui-assets/graph.bundle.js"' in quartz_page.text
     assert 'href="/ui-assets/graph.bundle.css"' in quartz_page.text
     assert "Knowledge universe" in quartz_page.text
     assert 'href="/quartz/?lang=en" target="_blank" rel="noopener noreferrer"' in quartz_page.text
+
+    bootstrap = client.get("/api/portal/universe/bootstrap", headers={"accept-language": "en-US"}).json()
+    assert len(bootstrap["poetic_lines"]) >= 100
+    assert bootstrap["intro_candidates"]
+
+    survey_search = client.get("/api/portal/universe/search?q=%E7%83%AD%E5%A4%87%E4%BB%BD").json()
+    assert any(item["name"] == "热备份" for item in survey_search["results"])
+
+    survey_suggest = client.get("/api/portal/universe/search/suggest?q=%E7%83%AD%E5%A4%87").json()
+    assert any(item["name"] == "热备份" for item in survey_suggest["suggestions"])
+
+    graph_payload = client.get("/api/portal/universe/graph").json()
+    assert graph_payload["nodes"]
+    assert graph_payload["edges"]
+    assert graph_payload["scene_mode"]
+
+    focused_graph = client.get("/api/portal/universe/graph?focus=entry%3A%3A%E7%83%AD%E5%A4%87%E4%BB%BD").json()
+    focused_ids = {node["id"] for node in focused_graph["nodes"]}
+    assert "entry::热备份" in focused_ids
+    assert len(focused_graph["nodes"]) >= 2
+
+    entry_payload = client.get("/api/portal/universe/node/entry%3A%3A%E7%83%AD%E5%A4%87%E4%BB%BD").json()
+    assert entry_payload["detail"]["structured"]["title"] == "热备份"
 
 
 def test_portal_default_language_prefers_english_without_zh_signal(tmp_path: Path, monkeypatch) -> None:
@@ -690,7 +731,12 @@ def test_admin_page_e2e_login_review_and_edit_flow(tmp_path: Path, monkeypatch) 
 
     entry_page = client.get("/entries/%E8%96%84%E5%BC%B1%E6%9D%A1%E7%9B%AE", headers={"accept-language": "en-US"})
     assert entry_page.status_code == 200
-    assert 'data-testid="portal-entry-page-title"' in entry_page.text
+    entry_page_data = _extract_page_data(entry_page.text)
+    assert entry_page_data["pageKind"] == "universe"
+    assert entry_page_data["routeKind"] == "entry"
+    assert entry_page_data["entryName"] == "薄弱条目"
+    assert 'data-testid="portal-spatial-card"' in entry_page.text
+    assert 'data-testid="portal-entry-reader-panel"' in entry_page.text
     assert 'data-testid="portal-entry-sections-panel"' in entry_page.text
     assert 'data-testid="portal-entry-signals-panel"' in entry_page.text
     assert "<title>薄弱条目 | Test Knowledge Base</title>" in entry_page.text

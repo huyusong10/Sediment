@@ -71,62 +71,64 @@ def _wait_for_shared_row_alignment(page, *testids: str, tolerance: float = 2.0) 
     )
 
 
+def _wait_for_portal_intro_to_finish(page) -> None:
+    page.wait_for_function(
+        """
+        () => {
+          const intro = document.getElementById("portal-universe-intro");
+          return !intro || intro.hidden;
+        }
+        """
+    )
+
+
+def _wait_for_portal_graph_ready(page) -> None:
+    page.wait_for_function(
+        "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
+    )
+
+
+def _expand_portal_hud(page) -> None:
+    if page.evaluate("() => document.getElementById('portal-hud')?.dataset.expanded !== 'true'"):
+        page.get_by_test_id("portal-hud-toggle").click()
+
+
+def _open_portal_survey(page) -> None:
+    _expand_portal_hud(page)
+    page.get_by_test_id("portal-hud-search").click()
+    expect(page.get_by_test_id("portal-survey")).to_be_visible()
+
+
 def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
 
-            expect(page.get_by_test_id("portal-search-input")).to_be_visible()
+            expect(page.get_by_test_id("portal-universe-page")).to_be_visible()
+            expect(page.get_by_test_id("portal-universe-intro")).to_be_visible()
+            expect(page.get_by_test_id("portal-intro-target")).not_to_have_text("")
+            _wait_for_portal_intro_to_finish(page)
+            _wait_for_portal_graph_ready(page)
             expect(page.get_by_test_id("portal-page-title")).to_have_class(re.compile("sr-only"))
-            expect(page.get_by_test_id("portal-message")).to_contain_text("知识库已就绪")
-            expect(page.locator("[data-shell-nav] a.nav-link")).to_have_count(5)
-            expect(page.locator("[data-shell-utility] .utility-icon-button")).to_have_count(2)
-            expect(page.locator("[data-shell-nav] a[aria-current='page']")).to_have_count(1)
-            expect(page.locator(".brand svg.brand-lockup")).to_be_visible()
+            expect(page.get_by_test_id("portal-message")).to_contain_text("知识宇宙已就绪")
+            expect(page.get_by_test_id("portal-topbar")).to_be_visible()
+            expect(page.get_by_test_id("portal-system-toggle")).to_be_visible()
+            expect(page.get_by_test_id("portal-sound-toggle")).to_be_visible()
+            expect(page.locator("[data-shell-nav] a.nav-link")).to_have_count(0)
+            expect(page.locator("[data-shell-utility] .utility-icon-button")).to_have_count(0)
             expect(page.locator('a[href^="/admin"]')).to_have_count(0)
-            assert page.locator('a[href="/submit?lang=zh"]').count() == 1
-            brand_box = page.locator(".brand").bounding_box()
-            nav_row_box = page.locator("[data-shell-nav]").bounding_box()
-            assert brand_box is not None and nav_row_box is not None
-            assert nav_row_box["y"] > brand_box["y"]
-            overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
-            tutorial_box = page.locator("[data-shell-nav] a.nav-link").nth(2).bounding_box()
-            assert overview_box is not None and tutorial_box is not None
-            assert abs(overview_box["width"] - tutorial_box["width"]) < 2
+            expect(page.locator("#portal-insights-graph canvas")).to_have_count(1)
 
-            page.goto(f"{live['base_url']}/?lang=en", wait_until="domcontentloaded")
-            overview_box = page.locator("[data-shell-nav] a.nav-link").nth(0).bounding_box()
-            tutorial_box = page.locator("[data-shell-nav] a.nav-link").nth(2).bounding_box()
-            assert overview_box is not None and tutorial_box is not None
-            assert abs(overview_box["height"] - tutorial_box["height"]) < 2
-
-            page.goto(f"{live['base_url']}/", wait_until="domcontentloaded")
-
+            _open_portal_survey(page)
             search_button = page.get_by_test_id("portal-search-button")
             search_input = page.get_by_test_id("portal-search-input")
-            page.get_by_test_id("portal-search-input").fill("热备")
+            search_input.fill("热备")
             expect(page.get_by_test_id("portal-search-suggestions")).to_contain_text("热备份")
             button_box = search_button.bounding_box()
             input_box = search_input.bounding_box()
             assert button_box is not None and input_box is not None
             assert abs(button_box["y"] - input_box["y"]) < 4
 
-            stat_cards = page.locator("#portal-stats .stat")
-            expect(stat_cards).to_have_count(5)
-            first_stat_box = stat_cards.nth(0).bounding_box()
-            second_stat_box = stat_cards.nth(1).bounding_box()
-            assert first_stat_box is not None and second_stat_box is not None
-            assert abs(first_stat_box["y"] - second_stat_box["y"]) < 4
-            expect(page.get_by_test_id("portal-home-graph-layout")).to_be_visible()
-            page.wait_for_function(
-                "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
-            )
-            assert page.locator("#portal-insights-graph canvas").count() >= 1
-            assert page.get_by_test_id("portal-recent-updates").count() == 0
-            graph_box = page.get_by_test_id("portal-home-graph").bounding_box()
-            search_box = page.get_by_test_id("portal-search-input").bounding_box()
-            assert graph_box is not None and search_box is not None
-            assert graph_box["y"] < search_box["y"]
             node_ids = page.evaluate(
                 """() => {
                   const api = document.querySelector('#portal-insights-graph')?.__sedimentGraphApi;
@@ -142,25 +144,33 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
                 }""",
                 selectable[0],
             )
-            expect(page.get_by_test_id("portal-graph-focus")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-focus")).not_to_contain_text("打开条目")
-            page.get_by_test_id("portal-graph-focus").get_by_role("button").click()
+            expect(page.get_by_test_id("portal-spatial-card")).to_be_visible()
+            expect(page.locator("#portal-spatial-card-title")).not_to_have_text("")
 
-            page.get_by_test_id("portal-search-input").fill("热备份")
-            page.get_by_test_id("portal-search-button").click()
+            page.goto(f"{live['base_url']}/search", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-survey")).to_be_visible()
+            search_button = page.get_by_test_id("portal-search-button")
+            search_input = page.get_by_test_id("portal-search-input")
+            search_input.fill("热备份")
+            search_button.click()
             expect(page.get_by_test_id("portal-search-results")).to_contain_text("热备份")
-            page.locator("#search-results .card").filter(has_text="热备份").first.click()
-            expect(page.get_by_test_id("portal-entry-page-title")).to_have_text("热备份")
-            expect(page).to_have_title(re.compile("热备份"))
+            page.locator("#search-results .universe-result-card").filter(has_text="热备份").first.click()
+            expect(page.get_by_test_id("portal-spatial-card")).to_be_visible()
+            expect(page.get_by_test_id("portal-entry-reader-panel")).to_be_visible()
+            expect(page.locator("#portal-spatial-card-title")).to_have_text("热备份")
             expect(page.get_by_test_id("portal-entry-sections")).to_contain_text("适用于需要连续服务的系统")
-            signal_cards = page.locator("#entry-signals .signal-card")
+            signal_cards = page.locator("#portal-entry-signals .universe-signal-block")
             expect(signal_cards).to_have_count(5)
             expect(page.get_by_test_id("portal-entry-signals")).not_to_contain_text("-")
+            expect(page.get_by_test_id("portal-entry-signals")).not_to_contain_text("concept")
+            expect(page.get_by_test_id("portal-entry-signals")).not_to_contain_text("fact")
             signals_panel_box = page.get_by_test_id("portal-entry-signals-panel").bounding_box()
             sections_panel_box = page.get_by_test_id("portal-entry-sections-panel").bounding_box()
             assert signals_panel_box is not None and sections_panel_box is not None
             assert signals_panel_box["width"] < sections_panel_box["width"]
+            assert page.get_by_test_id("portal-spatial-card").get_attribute("data-side") in {"left", "right"}
             page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-submit-panel")).to_be_visible()
             expect(page.locator("body")).to_contain_text("文本意见")
             expect(page.locator("body")).not_to_contain_text("Text submission")
 
@@ -168,10 +178,13 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             page.locator("#submit-title").fill("浏览器提案")
             page.locator("#submit-content").fill("这是一条来自真实浏览器流程的提案。")
             page.get_by_test_id("portal-submit-text-button").click()
-            expect(page.locator("#submit-text-status")).to_contain_text("item_id=")
-            expect(page.get_by_test_id("portal-message")).to_contain_text("已提交文本意见")
+            expect(page.locator("#submit-text-status")).to_contain_text("已记录这条知识种子")
+            expect(page.locator("#submit-text-status")).not_to_contain_text("undefined")
+            expect(page.get_by_test_id("portal-message")).to_contain_text("已记录这条知识种子")
+            expect(page.locator("#submit-text-followup")).to_be_visible()
 
             page.goto(f"{live['base_url']}/submit?lang=en", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-submit-panel")).to_be_visible()
             expect(page.locator("body")).to_contain_text("Text feedback")
             expect(page.locator("body")).not_to_contain_text("文本意见")
             page.locator("#upload-name").fill("Alice")
@@ -193,7 +206,8 @@ def test_portal_browser_e2e_search_and_submit(tmp_path: Path, monkeypatch) -> No
             expect(page.get_by_test_id("portal-upload-file-selection")).to_contain_text("Selected 2 files")
             expect(page.get_by_test_id("portal-upload-file-selection")).to_contain_text("bundle-a.md")
             page.get_by_test_id("portal-submit-file-button").click()
-            expect(page.locator("#submit-file-status")).to_contain_text("item_id=")
+            expect(page.locator("#submit-file-status")).to_contain_text("document seed")
+            expect(page.locator("#submit-file-status")).not_to_contain_text("undefined")
 
 
 def test_portal_browser_e2e_submit_draft_survives_primary_nav_switch(
@@ -202,14 +216,17 @@ def test_portal_browser_e2e_submit_draft_survives_primary_nav_switch(
     with live_server(tmp_path, monkeypatch) as live:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-submit-panel")).to_be_visible()
             page.get_by_test_id("portal-submit-name").fill("Alice")
             page.get_by_test_id("portal-submit-title").fill("切页也要保留")
             page.get_by_test_id("portal-submit-content").fill("这个草稿在同标签页切换后不应丢失。")
 
             page.goto(f"{live['base_url']}/tutorial", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-tutorial-panel")).to_be_visible()
             expect(page.get_by_test_id("portal-page-title")).to_have_text("接入教程")
 
             page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-submit-panel")).to_be_visible()
             expect(page.get_by_test_id("portal-submit-name")).to_have_value("Alice")
             expect(page.get_by_test_id("portal-submit-title")).to_have_value("切页也要保留")
             expect(page.get_by_test_id("portal-submit-content")).to_have_value(
@@ -221,11 +238,8 @@ def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) ->
     with live_server(tmp_path, monkeypatch, locale="zh") as live:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/tutorial", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-tutorial-panel")).to_be_visible()
             expect(page.get_by_test_id("portal-page-title")).to_have_text("接入教程")
-            title_box = page.get_by_test_id("portal-page-title").bounding_box()
-            nav_row_box = page.locator("[data-shell-nav]").bounding_box()
-            assert title_box is not None and nav_row_box is not None
-            assert nav_row_box["y"] > title_box["y"]
             mcp_panel = page.get_by_test_id("tutorial-mcp-panel")
             skill_panel = page.get_by_test_id("tutorial-skill-panel")
             decision_panel = page.get_by_test_id("tutorial-decision-panel")
@@ -235,11 +249,11 @@ def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) ->
             assert mcp_box is not None and skill_box is not None and decision_box is not None
             assert mcp_box["x"] < skill_box["x"]
             assert abs(skill_box["x"] - decision_box["x"]) < 2
-            assert skill_box["y"] < decision_box["y"]
-            expect(page.locator('[data-testid="tutorial-skill-downloads"] .card')).to_have_count(1)
-            expect(page.locator('[data-testid="tutorial-decision-cards"] .card')).to_have_count(2)
-            expect(page.locator('[data-testid="tutorial-tool-cards"] .card')).to_have_count(3)
-            expect(page.locator('[data-testid="tutorial-agent-guides"] .card')).to_have_count(3)
+            assert decision_box["y"] < skill_box["y"]
+            expect(page.locator('[data-testid="tutorial-skill-downloads"] .universe-guide-card')).to_have_count(1)
+            expect(page.locator('[data-testid="tutorial-decision-cards"] .universe-guide-card')).to_have_count(2)
+            expect(page.locator('[data-testid="tutorial-tool-cards"] .universe-guide-card')).to_have_count(3)
+            expect(page.locator('[data-testid="tutorial-agent-guides"] .universe-guide-card')).to_have_count(3)
             expect(page.locator("body")).to_contain_text("通过 MCP 接入")
             expect(page.locator("body")).to_contain_text("knowledge_ask")
             expect(page.locator("body")).to_contain_text("knowledge_list")
@@ -248,9 +262,9 @@ def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) ->
             expect(page.locator("body")).not_to_contain_text("传输协议")
             expect(page.locator("body")).not_to_contain_text("公开浏览默认匿名")
             expect(page.locator("body")).not_to_contain_text("推荐工作流")
-            tooltip = page.locator('[data-testid="tutorial-mcp-intro"] .tip-panel')
+            tooltip = page.locator('[data-testid="tutorial-mcp-intro"] .universe-tip-panel')
             expect(tooltip).not_to_be_visible()
-            page.locator('[data-testid="tutorial-mcp-intro"] .tip-trigger').hover()
+            page.locator('[data-testid="tutorial-mcp-intro"] .universe-tip-trigger').hover()
             expect(tooltip).to_be_visible()
             expect(tooltip).to_contain_text("tool allowlist")
             with page.expect_download() as download_info:
@@ -259,15 +273,37 @@ def test_portal_tutorial_page_and_skill_download(tmp_path: Path, monkeypatch) ->
             assert download.suggested_filename == "sediment-mcp-explore-SKILL.md"
 
 
+def test_portal_browser_e2e_entry_route_and_system_overlay(tmp_path: Path, monkeypatch) -> None:
+    with live_server(tmp_path, monkeypatch) as live:
+        with _browser_page() as page:
+            page.goto(f"{live['base_url']}/entries/%E7%83%AD%E5%A4%87%E4%BB%BD", wait_until="domcontentloaded")
+            _wait_for_portal_graph_ready(page)
+            _wait_for_portal_intro_to_finish(page)
+            expect(page.get_by_test_id("portal-spatial-card")).to_be_visible()
+            expect(page.locator("#portal-spatial-card-title")).to_have_text("热备份")
+            expect(page.get_by_test_id("portal-entry-reader-panel")).to_be_visible()
+
+            page.get_by_test_id("portal-system-toggle").click()
+            expect(page.get_by_test_id("portal-system-panel")).to_be_visible()
+            expect(page.get_by_test_id("portal-system-capabilities")).to_be_visible()
+            page.locator("#portal-system-motion-reduced").click()
+            page.locator("#portal-system-budget-safe").click()
+            page.reload(wait_until="domcontentloaded")
+            _wait_for_portal_graph_ready(page)
+            expect(page.locator("html")).to_have_attribute("data-motion", "reduced")
+            expect(page.locator("html")).to_have_attribute("data-render-budget", "safe")
+
+
 def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
     with live_server(tmp_path, monkeypatch, admin_token="top-secret") as live:
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/submit", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-submit-panel")).to_be_visible()
             page.locator("#submit-name").fill("Alice")
             page.locator("#submit-title").fill("浏览器管理台文本意见")
             page.locator("#submit-content").fill("这条提交会进入提交收件箱，并由 committer 手工解决。")
             page.get_by_test_id("portal-submit-text-button").click()
-            expect(page.locator("#submit-text-status")).to_contain_text("item_id=")
+            expect(page.locator("#submit-text-status")).to_contain_text("知识种子")
             page.locator("#upload-name").fill("Alice")
             page.get_by_test_id("portal-upload-file").set_input_files(
                 {
@@ -277,7 +313,7 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
                 }
             )
             page.get_by_test_id("portal-submit-file-button").click()
-            expect(page.locator("#submit-file-status")).to_contain_text("item_id=")
+            expect(page.locator("#submit-file-status")).to_contain_text("文档种子")
 
             page.goto(f"{live['base_url']}/admin", wait_until="domcontentloaded")
             expect(page.get_by_test_id("admin-page-title")).to_have_text("管理台登录")
@@ -563,12 +599,13 @@ def test_admin_browser_e2e_review_and_edit(tmp_path: Path, monkeypatch) -> None:
             expect(page.get_by_test_id("admin-version-tracked-changes-list")).to_contain_text("tracked 路径当前没有未提交改动")
 
             page.goto(f"{live['base_url']}/search", wait_until="domcontentloaded")
+            expect(page.get_by_test_id("portal-survey")).to_be_visible()
             page.get_by_test_id("portal-search-input").fill("薄弱条目")
             page.get_by_test_id("portal-search-button").click()
-            page.locator("#search-results .card").filter(has_text="薄弱条目").first.click()
-            expect(page.get_by_test_id("portal-entry-sections")).to_contain_text(
-                "适用于浏览器 E2E 编辑"
-            )
+            expect(page.get_by_test_id("portal-search-results")).to_contain_text("薄弱条目")
+            page.locator("#search-results .universe-result-card").filter(has_text="薄弱条目").first.click()
+            expect(page.get_by_test_id("portal-entry-reader-panel")).to_be_visible()
+            expect(page.get_by_test_id("portal-entry-sections")).to_contain_text("适用于浏览器 E2E 编辑")
 
             page.goto(f"{live['base_url']}/admin/users", wait_until="domcontentloaded")
             expect(page.locator('[data-testid="admin-user-token-view"]')).to_have_count(0)
@@ -703,13 +740,12 @@ def test_portal_graph_page_renders_dynamic_insights_surface(tmp_path: Path, monk
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/portal/graph-view?lang=zh", wait_until="domcontentloaded")
             expect(page).to_have_title(re.compile("知识宇宙"))
-            expect(page.get_by_test_id("portal-graph-immersive-page")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-hint")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-focus")).to_be_hidden()
-            expect(page.locator(".hero")).to_have_count(0)
-            page.wait_for_function(
-                "() => document.querySelector('#portal-insights-graph')?.dataset.graphReady === 'true'"
+            expect(page.get_by_test_id("portal-universe-page")).to_have_attribute(
+                "data-page-preset", "immersive"
             )
+            expect(page.get_by_test_id("portal-universe-intro")).to_be_hidden()
+            expect(page.locator(".hero")).to_have_count(0)
+            _wait_for_portal_graph_ready(page)
             assert page.locator("#portal-insights-graph canvas").count() >= 1
             node_ids = page.evaluate(
                 """() => {
@@ -726,9 +762,9 @@ def test_portal_graph_page_renders_dynamic_insights_surface(tmp_path: Path, monk
                 }""",
                 selectable[0],
             )
-            expect(page.get_by_test_id("portal-graph-focus")).to_be_visible()
-            expect(page.get_by_test_id("portal-graph-focus")).to_contain_text("最近事件")
-            expect(page.get_by_test_id("portal-graph-focus")).not_to_contain_text("打开条目")
+            expect(page.get_by_test_id("portal-spatial-card")).to_be_visible()
+            expect(page.locator("#portal-spatial-card-title")).not_to_have_text("")
+            expect(page.get_by_test_id("portal-spatial-card-expand")).to_be_visible()
 
 
 def test_portal_graph_page_keeps_quartz_as_new_tab_link(tmp_path: Path, monkeypatch) -> None:
@@ -745,8 +781,9 @@ def test_portal_graph_page_keeps_quartz_as_new_tab_link(tmp_path: Path, monkeypa
 
         with _browser_page() as page:
             page.goto(f"{live['base_url']}/portal/graph-view", wait_until="domcontentloaded")
+            _expand_portal_hud(page)
             with page.expect_popup() as popup_info:
-                page.get_by_test_id("portal-graph-quartz-link").locator('a[target="_blank"]').click()
+                page.get_by_test_id("portal-quartz-link").locator('a[target="_blank"]').click()
             popup = popup_info.value
             popup.wait_for_load_state("domcontentloaded")
             expect(page).to_have_url(re.compile(".*/portal/graph-view.*"))

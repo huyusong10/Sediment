@@ -126,7 +126,25 @@ def _tutorial_skill_filename() -> str:
 
 
 def _mono(text: str) -> str:
-    return f'<span class="inline-mono">{escape(text)}</span>'
+    return f'<span class="universe-inline-mono">{escape(text)}</span>'
+
+
+def _universe_link(
+    label: str,
+    href: str,
+    *,
+    emphasis: str = "quiet",
+    new_tab: bool = False,
+) -> str:
+    modifier = {
+        "primary": "universe-control-button-primary",
+        "quiet": "universe-control-button-quiet",
+    }.get(emphasis, "universe-control-button-quiet")
+    extra_attrs = ' target="_blank" rel="noopener noreferrer"' if new_tab else ""
+    return (
+        f'<a class="universe-control-button {modifier} universe-control-link" '
+        f'href="{escape(href, quote=True)}"{extra_attrs}>{escape(label)}</a>'
+    )
 
 
 def _tutorial_tip(summary_html: str, detail_html: str, *, locale: str, testid: str = "") -> str:
@@ -134,11 +152,11 @@ def _tutorial_tip(summary_html: str, detail_html: str, *, locale: str, testid: s
     data_attr = f' data-testid="{escape(testid, quote=True)}"' if testid else ""
     return "\n".join(
         [
-            f'<div class="compact-note"{data_attr}>',
-            f'  <span class="compact-note-text">{summary_html}</span>',
-            '  <span class="tip-anchor">',
-            f'    <button class="tip-trigger" type="button" aria-label="{escape(label, quote=True)}">i</button>',
-            f'    <span class="tip-panel" role="note">{detail_html}</span>',
+            f'<div class="universe-inline-note"{data_attr}>',
+            f'  <span class="universe-inline-note-text">{summary_html}</span>',
+            '  <span class="universe-tip-anchor">',
+            f'    <button class="universe-tip-trigger" type="button" aria-label="{escape(label, quote=True)}">i</button>',
+            f'    <span class="universe-tip-panel" role="note">{detail_html}</span>',
             "  </span>",
             "</div>",
         ]
@@ -207,10 +225,10 @@ def _tutorial_mcp_tool_cards(locale: str) -> str:
     return "\n".join(
         "\n".join(
             [
-                '<article class="card tutorial-tool-card">',
-                '  <div class="row spread tutorial-card-heading">',
+                '<article class="universe-guide-card universe-guide-card-tool">',
+                '  <div class="universe-guide-heading">',
                 f"    <strong>{escape(card['title'])}</strong>",
-                f'    <span class="tag">{escape(card["badge"])}</span>',
+                f'    <span class="universe-meta-chip">{escape(card["badge"])}</span>',
                 "  </div>",
                 "  "
                 + _tutorial_tip(
@@ -219,7 +237,7 @@ def _tutorial_mcp_tool_cards(locale: str) -> str:
                     locale=active_locale,
                     testid=f"tutorial-tool-{card['title']}",
                 ),
-                f'  <div class="subtle mono">{escape(card["call"])}</div>',
+                f'  <div class="universe-code-caption">{escape(card["call"])}</div>',
                 "</article>",
             ]
         )
@@ -262,7 +280,7 @@ def _tutorial_decision_cards(locale: str) -> str:
     return "\n".join(
         "\n".join(
             [
-                '<article class="card tutorial-decision-card">',
+                '<article class="universe-guide-card universe-guide-card-decision">',
                 f"  <strong>{escape(card['title'])}</strong>",
                 f'  {_tutorial_tip(card["summary_html"], card["detail_html"], locale=active_locale)}',
                 "</article>",
@@ -290,13 +308,13 @@ def _tutorial_skill_cards(locale: str) -> str:
     download_label = "下载 SKILL" if is_zh else "Download SKILL"
     return "\n".join(
         [
-            '<article class="card tutorial-skill-card">',
-            '  <div class="row spread">',
+            '<article class="universe-guide-card universe-guide-card-skill">',
+            '  <div class="universe-guide-heading">',
             f"    <strong>{escape(title)}</strong>",
-            f'    {_nav_link(download_label, _localized_path(f"/downloads/skills/{_tutorial_skill_slug()}", active_locale), variant="download")}',
+            f'    {_universe_link(download_label, _localized_path(f"/downloads/skills/{_tutorial_skill_slug()}", active_locale), emphasis="quiet")}',
             "  </div>",
             f'  {_tutorial_tip(summary_html, detail_html, locale=active_locale, testid="tutorial-skill-card-tip")}',
-            f'  <div class="subtle mono">{escape(_tutorial_skill_filename())}</div>',
+            f'  <div class="universe-code-caption">{escape(_tutorial_skill_filename())}</div>',
             "</article>",
         ]
     )
@@ -350,9 +368,95 @@ def _tutorial_agent_guides(locale: str) -> str:
     return "\n".join(
         "\n".join(
             [
-                '<article class="card tutorial-guide-card">',
+                '<article class="universe-guide-card universe-guide-card-agent">',
                 f"  <strong>{escape(card['title'])}</strong>",
                 f'  {_tutorial_tip(card["summary_html"], card["detail_html"], locale=active_locale)}',
+                "</article>",
+            ]
+        )
+        for card in cards
+    )
+
+
+@lru_cache(maxsize=2)
+def _portal_help_sections(locale: str) -> str:
+    active_locale = _normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    sections = [
+        {
+            "title": "操作方式" if is_zh else "Controls",
+            "body": (
+                "拖动画面以平移宇宙，滚轮缩放尺度。点击搜索会进入俯瞰星图，点击星球会进入聚焦阅读，再点背景则回到漫游。"
+                if is_zh
+                else "Drag to pan the universe and scroll to zoom. Search opens the survey map, selecting a planet focuses it, and clicking the void returns to roaming."
+            ),
+        },
+        {
+            "title": "搜索与 Survey" if is_zh else "Search and Survey",
+            "body": (
+                "搜索不是离开宇宙的表单，而是一次导航指令。进入 survey 后，匹配到的星球会亮起，确认目标后会触发长距离运镜。"
+                if is_zh
+                else "Search is a navigation command, not a separate page. In survey mode matching planets light up, and selecting a target launches a long-range flight."
+            ),
+        },
+        {
+            "title": "知识类别" if is_zh else "Celestial types",
+            "body": (
+                "前台把知识收束成五类：稳定知识、形成中知识、问题星座、知识盆地和导航结构。系统内部仍可更细，但用户只需要记住这五类。"
+                if is_zh
+                else "The public universe collapses knowledge into five classes: Stable Knowledge, Forming Knowledge, Question Constellations, Knowledge Basins, and Navigation Structures."
+            ),
+        },
+        {
+            "title": "提交与教程" if is_zh else "Submit and tutorial",
+            "body": (
+                "人类用户可在宇宙里提交知识种子、阅读教程并下载 Skill。Agent 仍然通过 MCP 或 Skill 接入，而不是操作这个前台宇宙。"
+                if is_zh
+                else "Human users can submit knowledge seeds, read the guide, and download the Skill inside the universe. Agents still enter through MCP or the Skill, not through this visual portal."
+            ),
+        },
+    ]
+    return "\n".join(
+        "\n".join(
+            [
+                '<article class="universe-guide-card universe-help-card">',
+                f"  <strong>{escape(section['title'])}</strong>",
+                f'  <p class="universe-copy-muted">{escape(section["body"])}</p>',
+                "</article>",
+            ]
+        )
+        for section in sections
+    )
+
+
+@lru_cache(maxsize=2)
+def _portal_system_shortcuts(locale: str) -> str:
+    active_locale = _normalize_locale(locale)
+    is_zh = active_locale == "zh"
+    cards = [
+        {
+            "title": "打开 Survey" if is_zh else "Open survey",
+            "body": "/",
+        },
+        {
+            "title": "退出当前层" if is_zh else "Exit current layer",
+            "body": "Esc",
+        },
+        {
+            "title": "巡游控制" if is_zh else "Cruise controls",
+            "body": (
+                "从 HUD 启动巡游，系统层打开时会自动暂停。"
+                if is_zh
+                else "Start cruise from the HUD. It pauses automatically when the system overlay opens."
+            ),
+        },
+    ]
+    return "\n".join(
+        "\n".join(
+            [
+                '<article class="universe-guide-card universe-shortcut-card">',
+                f"  <strong>{escape(card['title'])}</strong>",
+                f'  <p class="universe-copy-muted">{escape(card["body"])}</p>',
                 "</article>",
             ]
         )
@@ -392,6 +496,37 @@ def shared_shell(
             **shell_data_defaults(active_locale),
             "toggleLabel": toggle_label,
         },
+    )
+
+
+def _portal_universe_document(
+    title: str,
+    body: str,
+    *,
+    locale: str,
+    page_data: object,
+    route_kind: str,
+    script_names: list[str] | None = None,
+    style_names: list[str] | None = None,
+) -> str:
+    active_locale = _normalize_locale(locale)
+    style_tags = "".join(
+        f'<link rel="stylesheet" href="{_asset_url(style_name)}" />' for style_name in style_names or []
+    )
+    script_tags = "".join(
+        f'<script src="{_asset_url(script_name)}"></script>' for script_name in script_names or []
+    )
+    return _render_html_template(
+        "portal-universe-shell.html",
+        HTML_LANG=_html_lang(active_locale),
+        ACTIVE_LOCALE=active_locale,
+        TITLE=title,
+        LOGO_MARK_DATA_URI=_logo_mark_data_uri(),
+        BODY=body,
+        PAGE_DATA=_json_script_payload(page_data),
+        SCRIPT_TAGS=script_tags,
+        STYLE_TAGS=style_tags,
+        ROUTE_KIND=route_kind,
     )
 
 
@@ -440,34 +575,68 @@ def portal_html(
 ) -> str:
     active_locale = _normalize_locale(locale)
     is_zh = active_locale == "zh"
-    page = page if page in {"home", "search", "entry", "submit", "tutorial"} else "home"
-    nav = _public_nav(active_locale, page=page)
-    page_title = _portal_page_title(page, is_zh=is_zh, entry_name=entry_name)
-    subtitles = {
-        "home": "搜索" if is_zh else "Search",
-        "search": "全文搜索" if is_zh else "Full-text search",
-        "entry": "正式条目" if is_zh else "Canonical entry",
-        "submit": "提交入口" if is_zh else "Submit",
-        "tutorial": "接入" if is_zh else "Access",
-    }
+    page = page if page in {"home", "search", "entry", "submit", "tutorial", "graph"} else "home"
+    page_title = ("知识宇宙" if is_zh else "Knowledge universe") if page == "graph" else _portal_page_title(
+        page, is_zh=is_zh, entry_name=entry_name
+    )
+    initial_intent = {
+        "home": "roaming",
+        "search": "survey",
+        "entry": "entry",
+        "submit": "submit",
+        "tutorial": "tutorial",
+        "graph": "roaming",
+    }[page]
+    page_preset = "immersive" if page == "graph" else "default"
     common = {
-        "LOGO_INLINE": _logo_inline(),
         "KNOWLEDGE_NAME": knowledge_name,
         "INSTANCE_NAME": instance_name,
-        "ACTIVE_LOCALE": active_locale,
+        "PAGE_KIND": page,
+        "PAGE_PRESET": page_preset,
         "PAGE_TITLE": page_title,
-        "PAGE_TITLE_CLASS": "page-title sr-only" if page == "home" else "page-title",
-        "PAGE_KICKER": subtitles[page],
+        "LOGO_MARK": _logo_mark_svg(),
+        "UNIVERSE_TITLE": "Knowledge Universe" if not is_zh else "知识宇宙",
+        "UTILITY_SYSTEM_LABEL": "打开系统层" if is_zh else "Open system overlay",
+        "UTILITY_SYSTEM_TOGGLE": "系统" if is_zh else "System",
+        "UTILITY_LOCALE_LABEL": "切换语言" if is_zh else "Switch language",
+        "UTILITY_LOCALE_TOGGLE": "EN" if is_zh else "中",
+        "UTILITY_THEME_LABEL": "切换主题" if is_zh else "Switch theme",
+        "UTILITY_THEME_DARK": "Night" if not is_zh else "夜航",
+        "UTILITY_THEME_LIGHT": "Dawn" if not is_zh else "曙光",
+        "INTRO_LABEL": "请探索这片知识宇宙" if is_zh else "Explore this knowledge universe",
+        "INTRO_HINT": (
+            "首次抵达时，会有一颗缓慢自转的知识星球停留在视野右下角。"
+            if is_zh
+            else "On first arrival, a slowly rotating knowledge planet will settle into the lower-right of the view."
+        ),
+        "INTRO_PHASE_VOID": "静默抵达" if is_zh else "Silent arrival",
+        "INTRO_REPLAY_LABEL": "再次播放开场" if is_zh else "Replay intro",
+        "HUD_TOGGLE_LABEL": "展开 HUD" if is_zh else "Expand HUD",
+        "HUD_SEARCH_LABEL": "搜索" if is_zh else "Search",
+        "HUD_CLEAR_LABEL": "清屏" if is_zh else "Clear",
+        "HUD_CRUISE_LABEL": "巡游" if is_zh else "Cruise",
+        "HUD_SUBMIT_LABEL": "投放种子" if is_zh else "Seed",
+        "HUD_TUTORIAL_LABEL": "教程" if is_zh else "Guide",
+        "HUD_SYSTEM_LABEL": "系统层" if is_zh else "System",
+        "SURVEY_TITLE": "战略星图" if is_zh else "Survey map",
+        "SURVEY_HINT": (
+            "平移、缩放并点选目标星球。确认后会触发长距离运镜。"
+            if is_zh
+            else "Pan, zoom, and select a target planet. Confirming it launches a long-range flight."
+        ),
         "SEARCH_PLACEHOLDER": (
             "搜索概念、规则、经验，比如：热备份 泄洪 暗流"
             if is_zh
             else "Search concepts, rules, or lessons. Example: hot backup failover stream"
         ),
         "SEARCH_BUTTON_LABEL": "搜索" if is_zh else "Search",
-        "STATS_TITLE": "知识库统计" if is_zh else "Knowledge base stats",
-        "UPDATES_TITLE": "最近更新" if is_zh else "Recent updates",
-        "ENTRY_SIGNALS_TITLE": "条目信号" if is_zh else "Entry signals",
+        "SURVEY_CLOSE_LABEL": "返回宇宙" if is_zh else "Back to universe",
+        "SPATIAL_CARD_LABEL": "空间阅读窗" if is_zh else "Spatial reader",
+        "SPATIAL_CARD_EXPAND_LABEL": "展开全文" if is_zh else "Expand",
+        "SPATIAL_CARD_COLLAPSE_LABEL": "收起全文" if is_zh else "Collapse",
+        "SPATIAL_CARD_CLOSE_LABEL": "关闭" if is_zh else "Close",
         "ENTRY_SECTIONS_TITLE": "结构化分区" if is_zh else "Structured sections",
+        "ENTRY_SIGNALS_TITLE": "条目信号" if is_zh else "Entry signals",
         "ENTRY_BODY_TITLE": "Markdown 正文" if is_zh else "Markdown body",
         "TEXT_SUBMISSION_TITLE": "文本意见" if is_zh else "Text feedback",
         "TEXT_SUBMISSION_NOTE": (
@@ -495,6 +664,56 @@ def portal_html(
         "FILE_PICKER_SELECTED_PREFIX": "已选择" if is_zh else "Selected",
         "FILE_PICKER_SELECTED_SUFFIX": "个文件" if is_zh else "files",
         "SUBMIT_FILE_BUTTON": "上传文档" if is_zh else "Upload documents",
+        "SUBMIT_PANEL_TITLE": "知识种子投放" if is_zh else "Knowledge seed intake",
+        "SUBMIT_PANEL_CLOSE": "返回宇宙" if is_zh else "Back to universe",
+        "SUBMIT_ACTION_RETURN": "返回宇宙" if is_zh else "Back to universe",
+        "SUBMIT_ACTION_CONTINUE": "继续补充" if is_zh else "Continue editing",
+        "SUBMIT_ACTION_FOCUS": "飞向相关区域" if is_zh else "Fly to related region",
+        "TUTORIAL_PANEL_TITLE": "人类使用者教程" if is_zh else "Human user guide",
+        "TUTORIAL_PANEL_CLOSE": "返回宇宙" if is_zh else "Back to universe",
+        "SYSTEM_PANEL_TITLE": "系统层" if is_zh else "System overlay",
+        "SYSTEM_PANEL_HINT": (
+            "在这里收束语言、主题、动画、预算、快捷键与帮助。"
+            if is_zh
+            else "Manage language, theme, motion, budget, shortcuts, and help from one place."
+        ),
+        "SYSTEM_PANEL_CLOSE": "关闭系统层" if is_zh else "Close system overlay",
+        "SYSTEM_SETTINGS_TITLE": "界面设置" if is_zh else "Interface settings",
+        "SYSTEM_LANGUAGE_LABEL": "语言" if is_zh else "Language",
+        "SYSTEM_LANGUAGE_HINT": (
+            "切换当前前台界面的显示语言。"
+            if is_zh
+            else "Switch the current portal language."
+        ),
+        "SYSTEM_THEME_LABEL": "主题" if is_zh else "Theme",
+        "SYSTEM_THEME_HINT": (
+            "控制宇宙壳层的明暗外观。"
+            if is_zh
+            else "Choose the visual shell of the universe."
+        ),
+        "SYSTEM_MOTION_LABEL": "运动" if is_zh else "Motion",
+        "SYSTEM_MOTION_HINT": (
+            "Reduced motion 会压缩开场和飞行动画。"
+            if is_zh
+            else "Reduced motion shortens the intro and flight transitions."
+        ),
+        "SYSTEM_MOTION_FULL": "完整演出" if is_zh else "Full motion",
+        "SYSTEM_MOTION_REDUCED": "减少动画" if is_zh else "Reduced motion",
+        "SYSTEM_BUDGET_LABEL": "预算" if is_zh else "Budget",
+        "SYSTEM_BUDGET_HINT": (
+            "切换首页星图规模和沉浸层级。"
+            if is_zh
+            else "Control the home graph scale and immersion level."
+        ),
+        "SYSTEM_BUDGET_SAFE": "安全" if is_zh else "Safe",
+        "SYSTEM_BUDGET_STANDARD": "标准" if is_zh else "Standard",
+        "SYSTEM_BUDGET_IMMERSIVE": "沉浸" if is_zh else "Immersive",
+        "SYSTEM_RUNTIME_TITLE": "运行模式" if is_zh else "Runtime profile",
+        "SYSTEM_RUNTIME_MODE_LABEL": "当前模式" if is_zh else "Current mode",
+        "SYSTEM_SHORTCUTS_TITLE": "快捷键与控制" if is_zh else "Shortcuts and controls",
+        "SYSTEM_SHORTCUTS": _portal_system_shortcuts(active_locale),
+        "SYSTEM_HELP_TITLE": "帮助与宇宙语义" if is_zh else "Help and universe semantics",
+        "HELP_SECTIONS": _portal_help_sections(active_locale),
         "MCP_TITLE": "通过 MCP 接入" if is_zh else "Connect via MCP",
         "MCP_INTRO": _tutorial_tip(
             (
@@ -567,73 +786,50 @@ def portal_html(
             if is_zh
             else "$CODEX_HOME/skills/ or your agent runtime's skills directory"
         ),
-        "SKILL_DOWNLOADS": _tutorial_skill_cards(active_locale),
-        "GRAPH_HERO_TITLE": "知识宇宙" if is_zh else "Knowledge universe",
-        "GRAPH_HERO_NOTE": (
-            "不是全量知识图，而是知识从碎片里持续迸发、汇聚、稳定下来的那一刻。"
-            if is_zh
-            else "Not the full knowledge map, but the moment when knowledge bursts from fragments, gathers, and settles."
-        ),
-        "GRAPH_FRAME_TITLE": "知识磁场" if is_zh else "Knowledge field",
-        "GRAPH_FRAME_NOTE": (
-            "ingest 会把新知识抛入场中，explore / tidy 会唤醒既有碎片，把它们压缩成新的通路与知识节点。"
-            if is_zh
-            else "Ingest throws new knowledge into the field, while explore and tidy awaken fragments and compress them into new routes and nodes."
-        ),
-        "GRAPH_CAPTION": (
-            "你看到的不是库存，而是最近仍然有能量的知识形成过程。"
-            if is_zh
-            else "This surface shows knowledge while it is still alive with formation energy, not the full inventory."
-        ),
-        "GRAPH_STORY_TITLE": "最近形成的场" if is_zh else "Formation field",
-        "GRAPH_STORY_BODY": (
-            "灰线是尚弱的关联，脉冲通路表示近期提问或治理动作正在把知识压缩成更稳定的结构。"
-            if is_zh
-            else "Gray links are weak affinities; pulsing routes show recent questions or governance actions compressing knowledge into more stable structures."
-        ),
-        "LEGEND_WEAK": "弱连接" if is_zh else "Weak affinity",
-        "LEGEND_ACTIVE": "强化通路" if is_zh else "Reinforced route",
-        "LEGEND_FORMING": "正在形成" if is_zh else "Forming knowledge",
-        "LEGEND_STABLE": "稳定节点" if is_zh else "Stable knowledge",
-        "STATS_TITLE": "知识概览" if is_zh else "Knowledge snapshot",
-        "GRAPH_STATS_TITLE": "宇宙脉冲" if is_zh else "Universe pulse",
-        "STAT_NODES": "节点" if is_zh else "Nodes",
-        "STAT_EDGES": "连线" if is_zh else "Edges",
-        "STAT_COVERAGE": "聚类覆盖" if is_zh else "Cluster coverage",
-        "STAT_INSIGHTS": "候选知识" if is_zh else "Insight proposals",
-        "OPEN_GRAPH_LINK": _nav_link(
-            "展开宇宙" if is_zh else "Open universe",
-            _localized_path("/portal/graph-view", active_locale),
-            variant="action",
-        ),
-        "GRAPH_EXPAND_LABEL": "展开宇宙" if is_zh else "Open universe",
+        "TUTORIAL_DECISION_CARDS": _tutorial_decision_cards(active_locale),
+        "TUTORIAL_TOOL_CARDS": _tutorial_mcp_tool_cards(active_locale),
+        "TUTORIAL_AGENT_GUIDES": _tutorial_agent_guides(active_locale),
+        "TUTORIAL_DOWNLOADS": _tutorial_skill_cards(active_locale),
         "GRAPH_MODAL_TITLE": "知识详情" if is_zh else "Knowledge detail",
         "GRAPH_MODAL_CLOSE": "关闭" if is_zh else "Close",
-        **nav,
-    }
-    templates = {
-        "home": "portal-home-body.html",
-        "search": "portal-search-body.html",
-        "entry": "portal-entry-body.html",
-        "submit": "portal-submit-body.html",
-        "tutorial": "portal-tutorial-body.html",
-    }
-    body = _render_html_template(
-        templates[page],
-        **common,
-        ENTRY_NAME=entry_name,
-        ATTRIBUTION=(
+        "OPEN_QUARTZ_LINK": _universe_link(
+            "打开 Quartz" if is_zh else "Open Quartz",
+            _localized_path("/quartz/", active_locale),
+            emphasis="quiet",
+            new_tab=True,
+        ),
+        "ATTRIBUTION": (
             (
                 f"已识别登录身份：{current_user['name']} ({current_user['role']})"
                 if is_zh
                 else f"Authenticated as {current_user['name']} ({current_user['role']})"
             )
             if current_user
-            else ("当前将以匿名方式提交。" if is_zh else "This submission will be anonymous by default.")
+            else ("当前为匿名探索状态。" if is_zh else "Exploring anonymously.")
         ),
+        "DESKTOP_ONLY_TITLE": "请使用电脑端访问" if is_zh else "Please use a desktop",
+        "DESKTOP_ONLY_BODY": (
+            "知识宇宙 v2 当前仅面向桌面端。请使用电脑浏览器继续探索。"
+            if is_zh
+            else "Knowledge Universe v2 currently targets desktop browsers only. Please continue on a desktop browser."
+        ),
+        "SOUND_PROMPT": "点击后启用声音" if is_zh else "Tap to enable sound",
+        "SOUND_MUTE_LABEL": "静音" if is_zh else "Mute",
+        "SOUND_UNMUTE_LABEL": "声音" if is_zh else "Sound",
+        "CRUISE_SUMMARY_KICKER": "巡游" if is_zh else "Cruise",
+        "CRUISE_ACTION_PAUSE": "暂停" if is_zh else "Pause",
+        "CRUISE_ACTION_NEXT": "下一站" if is_zh else "Next",
+        "CRUISE_ACTION_EXIT": "退出巡游" if is_zh else "Exit cruise",
+    }
+    body = _render_html_template(
+        "portal-universe-body.html",
+        **common,
     )
     page_data = {
-        "pageKind": page,
+        "pageKind": "universe",
+        "routeKind": page,
+        "pagePreset": page_preset,
+        "initialIntent": initial_intent,
         "initialQuery": initial_query,
         "entryName": entry_name,
         "knowledgeName": knowledge_name,
@@ -644,6 +840,24 @@ def portal_html(
             "submit": _localized_path("/submit", active_locale),
             "entryPrefix": "/entries/",
             "quartz": _localized_path("/quartz/", active_locale),
+            "graph": _localized_path("/portal/graph-view", active_locale),
+        },
+        "preferences": {
+            "themeStorageKey": f"sediment-universe-theme:{knowledge_name}",
+            "reducedMotionStorageKey": f"sediment-universe-motion:{knowledge_name}",
+            "budgetStorageKey": f"sediment-universe-budget:{knowledge_name}",
+            "defaultTheme": "midnight",
+            "defaultReducedMotion": False,
+            "defaultBudget": "standard",
+            "themeLabels": {
+                "midnight": "Night" if not is_zh else "夜航",
+                "dawn": "Dawn" if not is_zh else "曙光",
+            },
+            "budgetLabels": {
+                "safe": "安全" if is_zh else "Safe",
+                "standard": "标准" if is_zh else "Standard",
+                "immersive": "沉浸" if is_zh else "Immersive",
+            },
         },
         "ui": {
             "formal_entries": "正式条目" if is_zh else "Formal entries",
@@ -651,7 +865,7 @@ def portal_html(
             "indexes": "索引" if is_zh else "Indexes",
             "pending": "待处理收件" if is_zh else "Pending inbox items",
             "health": "治理问题" if is_zh else "Health issues",
-            "home_ready": "知识库已就绪。" if is_zh else "Knowledge base ready.",
+            "home_ready": "知识宇宙已就绪。" if is_zh else "Knowledge universe ready.",
             "search_placeholder": (
                 "搜索概念、规则、经验，比如：热备份 泄洪 暗流"
                 if is_zh
@@ -687,11 +901,37 @@ def portal_html(
             "submit_file_busy": "上传中..." if is_zh else "Uploading...",
             "file_required": "请先选择文件、压缩包或文件夹" if is_zh else "Select a file, folder, or archive first.",
             "file_read_error": "读取文件失败" if is_zh else "Failed to read file.",
-            "submit_text_success": "文本意见已提交，item_id=" if is_zh else "Text feedback submitted, item_id=",
-            "submit_file_success": "文档已暂存，item_id=" if is_zh else "Document staged, item_id=",
+            "submit_text_success": "已记录这条知识种子。" if is_zh else "This knowledge seed has been recorded.",
+            "submit_file_success": "已暂存文档种子。" if is_zh else "The document seed has been staged.",
             "submitted_text_prefix": "已提交文本意见：" if is_zh else "Submitted text feedback: ",
             "submitted_file_prefix": "已暂存文档：" if is_zh else "Staged document: ",
+            "submission_receipt_prefix": "收件编号" if is_zh else "Receipt",
+            "submission_target_prefix": "候选关联" if is_zh else "Suggested focus",
+            "submit_action_focus": "飞向相关区域" if is_zh else "Fly to related region",
             "unknown_error": "未知错误" if is_zh else "Unknown error",
+            "entry_loading": "知识正在驶入阅读窗..." if is_zh else "Knowledge is moving into the reader...",
+            "entry_related": "关联知识" if is_zh else "Related knowledge",
+            "entry_aliases": "别名" if is_zh else "Aliases",
+            "entry_sources": "来源" if is_zh else "Sources",
+            "entry_section_empty": "暂无结构化分区" if is_zh else "No structured sections yet.",
+            "entry_validation": "校验线索" if is_zh else "Validation cues",
+            "help_hint": "系统层会解释操作方式、天体含义、搜索与巡游逻辑。" if is_zh else "The system overlay explains controls, celestial types, search, and cruise logic.",
+            "survey_prompt": "输入关键词后，匹配到的星球会在星图中亮起。" if is_zh else "Type a query and matching planets will light up inside the map.",
+            "survey_empty": "当前没有匹配到星球。" if is_zh else "No planets match the current query.",
+            "tutorial_intro": "教程面板主要服务人类使用者，Agent 请继续走 MCP / Skill。" if is_zh else "The guide panel is for human users. Agents should continue through MCP / Skill.",
+            "submit_intro": "投放的是候选知识种子，它不会在通过前直接变成正式星球。" if is_zh else "You are submitting a candidate seed. It will not become a visible planet until it is reviewed.",
+            "desktop_only_title": "请使用电脑端访问" if is_zh else "Please use a desktop",
+            "desktop_only_body": (
+                "知识宇宙 v2 当前仅面向桌面端。请使用电脑浏览器继续探索。"
+                if is_zh
+                else "Knowledge Universe v2 currently targets desktop browsers only. Please continue on a desktop browser."
+            ),
+            "sound_enable": "点击后启用声音" if is_zh else "Tap to enable sound",
+            "sound_mute": "静音" if is_zh else "Mute sound",
+            "cruise_kicker": "巡游" if is_zh else "Cruise",
+            "cruise_pause": "暂停" if is_zh else "Pause",
+            "cruise_next": "下一站" if is_zh else "Next",
+            "cruise_exit": "退出巡游" if is_zh else "Exit cruise",
             "graph_modal_title": "知识详情" if is_zh else "Knowledge detail",
             "graph_modal_close": "关闭" if is_zh else "Close",
             "graph_event": "最近事件" if is_zh else "Recent event",
@@ -703,31 +943,64 @@ def portal_html(
             "graph_neighbor_nodes": "共同形成的邻近节点" if is_zh else "Nearby co-forming nodes",
             "graph_focus_empty": "当前还没有更多上下文。" if is_zh else "There is no additional context yet.",
             "graph_story_empty": "当前还没有足够强的形成事件。" if is_zh else "There are not enough strong formation events yet.",
+            "intro_phase_void": "静默抵达" if is_zh else "Silent arrival",
+            "intro_phase_approach": "跃迁接近" if is_zh else "Approach",
+            "intro_phase_lock": "锁定星体" if is_zh else "Locking focus",
+            "intro_phase_hud": "界面接入" if is_zh else "HUD online",
+            "runtime_mode_immersive": "沉浸模式" if is_zh else "Immersive mode",
+            "runtime_mode_standard": "标准模式" if is_zh else "Standard mode",
+            "runtime_mode_safe_fallback": "安全回退" if is_zh else "Safe fallback",
+            "cap_webgpu": "WebGPU",
+            "cap_worker": "Worker",
+            "cap_offscreen": "OffscreenCanvas",
+            "cap_pointer": "Pointer",
+            "cap_hover": "Hover",
+            "cap_reduced_motion": "Reduced motion",
+            "cap_available": "可用" if is_zh else "Available",
+            "cap_unavailable": "不可用" if is_zh else "Unavailable",
+            "public_type_stable": "稳定星体" if is_zh else "Stable constellation",
+            "public_type_forming": "形成中星体" if is_zh else "Forming constellation",
+            "public_type_question": "问题星座" if is_zh else "Question constellation",
+            "public_type_basin": "知识盆地" if is_zh else "Knowledge basin",
+            "public_type_navigation": "导航结构" if is_zh else "Navigation structure",
+            "public_status_stable": "已稳定" if is_zh else "Stable",
+            "public_status_forming": "形成中" if is_zh else "Forming",
+            "public_status_question": "等待回应" if is_zh else "Awaiting response",
+            "public_status_navigation": "导航锚点" if is_zh else "Navigation anchor",
         },
     }
-    shell_kwargs = {
-        "locale": active_locale,
-        "page_script_name": "portal.js",
-        "page_data": page_data,
-        "shell_variant": "portal",
-    }
-    if page == "home":
-        page_data.update(
-            {
-                "graphApi": _localized_path("/api/portal/graph", active_locale) + "&scene=home"
-                if "?" in _localized_path("/api/portal/graph", active_locale)
-                else _localized_path("/api/portal/graph", active_locale) + "?scene=home",
-                "graphKind": "portal",
-                "graphLocale": active_locale,
-                "graphScene": "home",
-            }
-        )
-        shell_kwargs["page_style_names"] = ["graph.bundle.css"]
-        shell_kwargs["extra_script_names"] = ["graph.bundle.js"]
-    return shared_shell(
+    page_data.update(
+        {
+            "graphApi": _localized_path("/api/portal/universe/graph", active_locale)
+            + (
+                "&scene=full"
+                if page_preset == "immersive" and "?" in _localized_path("/api/portal/universe/graph", active_locale)
+                else "?scene=full"
+                if page_preset == "immersive"
+                else ""
+            ),
+            "graphApiBase": _localized_path("/api/portal/universe/graph", active_locale),
+            "graphKind": "portal",
+            "graphLocale": active_locale,
+            "graphScene": "full" if page_preset == "immersive" else "home",
+            "graphBoot": "manual",
+            "bootstrapApi": _localized_path("/api/portal/universe/bootstrap", active_locale),
+            "searchApi": _localized_path("/api/portal/universe/search", active_locale),
+            "searchSuggestApi": _localized_path("/api/portal/universe/search/suggest", active_locale),
+            "nodeApiPrefix": "/api/portal/universe/node/",
+            "textSubmitApi": _localized_path("/api/portal/submissions/text", active_locale),
+            "fileSubmitApi": _localized_path("/api/portal/submissions/document", active_locale),
+            "mcpEndpoint": mcp_endpoint,
+        }
+    )
+    return _portal_universe_document(
         _document_title(page_title, knowledge_name),
         body,
-        **shell_kwargs,
+        locale=active_locale,
+        page_data=page_data,
+        route_kind=page,
+        script_names=["graph.bundle.js", "portal.js"],
+        style_names=["graph.bundle.css"],
     )
 
 
@@ -737,73 +1010,14 @@ def portal_graph_html(
     instance_name: str,
     locale: str,
     quartz: dict[str, object],
+    mcp_endpoint: str = "",
 ) -> str:
-    active_locale = _normalize_locale(locale)
-    is_zh = active_locale == "zh"
-    page_title = "知识宇宙" if is_zh else "Knowledge universe"
-    body = _render_html_template(
-        "portal-graph-body.html",
-        LOGO_INLINE=_logo_inline(),
-        KNOWLEDGE_NAME=knowledge_name,
-        INSTANCE_NAME=instance_name,
-        PAGE_TITLE=page_title,
-        GRAPH_HINT=(
-            "点击节点进入聚焦，再点背景回到漫游。"
-            if is_zh
-            else "Click a node to focus, then click the void to drift again."
-        ),
-        GRAPH_CAPTION=(
-            "这不是条目列表，而是最近仍在发光的知识形成瞬间。"
-            if is_zh
-            else "This is not a list of entries, but the moments of knowledge formation that still glow."
-        ),
-        MODAL_TITLE="知识详情" if is_zh else "Knowledge detail",
-        MODAL_CLOSE="关闭" if is_zh else "Close",
-        HOME_FLOAT_LINK=_nav_link(
-            "返回知识库" if is_zh else "Back to knowledge base",
-            _localized_path("/", active_locale),
-            variant="action",
-        ),
-        OPEN_QUARTZ_LINK=_nav_link(
-            "打开 Quartz" if is_zh else "Open Quartz",
-            _localized_path("/quartz/", active_locale),
-            variant="action",
-            new_tab=True,
-        ),
-    )
-    return shared_shell(
-        _document_title(page_title, knowledge_name),
-        body,
-        locale=active_locale,
-        page_script_name="graph.bundle.js",
-        page_style_names=["graph.bundle.css"],
-        page_data={
-            "graphApi": _localized_path("/api/portal/graph", active_locale) + "&scene=full"
-            if "?" in _localized_path("/api/portal/graph", active_locale)
-            else _localized_path("/api/portal/graph", active_locale) + "?scene=full",
-            "graphKind": "portal",
-            "graphLocale": active_locale,
-            "graphScene": "full",
-            "entryPrefix": "/entries/",
-            "ui": {
-                "graph_modal_title": "知识详情" if is_zh else "Knowledge detail",
-                "graph_modal_close": "关闭" if is_zh else "Close",
-                "graph_event": "最近事件" if is_zh else "Recent event",
-                "graph_focus_reason": "为什么出现在这里" if is_zh else "Why it appears here",
-                "graph_focus_summary": "当前摘要" if is_zh else "Current summary",
-                "graph_focus_hypothesis": "形成假设" if is_zh else "Formation hypothesis",
-                "graph_supporting_entries": "支撑知识" if is_zh else "Supporting knowledge",
-                "graph_trigger_queries": "触发问题" if is_zh else "Trigger queries",
-                "graph_neighbor_nodes": "共同形成的邻近节点" if is_zh else "Nearby co-forming nodes",
-                "graph_focus_empty": "当前还没有更多上下文。"
-                if is_zh
-                else "There is no additional context yet.",
-                "graph_story_empty": "当前还没有足够强的形成事件。"
-                if is_zh
-                else "There are not enough strong formation events yet.",
-            },
-        },
-        shell_variant="portal",
+    return portal_html(
+        knowledge_name=knowledge_name,
+        instance_name=instance_name,
+        locale=locale,
+        page="graph",
+        mcp_endpoint=mcp_endpoint,
     )
 
 

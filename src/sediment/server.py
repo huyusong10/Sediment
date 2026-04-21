@@ -86,7 +86,7 @@ from sediment.git_ops import (
 from sediment.i18n import tr
 from sediment.insights import fingerprint_actor
 from sediment.instances import user_state_root
-from sediment.kb import resolve_kb_document_path, split_frontmatter
+from sediment.kb import inventory, resolve_kb_document_path, split_frontmatter
 from sediment.llm_cli import AgentCliInvocation, build_cli_command, collect_output
 from sediment.package_data import read_asset_text, read_skill_text
 from sediment.platform_services import (
@@ -4158,6 +4158,7 @@ async def _portal_home_page(request):
             locale=_request_locale(request),
             page="home",
             initial_query=str(request.query_params.get("q", "")).strip(),
+            mcp_endpoint=_tutorial_mcp_endpoint(request),
         )
     )
 
@@ -4185,6 +4186,7 @@ async def _portal_graph_page(request):
                 runtime_dir=QUARTZ_RUNTIME_DIR,
                 site_dir=QUARTZ_SITE_DIR,
             ),
+            mcp_endpoint=_tutorial_mcp_endpoint(request),
         )
     )
 
@@ -4203,6 +4205,7 @@ async def _portal_search_page(request):
             locale=locale,
             page="search",
             initial_query=str(request.query_params.get("q", "")).strip(),
+            mcp_endpoint=_tutorial_mcp_endpoint(request),
         )
     )
 
@@ -4229,6 +4232,7 @@ async def _portal_entry_page(request):
             locale=locale,
             page="entry",
             entry_name=request.path_params["name"],
+            mcp_endpoint=_tutorial_mcp_endpoint(request),
         )
     )
 
@@ -4242,6 +4246,7 @@ async def _portal_submit_page(request):
             locale=locale,
             page="submit",
             current_user=_current_optional_user(request),
+            mcp_endpoint=_tutorial_mcp_endpoint(request),
         )
     )
 
@@ -4344,14 +4349,177 @@ async def _healthz(request):
     )
 
 
+def _portal_poetic_lines(locale: str) -> list[str]:
+    is_zh = str(locale).strip().lower().startswith("zh")
+    if is_zh:
+        openings = [
+            "请探索这片知识宇宙，",
+            "在这片知识星海里，",
+            "让问题穿过寂静的星群，",
+            "让你正在寻找的答案，",
+            "让尚未成形的知识，",
+            "从微弱的引力里，",
+            "在文明残响与冷光之间，",
+            "于深蓝与金色的边界上，",
+            "在尚未被命名的群星旁，",
+            "于缓慢自转的知识星球上，",
+        ]
+        endings = [
+            "去寻找仍在发光的知识。",
+            "去追踪那些仍在凝聚的线索。",
+            "让星图为你指出方向。",
+            "把碎片连成新的通路。",
+            "抵达一颗真正的知识星球。",
+            "看见答案如何在暗处成形。",
+            "让连接从远方依次亮起。",
+            "开始一次缓慢而清醒的航行。",
+            "在无垠里确认你的目标。",
+            f"继续驶向 {KNOWLEDGE_NAME}。",
+        ]
+        return [f"{opening}{ending}" for opening in openings for ending in endings]
+    openings = [
+        "Explore this knowledge universe,",
+        "Across this field of knowledge,",
+        "Let your question cross the quiet stars,",
+        "Some answers are already glowing,",
+        "Some knowledge is still condensing,",
+        "From weak gravity and patient light,",
+        "Between deep blue and civil gold,",
+        "At the edge of named and unnamed worlds,",
+        "Near a slowly turning knowledge planet,",
+        "Inside this vast mapped silence,",
+    ]
+    endings = [
+        "find the knowledge that is still alive.",
+        "follow the threads that are still condensing.",
+        "let the star map pull you toward a target.",
+        "turn fragments into a navigable route.",
+        "arrive at a concrete planet of thought.",
+        "watch an answer form in the dark.",
+        "see distant connections light up in sequence.",
+        "begin a patient and lucid voyage.",
+        "orient yourself inside the vastness.",
+        f"continue deeper into {KNOWLEDGE_NAME}.",
+    ]
+    return [f"{opening} {ending}" for opening in openings for ending in endings]
+
+
+def _portal_intro_candidates() -> list[dict[str, Any]]:
+    data = inventory(KB_PATH)
+    docs = list((data.get("docs") or {}).items())
+    candidates = []
+    for name, doc in docs:
+        if str(doc.get("kind") or "").strip() != "formal":
+            continue
+        status = str(doc.get("status") or "").strip()
+        if status not in {"fact", "inferred", "stable"}:
+            continue
+        candidates.append(
+            {
+                "name": name,
+                "title": doc.get("title") or name,
+                "summary": doc.get("summary") or "",
+                "entry_type": doc.get("entry_type") or "concept",
+                "aliases": list(doc.get("aliases") or []),
+                "graph_ref": f"entry::{name}",
+                "importance": int(doc.get("inbound_count") or 0),
+            }
+        )
+    candidates.sort(key=lambda item: (-int(item["importance"]), str(item["title"])))
+    return candidates[:24]
+
+
+def _universe_search_results(query: str) -> list[dict[str, Any]]:
+    return [
+        {
+            **item,
+            "graph_ref": f"entry::{item['name']}",
+        }
+        for item in search_kb(KB_PATH, query)
+    ]
+
+
+def _universe_search_suggestions(query: str) -> list[dict[str, Any]]:
+    return [
+        {
+            **item,
+            "graph_ref": f"entry::{item['name']}",
+        }
+        for item in search_kb_suggestions(KB_PATH, query)
+    ]
+
+
+def _graph_node_payload(node_ref: str) -> dict[str, Any]:
+    normalized = str(node_ref or "").strip()
+    if not normalized:
+        raise FileNotFoundError(node_ref)
+    if normalized.startswith("entry::") or "::" not in normalized:
+        entry_name = normalized.split("::", 1)[1] if "::" in normalized else normalized
+        detail = get_entry_detail(KB_PATH, entry_name)
+        return {
+            "node_ref": normalized if "::" in normalized else f"entry::{entry_name}",
+            "node_type": "canonical_entry",
+            "entry_name": entry_name,
+            "detail": detail,
+        }
+    payload = graph_payload(
+        KB_PATH,
+        store=_platform_store(),
+        graph_kind="portal",
+        scene="full",
+    )
+    for node in payload.get("nodes") or []:
+        if str(node.get("id") or "") == normalized:
+            return {
+                "node_ref": normalized,
+                "node_type": str(node.get("node_type") or ""),
+                "node": node,
+            }
+    raise FileNotFoundError(node_ref)
+
+
 async def _api_portal_home(request):
     store = _platform_store()
     return _json_response(get_portal_home(KB_PATH, store=store))
 
 
+async def _api_portal_universe_bootstrap(request):
+    locale = _request_locale(request)
+    return _json_response(
+        {
+            "home": get_portal_home(KB_PATH, store=_platform_store()),
+            "intro_candidates": _portal_intro_candidates(),
+            "poetic_lines": _portal_poetic_lines(locale),
+            "capabilities": {
+                "desktop_only": True,
+                "supports_touch_desktop": True,
+                "supports_audio": True,
+                "supports_cruise": True,
+                "supports_survey": True,
+                "supports_focus_reload": True,
+                "supports_system_overlay": True,
+                "supports_reduced_motion": True,
+                "supports_budget_switch": True,
+            },
+            "categories": [
+                "Stable Knowledge",
+                "Forming Knowledge",
+                "Question Constellations",
+                "Knowledge Basins",
+                "Navigation Structures",
+            ],
+        }
+    )
+
+
 async def _api_portal_search(request):
     query = request.query_params.get("q", "")
     return _json_response(search_kb(KB_PATH, query))
+
+
+async def _api_portal_universe_search(request):
+    query = request.query_params.get("q", "")
+    return _json_response({"query": query, "results": _universe_search_results(query)})
 
 
 async def _api_portal_search_suggest(request):
@@ -4364,6 +4532,16 @@ async def _api_portal_search_suggest(request):
     )
 
 
+async def _api_portal_universe_search_suggest(request):
+    query = request.query_params.get("q", "")
+    return _json_response(
+        {
+            "query": query,
+            "suggestions": _universe_search_suggestions(query),
+        }
+    )
+
+
 async def _api_portal_entry(request):
     try:
         payload = get_entry_detail(KB_PATH, request.path_params["name"])
@@ -4372,7 +4550,29 @@ async def _api_portal_entry(request):
     return _json_response(payload)
 
 
+async def _api_portal_universe_node(request):
+    try:
+        payload = _graph_node_payload(request.path_params["node_ref"])
+    except FileNotFoundError:
+        return _json_response({"error": "node not found"}, status=404)
+    return _json_response(payload)
+
+
 async def _api_portal_graph(request):
+    focus = str(request.query_params.get("focus", "")).strip() or None
+    scene = str(request.query_params.get("scene", "")).strip() or None
+    return _json_response(
+        graph_payload(
+            KB_PATH,
+            store=_platform_store(),
+            graph_kind="portal",
+            focus=focus,
+            scene=scene,
+        )
+    )
+
+
+async def _api_portal_universe_graph(request):
     focus = str(request.query_params.get("focus", "")).strip() or None
     scene = str(request.query_params.get("scene", "")).strip() or None
     return _json_response(
@@ -4430,6 +4630,7 @@ async def _api_portal_submit_text(request):
     return _json_response(
         {
             "id": record["id"],
+            "item_id": record["id"],
             "status": record["status"],
             "item": record,
         },
@@ -4485,6 +4686,7 @@ async def _api_portal_submit_document(request):
     return _json_response(
         {
             "id": record["id"],
+            "item_id": record["id"],
             "status": record["status"],
             "item": record,
         },
@@ -6412,9 +6614,14 @@ def create_starlette_app():
         Route("/api/admin/session", _api_admin_session_create, methods=["POST"]),
         Route("/api/admin/session", _api_admin_session_delete, methods=["DELETE"]),
         Route("/api/portal/home", _api_portal_home),
+        Route("/api/portal/universe/bootstrap", _api_portal_universe_bootstrap),
+        Route("/api/portal/universe/graph", _api_portal_universe_graph),
         Route("/api/portal/search", _api_portal_search),
+        Route("/api/portal/universe/search", _api_portal_universe_search),
         Route("/api/portal/search/suggest", _api_portal_search_suggest),
+        Route("/api/portal/universe/search/suggest", _api_portal_universe_search_suggest),
         Route("/api/portal/entries/{name:str}", _api_portal_entry),
+        Route("/api/portal/universe/node/{node_ref:str}", _api_portal_universe_node),
         Route("/api/portal/graph", _api_portal_graph),
         Route("/api/portal/submissions/text", _api_portal_submit_text, methods=["POST"]),
         Route("/api/portal/submissions/document", _api_portal_submit_document, methods=["POST"]),

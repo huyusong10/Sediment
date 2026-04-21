@@ -1,56 +1,28 @@
 import "./graph.css";
 
-import ForceGraph3D from "3d-force-graph";
-import * as THREE from "three";
-import SpriteText from "three-spritetext";
-
-const ROLE_COLORS = {
-  knowledge_basin: "#92d9ff",
-  fresh_ingest: "#6df3ff",
-  refreshed_entry: "#8ed1ff",
-  recent_canonical: "#90ffe0",
-  stable_canonical: "#7ceac8",
-  supporting_entry: "#aadfff",
-  forming_insight: "#ffbf72",
-  forming_context: "#ffd89e",
-  reinforced_query: "#ffae63",
-  segment_context: "#c8d4ff",
+const NODE_COLORS = {
+  cluster_anchor: "#84b9ff",
+  canonical_entry: "#f2c879",
+  insight_proposal: "#ffb36c",
+  query_cluster: "#8ed9ff",
+  index_segment: "#c2cffb",
 };
 
 const EDGE_COLORS = {
-  weak_affinity: "#7f90aa40",
-  ask_reinforcement: "#6de3ffcc",
-  supports: "#77ffc1cc",
-  routes_to: "#ffb56edd",
-  belongs_to_cluster: "#9cb4ff55",
+  weak_affinity: "rgba(119, 141, 181, 0.28)",
+  ask_reinforcement: "rgba(122, 222, 255, 0.78)",
+  supports: "rgba(126, 233, 188, 0.82)",
+  routes_to: "rgba(246, 195, 122, 0.82)",
+  belongs_to_cluster: "rgba(146, 167, 212, 0.24)",
 };
 
-const FORMATION_STAGE_LEVEL = {
+const STAGE_LEVEL = {
   dormant: 0.12,
-  stable: 0.28,
-  stirring: 0.56,
-  condensing: 0.74,
+  stable: 0.22,
+  stirring: 0.48,
+  condensing: 0.68,
   bursting: 1,
 };
-
-function readPageData() {
-  const script = document.getElementById("sediment-page-data");
-  if (!script) return {};
-  try {
-    return JSON.parse(script.textContent || "{}");
-  } catch (_error) {
-    return {};
-  }
-}
-
-function escapeHtml(value) {
-  return String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -66,855 +38,690 @@ function hashString(value) {
   return Math.abs(hash >>> 0);
 }
 
-function normalizeGraphData(payload) {
-  return {
-    nodes: Array.isArray(payload?.nodes) ? payload.nodes.map((node) => ({ ...node })) : [],
-    links: Array.isArray(payload?.edges)
-      ? payload.edges.map((edge, index) => ({
-          ...edge,
-          id: edge.id || `edge-${index}-${edge.source}-${edge.target}-${edge.edge_type || edge.kind || "link"}`,
-        }))
-      : [],
-  };
-}
-
-function roleColor(node) {
-  return ROLE_COLORS[node.visual_role] || ROLE_COLORS[node.node_type] || "#8fb4d9";
+function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 function edgeColor(edge) {
-  return EDGE_COLORS[edge.edge_type] || "#86a2c655";
+  return EDGE_COLORS[String(edge.edge_type || "").trim()] || "rgba(135, 156, 187, 0.32)";
+}
+
+function nodeColor(node) {
+  return NODE_COLORS[String(node.node_type || "").trim()] || "#9bc2ff";
 }
 
 function stageLevel(node) {
-  return FORMATION_STAGE_LEVEL[String(node.formation_stage || "").trim()] || 0.24;
+  return STAGE_LEVEL[String(node.formation_stage || "").trim()] || 0.3;
 }
 
-function nodeRadius(node, sceneMode) {
-  if (node.node_type === "cluster_anchor") return 8.8;
-  const energy = Number(node.energy || 0.25);
-  const stability = Number(node.stability || 0.4);
-  const stage = stageLevel(node);
-  const portalBoost = String(sceneMode || "").includes("portal") ? 0.35 : 0;
-  const base = node.node_type === "canonical_entry" ? 2.3 : 2.7;
-  return clamp(base + energy * 1.9 + stage * 1.25 + (1 - stability) * 0.65 + portalBoost, 2.2, 7.2);
-}
-
-function shouldShowLabel(node, sceneMode) {
-  if (node.node_type === "cluster_anchor") return false;
-  const energy = Number(node.energy || 0);
-  const recentness = Number(node.recentness || 0);
-  const stage = stageLevel(node);
-  if (String(sceneMode || "").includes("admin")) {
-    return energy >= 0.35 || recentness >= 0.45 || node.node_type === "insight_proposal";
-  }
-  return energy >= 0.44 || recentness >= 0.56 || stage >= 0.56 || ["insight_proposal", "canonical_entry"].includes(node.node_type);
-}
-
-function markdownHtml(text) {
-  const renderMarkdown = window.SedimentShell?.renderMarkdown;
-  if (typeof renderMarkdown === "function") {
-    return renderMarkdown(String(text || ""));
-  }
-  return `<pre>${escapeHtml(String(text || ""))}</pre>`;
-}
-
-function graphEventLabel(eventType, ui, locale) {
-  const labels = {
-    ask_reinforced:
-      locale === "zh"
-        ? "近期提问正在唤醒多条弱连接，并把它们压缩成更稳定的知识通路。"
-        : "Recent questions are waking up weak links and compressing them into a steadier route.",
-    proposal_materialized:
-      locale === "zh"
-        ? "多个碎片刚被压缩成一个新的隐性知识候选。"
-        : "Multiple fragments were just compressed into a new latent knowledge proposal.",
-    insight_promoted:
-      locale === "zh"
-        ? "这条知识刚刚稳定下来，进入了正式知识层。"
-        : "This knowledge just stabilized and entered the canonical layer.",
-    insight_merged:
-      locale === "zh"
-        ? "这条知识刚被并入既有的稳定结构。"
-        : "This knowledge was recently merged into an existing stable structure.",
-    ingest_created:
-      locale === "zh"
-        ? "新知识刚刚被抛入宇宙，正在发光并寻找新的连接。"
-        : "New knowledge was just thrown into the universe and is still glowing into place.",
-    ingest_updated:
-      locale === "zh"
-        ? "既有知识刚被刷新，周围的连接也被重新点亮。"
-        : "Existing knowledge was refreshed and nearby routes were lit up again.",
-  };
-  return labels[eventType] || ui.graph_story_empty || "";
-}
-
-function localizedNodeType(node, locale) {
-  const labels = {
-    canonical_entry: locale === "zh" ? "正式知识" : "Canonical knowledge",
-    insight_proposal: locale === "zh" ? "形成中的知识" : "Forming insight",
-    query_cluster: locale === "zh" ? "问题簇" : "Query cluster",
-    index_segment: locale === "zh" ? "索引片段" : "Index segment",
-    cluster_anchor: locale === "zh" ? "知识盆地" : "Knowledge basin",
-  };
-  return labels[String(node?.node_type || "").trim()] || String(node?.node_type || "");
-}
-
-function localizedState(node, locale) {
-  const raw = String(node?.status || node?.state || node?.formation_stage || "").trim();
-  const labels = {
-    fact: locale === "zh" ? "事实" : "Fact",
-    inferred: locale === "zh" ? "推理成立" : "Inferred",
-    proposed: locale === "zh" ? "待确认" : "Proposed",
-    observing: locale === "zh" ? "继续观察" : "Observing",
-    merged: locale === "zh" ? "已并入" : "Merged",
-    promoted: locale === "zh" ? "已提升" : "Promoted",
-    captured: locale === "zh" ? "已捕获" : "Captured",
-    stable: locale === "zh" ? "已稳定" : "Stable",
-    stirring: locale === "zh" ? "正在被唤醒" : "Awakening",
-    condensing: locale === "zh" ? "正在凝聚" : "Condensing",
-    bursting: locale === "zh" ? "正在迸发" : "Bursting",
-  };
-  return labels[raw] || raw;
-}
-
-function nodeReasonLabel(node, ui, locale) {
-  if (String(node.event_type || "").trim()) {
-    return graphEventLabel(node.event_type, ui, locale);
-  }
-  if (node.node_type === "canonical_entry") {
-    return locale === "zh"
-      ? "这是一条当前仍对附近知识形成有牵引力的稳定知识。"
-      : "This is a stable knowledge node that is still pulling nearby formation routes.";
-  }
-  if (node.node_type === "insight_proposal") {
-    return locale === "zh"
-      ? "这是一条仍在形成中的候选知识，尚未完全沉淀为正式知识。"
-      : "This is a forming insight proposal that has not yet settled into canonical knowledge.";
-  }
-  return locale === "zh"
-    ? "它正在当前的知识形成局部里承担连接或支撑作用。"
-    : "It is currently acting as connective or supporting context inside this formation pocket.";
-}
-
-function eventHeadline(node, locale) {
-  if (node?.event_type) {
-    const labels = {
-      ask_reinforced: locale === "zh" ? "连接强化中" : "Route reinforcing",
-      proposal_materialized: locale === "zh" ? "新知识凝聚中" : "Insight condensing",
-      insight_promoted: locale === "zh" ? "正式知识刚形成" : "Recently stabilized",
-      insight_merged: locale === "zh" ? "并入稳定结构" : "Merged into stable structure",
-      ingest_created: locale === "zh" ? "新知识喷发" : "New knowledge burst",
-      ingest_updated: locale === "zh" ? "知识刷新回响" : "Knowledge refreshed",
-    };
-    return labels[String(node.event_type || "")] || String(node.event_type || "");
-  }
-  return localizedState(node, locale);
-}
-
-function statusLabel(node, locale) {
-  return [localizedNodeType(node, locale), localizedState(node, locale)].filter(Boolean).join(" · ");
+function nodeRadius(node) {
+  if (node.node_type === "cluster_anchor") return 10;
+  return clamp(
+    5.5 +
+      Number(node.energy || 0) * 5.2 +
+      stageLevel(node) * 3.6 +
+      (1 - Number(node.stability || 0.6)) * 1.4,
+    5.2,
+    12.4,
+  );
 }
 
 function buildAdjacency(payload) {
-  const map = new Map();
   const nodes = Array.isArray(payload?.nodes) ? payload.nodes : [];
+  const edges = Array.isArray(payload?.edges) ? payload.edges : [];
   const nodeMap = new Map(nodes.map((node) => [String(node.id || ""), node]));
-  (Array.isArray(payload?.edges) ? payload.edges : []).forEach((edge) => {
+  const adjacency = new Map(nodes.map((node) => [String(node.id || ""), new Map()]));
+  edges.forEach((edge) => {
     const source = String(edge.source || "");
     const target = String(edge.target || "");
     if (!source || !target) return;
-    if (!map.has(source)) map.set(source, new Map());
-    if (!map.has(target)) map.set(target, new Map());
-    map.get(source).set(target, edge);
-    map.get(target).set(source, edge);
+    if (!adjacency.has(source)) adjacency.set(source, new Map());
+    if (!adjacency.has(target)) adjacency.set(target, new Map());
+    adjacency.get(source).set(target, edge);
+    adjacency.get(target).set(source, edge);
   });
-  return { adjacency: map, nodeMap };
+  return { nodeMap, adjacency };
 }
 
-function listToChips(items, className = "graph-focus-chip") {
-  const values = Array.isArray(items) ? items.filter(Boolean) : [];
-  if (!values.length) return "";
-  return `<div class="graph-focus-chip-row">${values.map((item) => `<span class="${className}">${escapeHtml(item)}</span>`).join("")}</div>`;
+function computeHopMap(rootId, adjacencyBundle, maxDepth = 3) {
+  const start = String(rootId || "");
+  if (!start) return new Map();
+  const hopMap = new Map([[start, 0]]);
+  const queue = [{ id: start, depth: 0 }];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || current.depth >= maxDepth) continue;
+    const neighbors = adjacencyBundle.adjacency.get(current.id);
+    if (!neighbors) continue;
+    neighbors.forEach((_edge, neighborId) => {
+      if (hopMap.has(neighborId)) return;
+      hopMap.set(neighborId, current.depth + 1);
+      queue.push({ id: neighborId, depth: current.depth + 1 });
+    });
+  }
+  return hopMap;
 }
 
-function listToBulletList(items) {
-  const values = Array.isArray(items) ? items.filter(Boolean) : [];
-  if (!values.length) return "";
-  return `<ul class="graph-focus-list">${values.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-}
-
-function computeNearbyNodes(node, payload, adjacencyBundle) {
-  const currentId = String(node?.id || "");
-  if (!currentId) return [];
-  const links = adjacencyBundle.adjacency.get(currentId);
-  if (!links) return [];
-  return Array.from(links.entries())
-    .map(([targetId, edge]) => ({
-      node: adjacencyBundle.nodeMap.get(targetId),
-      edge,
-    }))
-    .filter((item) => item.node && item.node.node_type !== "cluster_anchor")
-    .sort(
-      (left, right) =>
-        Number(right.edge?.activation || 0) - Number(left.edge?.activation || 0) ||
-        Number(right.node?.energy || 0) - Number(left.node?.energy || 0),
-    )
-    .slice(0, 6)
-    .map((item) => item.node?.label || item.node?.id || "")
+function focusBundle(rootNode, adjacencyBundle, depth = 1) {
+  const rootId = String(rootNode?.id || "");
+  if (!rootId) return { nodes: [], radius: 48, center: { x: 0, y: 0, z: 0 } };
+  const hopMap = computeHopMap(rootId, adjacencyBundle, depth);
+  const nodes = Array.from(hopMap.keys())
+    .map((id) => adjacencyBundle.nodeMap.get(id))
     .filter(Boolean);
-}
-
-function buildFocusBody(node, payload, pageData) {
-  const locale = pageData.graphLocale || document.documentElement.dataset.locale || "en";
-  const ui = pageData.ui || {};
-  const details = node.details || {};
-  const adjacencyBundle = buildAdjacency(payload);
-  const supportingEntries = Array.isArray(details.supporting_entries) ? details.supporting_entries : [];
-  const triggerQueries = Array.isArray(details.trigger_queries) ? details.trigger_queries : [];
-  const relatedLinks = Array.isArray(details.related_links) ? details.related_links : [];
-  const neighbors = computeNearbyNodes(node, payload, adjacencyBundle);
-  const summary = node.summary || details.proposed_answer || details.hypothesis || ui.graph_focus_empty || "";
-  const hypothesis = details.hypothesis || "";
-  const recentEvent = graphEventLabel(node.event_type, ui, locale);
-  const whyItMatters = nodeReasonLabel(node, ui, locale);
-  const mergedSupporting = [...supportingEntries, ...relatedLinks].filter(Boolean);
-
-  return `
-    <section class="graph-focus-section">
-      <div class="graph-focus-section-title">${escapeHtml(ui.graph_focus_reason || (locale === "zh" ? "为什么出现在这里" : "Why it appears here"))}</div>
-      <div class="graph-focus-copy">${markdownHtml(whyItMatters)}</div>
-    </section>
-    ${
-      recentEvent
-        ? `<section class="graph-focus-section">
-            <div class="graph-focus-section-title">${escapeHtml(ui.graph_event || (locale === "zh" ? "最近事件" : "Recent event"))}</div>
-            <div class="graph-focus-event">
-              <strong>${escapeHtml(eventHeadline(node, locale))}</strong>
-              <div class="subtle">${escapeHtml(recentEvent)}</div>
-            </div>
-          </section>`
-        : ""
-    }
-    <section class="graph-focus-section">
-      <div class="graph-focus-section-title">${escapeHtml(ui.graph_focus_summary || (locale === "zh" ? "当前摘要" : "Current summary"))}</div>
-      <div class="graph-focus-copy">${markdownHtml(summary || ui.graph_focus_empty || "")}</div>
-    </section>
-    ${
-      hypothesis
-        ? `<section class="graph-focus-section">
-            <div class="graph-focus-section-title">${escapeHtml(ui.graph_focus_hypothesis || (locale === "zh" ? "形成假设" : "Formation hypothesis"))}</div>
-            <div class="graph-focus-copy">${markdownHtml(hypothesis)}</div>
-          </section>`
-        : ""
-    }
-    ${
-      mergedSupporting.length
-        ? `<section class="graph-focus-section">
-            <div class="graph-focus-section-title">${escapeHtml(ui.graph_supporting_entries || (locale === "zh" ? "支撑知识" : "Supporting knowledge"))}</div>
-            ${listToChips(mergedSupporting)}
-          </section>`
-        : ""
-    }
-    ${
-      triggerQueries.length
-        ? `<section class="graph-focus-section">
-            <div class="graph-focus-section-title">${escapeHtml(ui.graph_trigger_queries || (locale === "zh" ? "触发问题" : "Trigger queries"))}</div>
-            ${listToBulletList(triggerQueries)}
-          </section>`
-        : ""
-    }
-    ${
-      neighbors.length
-        ? `<section class="graph-focus-section">
-            <div class="graph-focus-section-title">${escapeHtml(ui.graph_neighbor_nodes || (locale === "zh" ? "共同形成的邻近节点" : "Nearby co-forming nodes"))}</div>
-            ${listToChips(neighbors)}
-          </section>`
-        : ""
-    }
-  `;
-}
-
-function setupPortalFocusSheet(pageData, payload) {
-  const sheet = document.getElementById("portal-graph-focus");
-  if (!sheet) {
-    return { show() {}, hide() {} };
-  }
-  const titleNode = document.getElementById("portal-graph-focus-title");
-  const subtitleNode = document.getElementById("portal-graph-focus-subtitle");
-  const bodyNode = document.getElementById("portal-graph-focus-body");
-  const ui = pageData.ui || {};
-
-  function hide() {
-    sheet.hidden = true;
-  }
-
-  function show(node) {
-    if (!node || !titleNode || !subtitleNode || !bodyNode) return;
-    titleNode.textContent = String(node.label || node.id || ui.graph_modal_title || "");
-    subtitleNode.textContent = statusLabel(node, pageData.graphLocale || document.documentElement.dataset.locale || "en");
-    bodyNode.innerHTML = buildFocusBody(node, payload, pageData);
-    sheet.hidden = false;
-  }
-
-  if (!sheet.dataset.bound) {
-    sheet.dataset.bound = "true";
-    sheet.addEventListener("click", (event) => {
-      if (event.target.closest('[data-action="close-graph-focus"]')) hide();
-    });
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && !sheet.hidden) hide();
-    });
-  }
-
-  return { show, hide };
-}
-
-function createStarField(scene, sceneMode, ambientSeed) {
-  const geometry = new THREE.BufferGeometry();
-  const count = String(sceneMode || "").includes("immersive") ? 420 : 280;
-  const vertices = new Float32Array(count * 3);
-  const seedOffset = hashString(String(ambientSeed || sceneMode || "ambient"));
-  for (let index = 0; index < count; index += 1) {
-    const seed = hashString(`star:${seedOffset}:${index}`);
-    vertices[index * 3] = (seed % 280) - 140;
-    vertices[index * 3 + 1] = ((seed / 7) % 170) - 85;
-    vertices[index * 3 + 2] = ((seed / 13) % 280) - 140;
-  }
-  geometry.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
-  const material = new THREE.PointsMaterial({
-    color: 0xc7ecff,
-    size: String(sceneMode || "").includes("immersive") ? 1.24 : 1.02,
-    transparent: true,
-    opacity: 0.72,
-    depthWrite: false,
-  });
-  const points = new THREE.Points(geometry, material);
-  scene.add(points);
-  return points;
-}
-
-function createNodeParticles(node, radius, color, formationLevel, burstLevel) {
-  const particles = [];
-  const burstCount = burstLevel >= 0.55 ? 14 : 0;
-  const cloudCount = formationLevel >= 0.52 ? 9 : formationLevel >= 0.3 ? 5 : 2;
-
-  for (let index = 0; index < burstCount; index += 1) {
-    const seed = hashString(`${node.id}:burst:${index}`);
-    const particle = new THREE.Mesh(
-      new THREE.SphereGeometry(Math.max(0.16, radius * 0.12), 8, 8),
-      new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.78,
-        depthWrite: false,
-      }),
+  const center = nodes.reduce(
+    (accumulator, node) => ({
+      x: accumulator.x + Number(node.x || 0),
+      y: accumulator.y + Number(node.y || 0),
+      z: accumulator.z + Number(node.z || 0),
+    }),
+    { x: 0, y: 0, z: 0 },
+  );
+  center.x /= Math.max(nodes.length, 1);
+  center.y /= Math.max(nodes.length, 1);
+  center.z /= Math.max(nodes.length, 1);
+  const radius = nodes.reduce((maxRadius, node) => {
+    const distance = Math.hypot(
+      Number(node.x || 0) - center.x,
+      Number(node.y || 0) - center.y,
+      Number(node.z || 0) - center.z,
     );
-    particle.userData = {
-      mode: "burst",
-      orbit: (Math.PI * 2 * index) / burstCount,
-      phase: (seed % 100) / 100,
-      drift: 0.95 + ((seed % 41) / 41) * 1.15,
+    return Math.max(maxRadius, distance);
+  }, 42);
+  return { nodes, radius: Math.max(radius, 42), center };
+}
+
+function worldBounds(nodes) {
+  const safeNodes = Array.isArray(nodes) ? nodes : [];
+  const initial = {
+    minX: Infinity,
+    maxX: -Infinity,
+    minY: Infinity,
+    maxY: -Infinity,
+    minZ: Infinity,
+    maxZ: -Infinity,
+  };
+  const bounds = safeNodes.reduce((accumulator, node) => {
+    const x = Number(node.x || 0);
+    const y = Number(node.y || 0);
+    const z = Number(node.z || 0);
+    return {
+      minX: Math.min(accumulator.minX, x),
+      maxX: Math.max(accumulator.maxX, x),
+      minY: Math.min(accumulator.minY, y),
+      maxY: Math.max(accumulator.maxY, y),
+      minZ: Math.min(accumulator.minZ, z),
+      maxZ: Math.max(accumulator.maxZ, z),
     };
-    particles.push(particle);
-  }
+  }, initial);
+  const width = Math.max(bounds.maxX - bounds.minX, 120);
+  const height = Math.max(bounds.maxY - bounds.minY, 90);
+  return {
+    ...bounds,
+    width,
+    height,
+    centerX: bounds.minX + width / 2,
+    centerY: bounds.minY + height / 2,
+    centerZ: bounds.minZ + (bounds.maxZ - bounds.minZ) / 2,
+  };
+}
 
-  for (let index = 0; index < cloudCount; index += 1) {
-    const seed = hashString(`${node.id}:cloud:${index}`);
-    const particle = new THREE.Mesh(
-      new THREE.SphereGeometry(Math.max(0.1, radius * 0.09), 8, 8),
-      new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.3,
-        depthWrite: false,
-      }),
-    );
-    particle.userData = {
-      mode: "cloud",
-      orbit: (Math.PI * 2 * index) / Math.max(cloudCount, 1),
-      phase: (seed % 100) / 100,
-      drift: 0.42 + ((seed % 31) / 31) * 0.5,
+function shouldShowLabel(node, state, projection) {
+  if (node.node_type === "cluster_anchor") return false;
+  const id = String(node.id || "");
+  if (state.selectedNodeId) {
+    return state.hopMap.has(id);
+  }
+  if (state.searchMatches.size) {
+    return state.searchMatches.has(id);
+  }
+  const priority =
+    Number(node.energy || 0) +
+    Number(node.recentness || 0) +
+    stageLevel(node) +
+    Number(node.importance_rank || 0) * 0.04;
+  const inCenter =
+    projection.x >= projection.width * 0.25 &&
+    projection.x <= projection.width * 0.75 &&
+    projection.y >= projection.height * 0.25 &&
+    projection.y <= projection.height * 0.75;
+  return priority >= 1.32 || (inCenter && priority >= 0.62);
+}
+
+class CanvasGraphRuntime {
+  constructor(container, payload, options = {}) {
+    this.container = container;
+    this.payload = deepClone(payload);
+    this.options = options;
+    this.variant = options.variant || "portal";
+    this.sceneMode = options.sceneMode || (this.variant === "admin" ? "admin" : "portal");
+    this.motionProfile = options.motionProfile === "reduced" ? "reduced" : "full";
+    this.nodes = Array.isArray(this.payload.nodes) ? this.payload.nodes.map((node) => ({ ...node })) : [];
+    this.edges = Array.isArray(this.payload.edges)
+      ? this.payload.edges.map((edge, index) => ({
+          ...edge,
+          id: edge.id || `edge-${index}-${edge.source}-${edge.target}`,
+        }))
+      : [];
+    this.bounds = worldBounds(this.nodes);
+    this.adjacencyBundle = buildAdjacency({ nodes: this.nodes, edges: this.edges });
+    this.canvas = document.createElement("canvas");
+    this.canvas.className = "sediment-graph-canvas";
+    this.canvas.setAttribute("aria-hidden", "true");
+    this.container.textContent = "";
+    this.container.appendChild(this.canvas);
+    this.context = this.canvas.getContext("2d");
+    this.devicePixelRatio = Math.max(window.devicePixelRatio || 1, 1);
+    this.pointer = { x: 0, y: 0, down: false, dragging: false, startX: 0, startY: 0 };
+    this.starField = this.buildStarField(String(this.payload.ambient_seed || "ambient"));
+    this.hoveredNodeId = "";
+    this.selectedNodeId = "";
+    this.previewNodeId = "";
+    this.viewMode = "roam";
+    this.searchMatches = new Set();
+    this.hopMap = new Map();
+    this.animationFrame = 0;
+    this.disposed = false;
+    this.camera = {
+      x: this.bounds.centerX,
+      y: this.bounds.centerY,
+      zoom: 1,
+      tilt: 0.18,
     };
-    particles.push(particle);
+    this.targetCamera = { ...this.camera };
+    this.baseRoam = { x: this.bounds.centerX, y: this.bounds.centerY, zoom: 1, tilt: 0.18 };
+    this.baseSurvey = { x: this.bounds.centerX, y: this.bounds.centerY, zoom: 0.68, tilt: 0.02 };
+    this.resize = this.resize.bind(this);
+    this.tick = this.tick.bind(this);
+    this.onPointerMove = this.onPointerMove.bind(this);
+    this.onPointerDown = this.onPointerDown.bind(this);
+    this.onPointerUp = this.onPointerUp.bind(this);
+    this.onWheel = this.onWheel.bind(this);
+    this.bind();
+    this.setViewMode("roam", { immediate: true });
+    this.stageInitialNode();
+    this.resize();
+    this.tick();
   }
 
-  return particles;
-}
-
-function buildNodeObject(node, sceneMode, animatedNodes) {
-  const radius = nodeRadius(node, sceneMode);
-  const formationLevel = stageLevel(node);
-  const burstLevel = Number(node.burst_level || 0);
-  const recentness = Number(node.recentness || 0);
-  const color = new THREE.Color(roleColor(node));
-  const group = new THREE.Group();
-  const core = new THREE.Mesh(
-    new THREE.SphereGeometry(radius, 20, 20),
-    new THREE.MeshStandardMaterial({
-      color,
-      emissive: color.clone().multiplyScalar(0.68),
-      emissiveIntensity: clamp(0.82 + Number(node.energy || 0) * 0.9, 0.8, 1.95),
-      roughness: 0.28,
-      metalness: 0.08,
-      transparent: true,
-      opacity: node.node_type === "cluster_anchor" ? 0.28 : 0.98,
-    }),
-  );
-  const halo = new THREE.Mesh(
-    new THREE.SphereGeometry(radius * (node.node_type === "cluster_anchor" ? 2.4 : 2.9), 18, 18),
-    new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: node.node_type === "cluster_anchor" ? 0.08 : clamp(0.12 + formationLevel * 0.2 + recentness * 0.18, 0.12, 0.42),
-      side: THREE.BackSide,
-      depthWrite: false,
-    }),
-  );
-  const vapor = new THREE.Mesh(
-    new THREE.SphereGeometry(radius * (node.node_type === "cluster_anchor" ? 3.2 : 3.8), 16, 16),
-    new THREE.MeshBasicMaterial({
-      color,
-      transparent: true,
-      opacity: node.node_type === "cluster_anchor" ? 0.05 : clamp(0.05 + formationLevel * 0.14 + burstLevel * 0.16, 0.05, 0.28),
-      side: THREE.BackSide,
-      depthWrite: false,
-    }),
-  );
-  group.add(vapor, halo, core);
-
-  const particles = createNodeParticles(node, radius, color, formationLevel, burstLevel);
-  particles.forEach((particle) => group.add(particle));
-
-  let label = null;
-  if (shouldShowLabel(node, sceneMode)) {
-    label = new SpriteText(String(node.label || ""));
-    label.color = "#f5fbff";
-    label.textHeight = clamp(radius * 0.92, 2.6, 6.2);
-    label.padding = 2;
-    label.backgroundColor = "rgba(6, 13, 24, 0)";
-    label.position.set(0, radius * 2.75, 0);
-    group.add(label);
+  buildStarField(seed) {
+    const count = this.variant === "admin" ? 140 : 240;
+    return Array.from({ length: count }, (_value, index) => {
+      const hash = hashString(`${seed}:${index}`);
+      return {
+        x: (hash % 1000) / 1000,
+        y: ((hash / 11) % 1000) / 1000,
+        size: 0.4 + (((hash / 17) % 1000) / 1000) * 1.6,
+        alpha: 0.14 + (((hash / 23) % 1000) / 1000) * 0.56,
+        drift: (((hash / 29) % 1000) / 1000) * 0.08,
+      };
+    });
   }
 
-  animatedNodes.push({
-    node,
-    group,
-    core,
-    halo,
-    vapor,
-    particles,
-    label,
-    radius,
-    formationLevel,
-    burstLevel,
-    pulseOffset: (hashString(node.id) % 628) / 100,
-  });
-  return group;
-}
-
-function styleForceGraph(fg, sceneMode, payload) {
-  const scene = fg.scene();
-  scene.background = new THREE.Color(String(sceneMode || "").includes("admin") ? "#08131f" : "#050d17");
-  scene.fog = new THREE.FogExp2(scene.background, String(sceneMode || "").includes("immersive") ? 0.0058 : 0.0067);
-
-  const ambient = new THREE.AmbientLight(0xe0f5ff, 2.15);
-  const hemi = new THREE.HemisphereLight(0xb8e3ff, 0x040b13, 0.85);
-  const key = new THREE.DirectionalLight(0x6ddaff, 1.7);
-  key.position.set(28, 44, 32);
-  const fill = new THREE.PointLight(0xffbb72, 1.45, 420);
-  fill.position.set(-34, -18, -16);
-  scene.add(ambient, hemi, key, fill, createStarField(scene, sceneMode, payload.ambient_seed));
-
-  const controls = fg.controls();
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.enablePan = !String(sceneMode || "").includes("portal");
-  controls.minDistance = 72;
-  controls.maxDistance = String(sceneMode || "").includes("immersive") ? 520 : 430;
-  if (String(sceneMode || "").includes("portal")) {
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = String(sceneMode || "").includes("immersive") ? 0.18 : 0.12;
+  bind() {
+    this.container.addEventListener("pointermove", this.onPointerMove);
+    this.container.addEventListener("pointerdown", this.onPointerDown);
+    window.addEventListener("pointerup", this.onPointerUp);
+    this.container.addEventListener("wheel", this.onWheel, { passive: false });
+    window.addEventListener("resize", this.resize);
   }
 
-  fg
-    .backgroundColor("#000000")
-    .showNavInfo(false)
-    .nodeLabel((node) => escapeHtml(node.label || ""))
-    .linkColor((link) => edgeColor(link))
-    .linkOpacity((link) =>
-      clamp(
-        link.edge_type === "weak_affinity"
-          ? 0.08 + Number(link.activation || 0) * 0.18
-          : 0.22 + Math.max(Number(link.activation || 0), Number(link.pulse_level || 0)) * 0.62,
-        0.08,
-        0.96,
-      ),
-    )
-    .linkWidth((link) =>
-      clamp(
-        link.edge_type === "weak_affinity"
-          ? 0.35 + Number(link.strength || 0) * 0.85
-          : 0.9 + Number(link.strength || 0) * 2.1 + Number(link.pulse_level || 0) * 1.6,
-        0.25,
-        5.4,
-      ),
-    )
-    .linkCurvature((link) => (link.edge_type === "weak_affinity" ? 0 : clamp(Number(link.pulse_level || 0) * 0.12, 0.02, 0.22)))
-    .linkDirectionalParticles((link) => {
-      if (link.edge_type === "weak_affinity") return 0;
-      return clamp(Math.round(2 + Math.max(Number(link.activation || 0), Number(link.pulse_level || 0)) * 6), 2, 9);
-    })
-    .linkDirectionalParticleWidth((link) => clamp(0.8 + Number(link.pulse_level || link.activation || 0) * 2.8, 0.8, 4.4))
-    .linkDirectionalParticleSpeed((link) => clamp(0.0028 + Number(link.pulse_level || link.activation || 0) * 0.018, 0.0028, 0.032))
-    .linkDirectionalParticleColor((link) => edgeColor(link))
-    .nodeRelSize(1)
-    .d3VelocityDecay(String(sceneMode || "").includes("portal") ? 0.22 : 0.32)
-    .cooldownTicks(String(sceneMode || "").includes("immersive") ? 160 : String(sceneMode || "").includes("portal") ? 125 : 180)
-    .graphData(normalizeGraphData(payload));
-
-  try {
-    fg.resumeAnimation();
-  } catch (_error) {
-    // Some environments do not expose explicit animation controls.
+  prefersReducedMotion() {
+    return this.motionProfile === "reduced";
   }
-}
 
-function playbackRefs(event) {
-  const refs = new Set();
-  const subject = String(event?.subject_ref || "");
-  if (subject) refs.add(subject);
-  (Array.isArray(event?.related_refs) ? event.related_refs : []).forEach((item) => {
-    const value = String(item || "");
-    if (value) refs.add(value);
-  });
-  return refs;
-}
+  resize() {
+    const width = Math.max(this.container.clientWidth || 0, 320);
+    const height = Math.max(this.container.clientHeight || 0, 320);
+    this.width = width;
+    this.height = height;
+    this.canvas.width = Math.round(width * this.devicePixelRatio);
+    this.canvas.height = Math.round(height * this.devicePixelRatio);
+    this.canvas.style.width = `${width}px`;
+    this.canvas.style.height = `${height}px`;
+    this.context.setTransform(this.devicePixelRatio, 0, 0, this.devicePixelRatio, 0, 0);
+    this.baseScale =
+      Math.min(width / this.bounds.width, height / this.bounds.height) *
+      (this.viewMode === "survey" ? 0.82 : this.variant === "admin" ? 0.74 : 0.66);
+  }
 
-function animateGraph(fg, animatedNodes, payload, sceneMode, state) {
-  let rafId = 0;
-  const controls = fg.controls();
-  const renderer = fg.renderer();
-  const scene = fg.scene();
-  const camera = fg.camera();
-  const playbackEvents = Array.isArray(payload?.playback_events) ? payload.playback_events : [];
-  let playbackIndex = 0;
-  let playbackChangedAt = performance.now();
-  let lastCameraDrift = 0;
-
-  function currentPlayback(now) {
-    if (!playbackEvents.length || state.selectedNodeId) return null;
-    if (now - playbackChangedAt > 4200) {
-      playbackIndex = (playbackIndex + 1) % playbackEvents.length;
-      playbackChangedAt = now;
+  stageInitialNode() {
+    const candidate =
+      this.nodes.find((node) => String(node.id || "") === String(this.payload.focus_seed || "")) ||
+      this.nodes.find((node) => String(node.node_type || "") !== "cluster_anchor") ||
+      this.nodes[0];
+    if (candidate) {
+      this.previewNodeId = String(candidate.id || "");
+      this.centerOnNode(candidate, { select: false, immediate: true, depth: 1 });
     }
-    return playbackEvents[playbackIndex];
   }
 
-  function tick() {
-    if (state.disposed) return;
-    const nowMs = performance.now();
-    const now = nowMs / 1000;
-    const playback = currentPlayback(nowMs);
-    const playbackNodeIds = playback ? playbackRefs(playback) : new Set();
-
-    controls.autoRotate = String(sceneMode || "").includes("portal") && !state.selectedNodeId;
-    if (String(sceneMode || "").includes("immersive") && !state.selectedNodeId && nowMs - lastCameraDrift > 1800) {
-      lastCameraDrift = nowMs;
-      const drift = Math.sin(now * 0.12) * 8;
-      camera.position.y += drift * 0.02;
+  onPointerMove(event) {
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.x = event.clientX - rect.left;
+    this.pointer.y = event.clientY - rect.top;
+    if (this.pointer.down) {
+      const dx = this.pointer.x - this.pointer.startX;
+      const dy = this.pointer.y - this.pointer.startY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) this.pointer.dragging = true;
+      this.camera.x -= dx / Math.max(this.baseScale * this.camera.zoom, 0.001);
+      this.camera.y -= dy / Math.max(this.baseScale * this.camera.zoom, 0.001);
+      this.targetCamera.x = this.camera.x;
+      this.targetCamera.y = this.camera.y;
+      this.pointer.startX = this.pointer.x;
+      this.pointer.startY = this.pointer.y;
+      return;
     }
+    const hovered = this.pickNodeAt(this.pointer.x, this.pointer.y);
+    this.hoveredNodeId = hovered ? String(hovered.id || "") : "";
+    this.container.style.cursor = hovered ? "pointer" : this.pointer.down ? "grabbing" : "grab";
+  }
 
-    animatedNodes.forEach((entry) => {
-      const hovered = state.hoveredNodeId === entry.node.id;
-      const selected = state.selectedNodeId === entry.node.id;
-      const playbackHit = playbackNodeIds.has(String(entry.node.id || ""));
-      const recentness = Number(entry.node.recentness || 0);
-      const energy = Number(entry.node.energy || 0);
-      const stage = entry.formationLevel;
-      const burst = entry.burstLevel;
-      const emphasis = selected ? 1.6 : hovered ? 1.28 : playbackHit ? 1.22 : 1;
-      const haloPulse = 1 + Math.sin(now * (1.2 + burst * 1.1) + entry.pulseOffset) * (0.05 + stage * 0.06);
-      const corePulse = 1 + Math.sin(now * (2.6 + stage) + entry.pulseOffset) * (0.02 + burst * 0.07);
-      const vaporPulse = 1 + Math.sin(now * (0.8 + recentness) + entry.pulseOffset * 0.7) * (0.08 + stage * 0.12);
-      entry.halo.scale.setScalar(haloPulse * emphasis);
-      entry.core.scale.setScalar(corePulse * emphasis);
-      entry.vapor.scale.setScalar(vaporPulse * (selected ? 1.06 : 1));
-      entry.halo.material.opacity = clamp(
-        (entry.node.node_type === "cluster_anchor" ? 0.08 : 0.1) +
-          stage * 0.16 +
-          recentness * 0.16 +
-          burst * 0.18 +
-          (emphasis - 1) * 0.08,
-        0.08,
-        0.58,
-      );
-      entry.vapor.material.opacity = clamp(
-        (entry.node.node_type === "cluster_anchor" ? 0.05 : 0.04) + stage * 0.12 + burst * 0.16 + (playbackHit ? 0.08 : 0),
-        0.03,
-        0.32,
-      );
-      entry.core.material.emissiveIntensity = clamp(
-        0.74 + energy * 0.86 + recentness * 0.4 + (playbackHit ? 0.28 : 0) + (emphasis - 1) * 0.35,
-        0.7,
-        2.25,
-      );
-      if (entry.label) {
-        entry.label.textHeight = clamp(entry.radius * (selected ? 1.04 : 0.92), 2.6, 6.6);
-        entry.label.material.opacity = clamp(0.66 + recentness * 0.18 + (hovered || selected || playbackHit ? 0.18 : 0), 0.6, 1);
+  onPointerDown(event) {
+    event.preventDefault();
+    const rect = this.canvas.getBoundingClientRect();
+    this.pointer.down = true;
+    this.pointer.dragging = false;
+    this.pointer.startX = event.clientX - rect.left;
+    this.pointer.startY = event.clientY - rect.top;
+    this.container.style.cursor = "grabbing";
+  }
+
+  onPointerUp(event) {
+    if (!this.pointer.down) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    this.pointer.down = false;
+    this.container.style.cursor = "grab";
+    if (this.pointer.dragging) return;
+    const picked = this.pickNodeAt(x, y);
+    if (picked) {
+      this.selectNodeById(String(picked.id || ""));
+      return;
+    }
+    this.clearSelection();
+  }
+
+  onWheel(event) {
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? 0.94 : 1.06;
+    this.camera.zoom = clamp(this.camera.zoom * direction, 0.28, 4.2);
+    this.targetCamera.zoom = this.camera.zoom;
+  }
+
+  setViewMode(mode, options = {}) {
+    this.viewMode = mode === "survey" ? "survey" : mode === "cruise" ? "cruise" : "roam";
+    this.resize();
+    const target =
+      this.viewMode === "survey"
+        ? { ...this.baseSurvey }
+        : this.viewMode === "cruise"
+          ? { ...this.baseRoam, zoom: Math.max(this.baseRoam.zoom, 1.08), tilt: 0.22 }
+          : { ...this.baseRoam };
+    const immediate = Boolean(options.immediate) || this.prefersReducedMotion();
+    if (this.selectedNodeId) {
+      const node = this.adjacencyBundle.nodeMap.get(this.selectedNodeId);
+      if (node) {
+        this.centerOnNode(node, { select: true, notify: false, immediate });
+        return;
       }
-      entry.particles.forEach((particle, index) => {
-        if (particle.userData.mode === "burst") {
-          const orbit = particle.userData.orbit + now * particle.userData.drift + index * 0.04;
-          const distance = entry.radius * (2.2 + burst * 3.8 + (Math.sin(now * 2.4 + index) + 1) * 0.85);
-          particle.position.set(
-            Math.cos(orbit) * distance,
-            Math.sin(now * 1.65 + index) * entry.radius * (0.7 + burst * 0.7),
-            Math.sin(orbit) * distance,
-          );
-          particle.material.opacity = clamp(0.1 + burst * 0.55 + (playbackHit ? 0.12 : 0), 0.08, 0.92);
-        } else {
-          const orbit = particle.userData.orbit + now * particle.userData.drift;
-          const distance = entry.radius * (1.45 + stage * 1.85 + Math.sin(now * 1.1 + index) * 0.18);
-          particle.position.set(
-            Math.cos(orbit) * distance,
-            Math.sin(now * 0.8 + particle.userData.phase * Math.PI * 2) * entry.radius * (0.34 + stage * 0.56),
-            Math.sin(orbit) * distance,
-          );
-          particle.material.opacity = clamp(0.08 + stage * 0.24 + recentness * 0.12 + (playbackHit ? 0.08 : 0), 0.06, 0.5);
-        }
-      });
+    }
+    this.targetCamera = target;
+    if (immediate) this.camera = { ...target };
+  }
+
+  getViewMode() {
+    return this.viewMode;
+  }
+
+  centerOnNode(node, options = {}) {
+    const focus = focusBundle(node, this.adjacencyBundle, options.depth || 1);
+    const selectedZoom = clamp(
+      Math.min(this.width / (focus.radius * 4.1), this.height / (focus.radius * 3.5)) /
+        Math.max(this.baseScale, 0.001),
+      0.82,
+      this.viewMode === "survey" ? 1.6 : 2.6,
+    );
+    const target = {
+      x: focus.center.x,
+      y: focus.center.y,
+      zoom: this.viewMode === "survey" ? Math.max(selectedZoom, 1.1) : selectedZoom,
+      tilt: this.viewMode === "survey" ? 0.04 : this.viewMode === "cruise" ? 0.24 : 0.18,
+    };
+    this.targetCamera = target;
+    if (options.immediate || this.prefersReducedMotion()) this.camera = { ...target };
+    if (options.select) {
+      this.selectedNodeId = String(node.id || "");
+      this.previewNodeId = "";
+      this.hopMap = computeHopMap(this.selectedNodeId, this.adjacencyBundle, 3);
+      if (this.viewMode === "survey") {
+        this.viewMode = "roam";
+      }
+      if (options.notify !== false && typeof this.options.onSelect === "function") {
+        this.options.onSelect({ ...node });
+      }
+    }
+  }
+
+  selectNodeById(nodeId) {
+    const node = this.adjacencyBundle.nodeMap.get(String(nodeId || ""));
+    if (!node) return false;
+    this.centerOnNode(node, { select: true });
+    return true;
+  }
+
+  stageNodeById(nodeId) {
+    const node = this.adjacencyBundle.nodeMap.get(String(nodeId || ""));
+    if (!node) return false;
+    this.previewNodeId = String(node.id || "");
+    if (!this.selectedNodeId) {
+      this.centerOnNode(node, { select: false, immediate: this.prefersReducedMotion(), depth: 1 });
+    }
+    return true;
+  }
+
+  clearSelection() {
+    const hadSelection = Boolean(this.selectedNodeId);
+    this.selectedNodeId = "";
+    this.hopMap = new Map();
+    this.targetCamera = this.viewMode === "survey" ? { ...this.baseSurvey } : { ...this.baseRoam };
+    if (hadSelection && typeof this.options.onBackgroundSelect === "function") {
+      this.options.onBackgroundSelect();
+    }
+  }
+
+  setSearchMatches(matches) {
+    this.searchMatches = new Set((Array.isArray(matches) ? matches : []).map((item) => String(item || "")));
+  }
+
+  setMotionProfile(profile) {
+    this.motionProfile = profile === "reduced" ? "reduced" : "full";
+    if (this.prefersReducedMotion()) {
+      this.camera = { ...this.targetCamera };
+    }
+  }
+
+  nodesSnapshot() {
+    return this.nodes.map((node) => ({ ...node }));
+  }
+
+  project(node, camera = this.camera) {
+    const x = Number(node.x || 0);
+    const y = Number(node.y || 0);
+    const z = Number(node.z || 0);
+    const scale = this.baseScale * camera.zoom;
+    const dx = x - camera.x;
+    const dy = y - camera.y;
+    const dz = z - this.bounds.centerZ;
+    const tilt = camera.tilt;
+    return {
+      x: this.width / 2 + dx * scale + dz * scale * 0.08,
+      y: this.height / 2 + dy * scale * (this.viewMode === "survey" ? 0.92 : 0.84) - dz * scale * tilt * 0.24,
+      radius: nodeRadius(node) * clamp(scale / 11, 0.42, 1.36),
+      width: this.width,
+      height: this.height,
+    };
+  }
+
+  pickNodeAt(x, y) {
+    const candidates = this.nodes
+      .map((node) => ({ node, projection: this.project(node) }))
+      .filter(({ node }) => String(node.node_type || "") !== "cluster_anchor")
+      .sort((left, right) => right.projection.radius - left.projection.radius);
+    return (
+      candidates.find(({ projection }) => Math.hypot(projection.x - x, projection.y - y) <= projection.radius + 8)
+        ?.node || null
+    );
+  }
+
+  edgeOpacity(edge) {
+    const sourceId = String(edge.source || "");
+    const targetId = String(edge.target || "");
+    if (this.selectedNodeId) {
+      const leftHop = this.hopMap.get(sourceId);
+      const rightHop = this.hopMap.get(targetId);
+      if (leftHop == null || rightHop == null) return 0.025;
+      return clamp(0.88 - Math.min(leftHop, rightHop) * 0.24, 0.16, 0.9);
+    }
+    if (this.searchMatches.size && !this.searchMatches.has(sourceId) && !this.searchMatches.has(targetId)) {
+      return 0.04;
+    }
+    return clamp(0.16 + Number(edge.activation || 0) * 0.48 + Number(edge.pulse_level || 0) * 0.32, 0.08, 0.84);
+  }
+
+  edgeWidth(edge) {
+    const sourceId = String(edge.source || "");
+    const targetId = String(edge.target || "");
+    if (this.selectedNodeId) {
+      const leftHop = this.hopMap.get(sourceId);
+      const rightHop = this.hopMap.get(targetId);
+      if (leftHop == null || rightHop == null) return 0.8;
+      return clamp(2.9 - Math.min(leftHop, rightHop) * 0.72, 0.9, 3.2);
+    }
+    return clamp(0.8 + Number(edge.strength || 0) * 2.2 + Number(edge.pulse_level || 0) * 1.2, 0.6, 3.2);
+  }
+
+  nodeOpacity(node) {
+    const nodeId = String(node.id || "");
+    if (this.selectedNodeId) {
+      const hop = this.hopMap.get(nodeId);
+      if (hop == null) return 0.08;
+      return clamp(1 - hop * 0.28, 0.34, 1);
+    }
+    if (this.searchMatches.size && !this.searchMatches.has(nodeId)) return 0.24;
+    return 1;
+  }
+
+  drawStars(time) {
+    this.starField.forEach((star) => {
+      const x = (star.x + star.drift * Math.sin(time * 0.00012 + star.x * 9)) * this.width;
+      const y = (star.y + star.drift * Math.cos(time * 0.0001 + star.y * 12)) * this.height;
+      this.context.fillStyle = `rgba(235, 242, 255, ${star.alpha})`;
+      this.context.beginPath();
+      this.context.arc(x % this.width, y % this.height, star.size, 0, Math.PI * 2);
+      this.context.fill();
     });
-
-    controls.update();
-    renderer.render(scene, camera);
-    rafId = window.requestAnimationFrame(tick);
   }
 
-  rafId = window.requestAnimationFrame(tick);
-  return () => window.cancelAnimationFrame(rafId);
-}
-
-function updatePortalStats(payload) {
-  const statsNode = document.getElementById("portal-graph-stats");
-  if (!statsNode) return;
-  const stats = payload?.stats || {};
-  const values = [
-    String(stats.node_count || 0),
-    String(stats.edge_count || 0),
-    `${Math.round(Number(stats.cluster_coverage || 0) * 100)}%`,
-    String(stats.insight_count || 0),
-  ];
-  statsNode.querySelectorAll(".stat strong").forEach((node, index) => {
-    node.textContent = values[index] || "0";
-  });
-}
-
-function renderStory(payload, pageData, node = null) {
-  const locale = pageData.graphLocale || document.documentElement.dataset.locale || "en";
-  const ui = pageData.ui || {};
-  const captionNode = document.getElementById("portal-graph-caption");
-  const storyNode = document.getElementById("portal-graph-story");
-  const value = node ? nodeReasonLabel(node, ui, locale) : String(payload?.story_caption || ui.graph_story_empty || "");
-  if (captionNode) {
-    captionNode.textContent = value || ui.graph_story_empty || "";
+  drawEdges() {
+    this.edges.forEach((edge) => {
+      const source = this.adjacencyBundle.nodeMap.get(String(edge.source || ""));
+      const target = this.adjacencyBundle.nodeMap.get(String(edge.target || ""));
+      if (!source || !target) return;
+      const left = this.project(source);
+      const right = this.project(target);
+      const opacity = this.edgeOpacity(edge);
+      if (opacity <= 0.03) return;
+      const pulse = 0.14 * Math.sin(performance.now() * 0.003 + hashString(edge.id || "") / 10);
+      this.context.strokeStyle = edgeColor(edge).replace(/[\d.]+\)$/, `${clamp(opacity + pulse, 0.02, 0.92)})`);
+      this.context.lineWidth = this.edgeWidth(edge);
+      this.context.beginPath();
+      const curvature = Number(edge.pulse_level || 0) * 12;
+      const midX = (left.x + right.x) / 2 + curvature;
+      const midY = (left.y + right.y) / 2 - curvature * 0.25;
+      this.context.moveTo(left.x, left.y);
+      this.context.quadraticCurveTo(midX, midY, right.x, right.y);
+      this.context.stroke();
+    });
   }
-  if (storyNode) {
-    storyNode.textContent = value || ui.graph_story_empty || "";
+
+  drawNode(node, time) {
+    const projection = this.project(node);
+    const opacity = this.nodeOpacity(node);
+    const color = nodeColor(node);
+    const radius = projection.radius;
+    const highlight =
+      String(node.id || "") === this.selectedNodeId ||
+      String(node.id || "") === this.hoveredNodeId ||
+      this.searchMatches.has(String(node.id || ""));
+    const pulse = 1 + Math.sin(time * 0.002 + hashString(node.id || "") / 50) * (0.04 + stageLevel(node) * 0.07);
+
+    if (node.node_type === "cluster_anchor") {
+      this.context.strokeStyle = `rgba(148, 182, 238, ${0.18 * opacity})`;
+      this.context.lineWidth = 1.5;
+      this.context.beginPath();
+      this.context.arc(projection.x, projection.y, radius * 2.6 * pulse, 0, Math.PI * 2);
+      this.context.stroke();
+      return;
+    }
+
+    const halo = this.context.createRadialGradient(
+      projection.x,
+      projection.y,
+      radius * 0.2,
+      projection.x,
+      projection.y,
+      radius * 3.6 * pulse,
+    );
+    halo.addColorStop(0, `${color}B8`);
+    halo.addColorStop(0.32, `${color}32`);
+    halo.addColorStop(1, "rgba(0, 0, 0, 0)");
+    this.context.fillStyle = halo;
+    this.context.beginPath();
+    this.context.arc(projection.x, projection.y, radius * 3.6 * pulse, 0, Math.PI * 2);
+    this.context.fill();
+
+    this.context.fillStyle = color;
+    this.context.globalAlpha = opacity;
+    this.context.beginPath();
+    this.context.arc(projection.x, projection.y, radius * pulse, 0, Math.PI * 2);
+    this.context.fill();
+
+    this.context.strokeStyle = highlight ? "rgba(255, 244, 214, 0.72)" : "rgba(255, 255, 255, 0.24)";
+    this.context.lineWidth = highlight ? 2 : 1;
+    this.context.beginPath();
+    this.context.arc(projection.x, projection.y, radius * (highlight ? 1.18 : 1.04), 0, Math.PI * 2);
+    this.context.stroke();
+    this.context.globalAlpha = 1;
+
+    if (!shouldShowLabel(node, this, projection)) return;
+    const text = String(node.label || node.id || "");
+    const paddingX = 8;
+    const paddingY = 6;
+    this.context.font = `600 ${clamp(radius * 2.05, 12, 18)}px "IBM Plex Sans", "SF Pro Display", "Segoe UI", sans-serif`;
+    const textWidth = this.context.measureText(text).width;
+    const boxWidth = textWidth + paddingX * 2;
+    const boxHeight = clamp(radius * 2.1, 24, 34);
+    const boxX = projection.x - boxWidth / 2;
+    const boxY = projection.y - radius - boxHeight - 10;
+    this.context.fillStyle = `rgba(5, 12, 23, ${this.selectedNodeId ? 0.86 : 0.7})`;
+    this.context.beginPath();
+    this.context.roundRect(boxX, boxY, boxWidth, boxHeight, 999);
+    this.context.fill();
+    this.context.strokeStyle = "rgba(195, 214, 243, 0.16)";
+    this.context.lineWidth = 1;
+    this.context.beginPath();
+    this.context.roundRect(boxX, boxY, boxWidth, boxHeight, 999);
+    this.context.stroke();
+    this.context.fillStyle = "rgba(246, 251, 255, 0.96)";
+    this.context.textBaseline = "middle";
+    this.context.fillText(text, boxX + paddingX, boxY + boxHeight / 2 + 0.5);
+  }
+
+  tick() {
+    if (this.disposed) return;
+    this.camera.x += (this.targetCamera.x - this.camera.x) * 0.09;
+    this.camera.y += (this.targetCamera.y - this.camera.y) * 0.09;
+    this.camera.zoom += (this.targetCamera.zoom - this.camera.zoom) * 0.08;
+    this.camera.tilt += (this.targetCamera.tilt - this.camera.tilt) * 0.08;
+    if (this.prefersReducedMotion()) {
+      this.camera = { ...this.targetCamera };
+    }
+
+    const time = performance.now();
+    this.context.clearRect(0, 0, this.width, this.height);
+    this.drawStars(time);
+    this.drawEdges();
+    this.nodes
+      .slice()
+      .sort((left, right) => Number(left.z || 0) - Number(right.z || 0))
+      .forEach((node) => this.drawNode(node, time));
+    this.animationFrame = window.requestAnimationFrame(this.tick);
+  }
+
+  api() {
+    return {
+      selectNodeById: (nodeId) => this.selectNodeById(nodeId),
+      stageNodeById: (nodeId) => this.stageNodeById(nodeId),
+      clearSelection: () => this.clearSelection(),
+      nodeIds: () => this.nodes.map((node) => String(node.id || "")),
+      nodes: () => this.nodesSnapshot(),
+      setSearchMatches: (matches) => this.setSearchMatches(matches),
+      setViewMode: (mode) => this.setViewMode(mode),
+      getViewMode: () => this.getViewMode(),
+      setMotionProfile: (profile) => this.setMotionProfile(profile),
+      projectNode: (nodeId) => {
+        const node = this.adjacencyBundle.nodeMap.get(String(nodeId || ""));
+        return node ? this.project(node) : null;
+      },
+    };
+  }
+
+  destroy() {
+    this.disposed = true;
+    window.cancelAnimationFrame(this.animationFrame);
+    this.container.removeEventListener("pointermove", this.onPointerMove);
+    this.container.removeEventListener("pointerdown", this.onPointerDown);
+    window.removeEventListener("pointerup", this.onPointerUp);
+    this.container.removeEventListener("wheel", this.onWheel);
+    window.removeEventListener("resize", this.resize);
+    delete this.container.__sedimentGraphApi;
+    delete this.container.dataset.graphReady;
+    delete this.container.dataset.graphNodeCount;
+    this.container.textContent = "";
   }
 }
 
-function mount3DGraph(container, payload, { sceneMode, onNodeSelect, onBackgroundSelect } = {}) {
+function mountGraph(container, payload, options) {
   if (typeof container.__sedimentGraphCleanup === "function") {
     container.__sedimentGraphCleanup();
   }
-  container.textContent = "";
-  const surface = document.createElement("div");
-  surface.className = "sediment-graph-stage";
-  container.appendChild(surface);
-
-  const graph = ForceGraph3D({ controlType: "orbit" })(surface);
-  const animatedNodes = [];
-  const state = {
-    disposed: false,
-    hoveredNodeId: "",
-    selectedNodeId: "",
-  };
-  const nodeIndex = new Map((Array.isArray(payload?.nodes) ? payload.nodes : []).map((node) => [String(node.id || ""), node]));
-
-  function focusNode(node) {
-    state.selectedNodeId = node?.id || "";
-    if (typeof onNodeSelect === "function") {
-      onNodeSelect(node || null);
-    }
-    if (!node) return;
-    const distance = String(sceneMode || payload.scene_mode || "").includes("immersive") ? 104 : 118;
-    const distRatio = 1 + distance / Math.max(Math.hypot(node.x || 0, node.y || 0, node.z || 0), 1);
-    graph.cameraPosition(
-      {
-        x: (node.x || 0) * distRatio,
-        y: (node.y || 0) * distRatio + 16,
-        z: (node.z || 0) * distRatio + 24,
-      },
-      { x: node.x || 0, y: node.y || 0, z: node.z || 0 },
-      950,
-    );
-  }
-
-  graph.nodeThreeObject((node) => buildNodeObject(node, sceneMode || payload.scene_mode || "portal-story", animatedNodes));
-  graph.onNodeHover((node) => {
-    state.hoveredNodeId = node?.id || "";
-    surface.style.cursor = node ? "pointer" : "grab";
-  });
-  graph.onNodeClick((node) => {
-    focusNode(node || null);
-  });
-  if (typeof graph.onBackgroundClick === "function") {
-    graph.onBackgroundClick(() => {
-      state.selectedNodeId = "";
-      if (typeof onBackgroundSelect === "function") onBackgroundSelect();
-    });
-  }
-
-  styleForceGraph(graph, sceneMode || payload.scene_mode || "portal-story", payload);
-
-  const cleanupAnimation = animateGraph(
-    graph,
-    animatedNodes,
-    payload,
-    sceneMode || payload.scene_mode || "portal-story",
-    state,
-  );
-
-  const resize = () => {
-    graph.width(Math.max(container.clientWidth, 320));
-    graph.height(Math.max(container.clientHeight, 320));
-  };
-  resize();
-  window.addEventListener("resize", resize);
+  const runtime = new CanvasGraphRuntime(container, payload, options);
   container.dataset.graphReady = "true";
-  container.dataset.graphNodeCount = String(Array.isArray(payload?.nodes) ? payload.nodes.length : 0);
-  container.__sedimentGraphApi = {
-    selectNodeById(nodeId) {
-      const node = nodeIndex.get(String(nodeId || ""));
-      if (!node) return false;
-      focusNode(node);
-      return true;
-    },
-    clearSelection() {
-      state.selectedNodeId = "";
-      if (typeof onBackgroundSelect === "function") onBackgroundSelect();
-    },
-    nodeIds() {
-      return Array.from(nodeIndex.keys());
-    },
-  };
-
-  const focusSeedNode = Array.isArray(payload?.nodes)
-    ? payload.nodes.find((node) => node.id === payload.focus_seed) || payload.nodes.find((node) => node.node_type !== "cluster_anchor") || payload.nodes[0]
-    : null;
-  if (focusSeedNode) {
-    graph.cameraPosition(
-      {
-        x: 0,
-        y: String(sceneMode || payload.scene_mode || "").includes("immersive") ? 28 : 40,
-        z: String(sceneMode || payload.scene_mode || "").includes("immersive") ? 292 : 244,
-      },
-      { x: focusSeedNode.x || 0, y: focusSeedNode.y || 0, z: focusSeedNode.z || 0 },
-      0,
-    );
-  }
-
-  container.__sedimentGraphCleanup = () => {
-    state.disposed = true;
-    cleanupAnimation();
-    window.removeEventListener("resize", resize);
-    delete container.__sedimentGraphApi;
-    delete container.dataset.graphReady;
-    delete container.dataset.graphNodeCount;
-    try {
-      graph.pauseAnimation();
-    } catch (_error) {
-      // ignore
-    }
-    container.textContent = "";
-  };
-
+  container.dataset.graphNodeCount = String(runtime.nodes.length);
+  container.__sedimentGraphApi = runtime.api();
+  container.__sedimentGraphCleanup = () => runtime.destroy();
   return {
-    resize,
+    resize() {
+      runtime.resize();
+    },
     destroy() {
-      if (typeof container.__sedimentGraphCleanup === "function") {
-        container.__sedimentGraphCleanup();
-      }
+      runtime.destroy();
     },
   };
 }
 
+async function fetchGraphPayload(url) {
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`${response.status}`);
+  return response.json();
+}
+
+function readPageData() {
+  const node = document.getElementById("sediment-page-data");
+  if (!node) return {};
+  try {
+    return JSON.parse(node.textContent || "{}");
+  } catch (_error) {
+    return {};
+  }
+}
+
 function mountPortalGraph(container, payload, options = {}) {
-  const pageData = options.pageData || readPageData();
-  const focusSheet = setupPortalFocusSheet(pageData, payload);
-  updatePortalStats(payload);
-  renderStory(payload, pageData, null);
-  return mount3DGraph(container, payload, {
-    sceneMode: payload.scene_mode || options.sceneMode || "portal-story",
-    onNodeSelect(node) {
-      if (!node) {
-        focusSheet.hide();
-        renderStory(payload, pageData, null);
-        return;
-      }
-      renderStory(payload, pageData, node);
-      focusSheet.show(node);
-      if (typeof options.onSelect === "function") {
-        options.onSelect(node);
-      }
-    },
-    onBackgroundSelect() {
-      focusSheet.hide();
-      renderStory(payload, pageData, null);
-    },
+  return mountGraph(container, payload, {
+    ...options,
+    variant: "portal",
+    sceneMode: options.sceneMode || payload.scene_mode || "portal",
   });
 }
 
 function mountAdminGraph(container, payload, options = {}) {
-  return mount3DGraph(container, payload, {
-    sceneMode: payload.scene_mode || options.sceneMode || "admin-governance",
-    onNodeSelect(node) {
-      if (typeof options.onSelect === "function") {
-        options.onSelect(node);
-      }
-    },
-    onBackgroundSelect() {
-      if (typeof options.onSelect === "function") {
-        options.onSelect(null);
-      }
-    },
+  return mountGraph(container, payload, {
+    ...options,
+    variant: "admin",
+    sceneMode: options.sceneMode || payload.scene_mode || "admin",
   });
-}
-
-async function fetchJson(url) {
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}: ${response.status}`);
-  }
-  return response.json();
-}
-
-async function bootPortalSurface() {
-  const pageData = readPageData();
-  const container = document.getElementById("portal-insights-graph");
-  if (!container || !pageData.graphApi) return;
-  try {
-    const payload = await fetchJson(pageData.graphApi);
-    renderStory(payload, pageData, null);
-    await mountPortalGraph(container, payload, { pageData });
-  } catch (error) {
-    container.innerHTML = `<div class="sediment-graph-empty">${escapeHtml(
-      pageData.graphLocale === "zh" ? `图谱暂时不可用：${error.message}` : `Graph unavailable: ${error.message}`,
-    )}</div>`;
-  }
 }
 
 window.SedimentGraph = {
@@ -922,8 +729,21 @@ window.SedimentGraph = {
   mountAdminGraph,
 };
 
+async function autoBoot() {
+  const pageData = readPageData();
+  if (pageData.graphBoot === "manual" || !pageData.graphApi) return;
+  const container = document.getElementById("portal-insights-graph");
+  if (!container) return;
+  try {
+    const payload = await fetchGraphPayload(pageData.graphApi);
+    mountPortalGraph(container, payload, { pageData });
+  } catch (_error) {
+    container.innerHTML = '<div class="sediment-graph-empty">Graph unavailable.</div>';
+  }
+}
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", bootPortalSurface, { once: true });
+  document.addEventListener("DOMContentLoaded", autoBoot, { once: true });
 } else {
-  bootPortalSurface();
+  autoBoot();
 }

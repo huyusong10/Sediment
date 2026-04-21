@@ -197,14 +197,16 @@ flowchart LR
 
 职责：
 
-- 前台：浏览知识库、搜索、查看概念、提交材料和意见
+- 前台：以单一 `Universe OS` 壳层承载浏览知识库、搜索、查看概念、提交材料和意见
 - 后台：提交收件箱、知识库管理、文件管理、版本管理、健康面板和任务管理
-- 两者共享基础 shell，但在导航、权限和配色上彻底独立
+- 两者共享主题、语言切换、少量基础组件和 API 能力，但在结构壳、导航、权限和配色上彻底独立
 
 当前 IA：
 
 - Public Knowledge Base UI：`/`、`/search`、`/tutorial`、`/entries/{name}`、`/submit`、`/portal/graph-view`、`/quartz/`
-- Admin Console：`/admin/overview`、`/admin/kb`（知识运营中枢，内含 operations / insights / graph / live）、`/admin/files`（文件管理）、`/admin/inbox`（提交收件箱）、`/admin/version-control`（版本管理）、`/admin/users`、`/admin/system`（设置）
+  - 其中 `/`、`/search`、`/tutorial`、`/entries/{name}`、`/submit`、`/portal/graph-view` 统一映射到同一前台宇宙壳；这些 URL 代表前台状态入口，而不是独立页面模板
+  - 前台宇宙壳拥有独立 HTML document shell，不再复用后台 shared `web-shell`
+- Admin Console：`/admin/overview`、`/admin/kb`（知识运营中枢，主切面为 operations / insights / graph，且在 operations 下固定挂载公共 Live 运行台）、`/admin/files`（文件管理）、`/admin/inbox`（提交收件箱）、`/admin/version-control`（版本管理）、`/admin/users`、`/admin/system`（设置）
 - 兼容路径：`/portal`、`/portal/graph-view`、`/admin`
 
 ### 3.9 Diagnostic Logging

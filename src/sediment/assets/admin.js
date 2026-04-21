@@ -229,7 +229,7 @@
 
   function normalizeKbPane(value) {
     const normalized = String(value || "").trim().toLowerCase();
-    return ["operations", "insights", "graph", "live"].includes(normalized)
+    return ["operations", "insights", "graph"].includes(normalized)
       ? normalized
       : "operations";
   }

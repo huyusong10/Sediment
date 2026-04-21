@@ -9,7 +9,6 @@
         <button type="button" class="nav-link" data-action="switch-kb-pane" data-pane="operations">__PANE_OPERATIONS__</button>
         <button type="button" class="nav-link" data-action="switch-kb-pane" data-pane="insights">__PANE_INSIGHTS__</button>
         <button type="button" class="nav-link" data-action="switch-kb-pane" data-pane="graph">__PANE_GRAPH__</button>
-        <button type="button" class="nav-link" data-action="switch-kb-pane" data-pane="live">__PANE_LIVE__</button>
       </div>
     </div>
   </div>
@@ -112,6 +111,37 @@
         </div>
       </div>
     </div>
+
+    <div class="panel admin-live-panel" data-testid="admin-kb-live-panel">
+      <div class="row spread">
+        <h2>__RUNTIME_TITLE__</h2>
+        <div class="admin-live-toolbar">
+          <div class="panel-header-tip">__RUNTIME_TIP__</div>
+          <button id="admin-kb-live-clear" data-testid="admin-kb-live-clear">__LIVE_CLEAR_BUTTON__</button>
+        </div>
+      </div>
+      <div class="runtime-console" data-testid="admin-runtime-console">
+        <section class="runtime-console-section runtime-result-section" data-testid="admin-runtime-result-section">
+          <div class="runtime-section-header">
+            <div class="runtime-section-heading">
+              <h3>__RESULT_TITLE__</h3>
+            </div>
+            <div id="admin-kb-result-status" data-testid="admin-kb-result-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__RESULT_STATUS__</div>
+          </div>
+          <div id="admin-kb-result" data-testid="admin-kb-result" class="runtime-result-view markdown empty">__RESULT_EMPTY__</div>
+        </section>
+
+        <section class="runtime-console-section runtime-live-section" data-testid="admin-runtime-live-section">
+          <div class="runtime-section-header">
+            <div class="runtime-section-heading">
+              <h3>__LIVE_TITLE__</h3>
+            </div>
+            <div id="admin-kb-live-status" data-testid="admin-kb-live-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__LIVE_STATUS__</div>
+          </div>
+          <textarea class="live-log-area runtime-live-log" id="admin-kb-live-log" data-testid="admin-kb-live-log" readonly spellcheck="false">__LIVE_EMPTY__</textarea>
+        </section>
+      </div>
+    </div>
   </div>
 
   <div class="admin-kb-pane" data-kb-pane="insights" data-testid="admin-kb-insights-pane" hidden>
@@ -170,36 +200,4 @@
     </div>
   </div>
 
-  <div class="admin-kb-pane" data-kb-pane="live" data-testid="admin-kb-live-pane" hidden>
-    <div class="panel admin-live-panel" data-testid="admin-kb-live-panel">
-      <div class="row spread">
-        <h2>__RUNTIME_TITLE__</h2>
-        <div class="admin-live-toolbar">
-          <div class="panel-header-tip">__RUNTIME_TIP__</div>
-          <button id="admin-kb-live-clear" data-testid="admin-kb-live-clear">__LIVE_CLEAR_BUTTON__</button>
-        </div>
-      </div>
-      <div class="runtime-console" data-testid="admin-runtime-console">
-        <section class="runtime-console-section runtime-result-section" data-testid="admin-runtime-result-section">
-          <div class="runtime-section-header">
-            <div class="runtime-section-heading">
-              <h3>__RESULT_TITLE__</h3>
-            </div>
-            <div id="admin-kb-result-status" data-testid="admin-kb-result-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__RESULT_STATUS__</div>
-          </div>
-          <div id="admin-kb-result" data-testid="admin-kb-result" class="runtime-result-view markdown empty">__RESULT_EMPTY__</div>
-        </section>
-
-        <section class="runtime-console-section runtime-live-section" data-testid="admin-runtime-live-section">
-          <div class="runtime-section-header">
-            <div class="runtime-section-heading">
-              <h3>__LIVE_TITLE__</h3>
-            </div>
-            <div id="admin-kb-live-status" data-testid="admin-kb-live-status" class="subtle admin-kb-status-line" role="status" aria-live="polite">__LIVE_STATUS__</div>
-          </div>
-          <textarea class="live-log-area runtime-live-log" id="admin-kb-live-log" data-testid="admin-kb-live-log" readonly spellcheck="false">__LIVE_EMPTY__</textarea>
-        </section>
-      </div>
-    </div>
-  </div>
 </section>

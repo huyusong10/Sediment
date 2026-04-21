@@ -6,6 +6,10 @@
 
 ## 文档索引
 
+- [knowledge_universe_v1.md](knowledge_universe_v1.md)
+  - 把 `/portal/graph-view` 升级为固定坐标、可搜索、可探索的知识宇宙图页
+- [knowledge_universe_v2_portal_os.md](knowledge_universe_v2_portal_os.md)
+  - 把“知识宇宙是门户功能”进一步演进为“知识宇宙就是前台门户本身”的 `Universe OS` 方案
 - [tacit_knowledge_system_v3.md](tacit_knowledge_system_v3.md)
   - 强调系统定位、核心用例和最早的条目抽取思路
 - [tacit_knowledge_system_v4.md](tacit_knowledge_system_v4.md)
